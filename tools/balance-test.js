@@ -12,15 +12,37 @@
  *   - determinism: same seed -> identical hash, ticks and events; different seed -> different hash
  *   - no NaN anywhere; every race finishes under MAX_TICKS; 1000 races simulate in < 3 s
  *   - roster win rates in 8-runner fields (8-of-10 rotated so all ten are covered):
- *       single distance: every runner in [5%, 40%] at that distance;
+ *       single distance: every runner in [5%, 40%] at 1200 / 1600 m, [3%, 40%] at 2000 m+
+ *         (M4: the stamina pool now makes 2000 / 2400 m a real stamina test, so low-Stamina
+ *         runners are specialists there, exactly as in the matrix rule below);
  *       --matrix: every runner's AVERAGE over 1200/1600/2000/2400 in [5%, 40%], and
  *                 every runner in [3%, 40%] at each single distance (distance specialists
  *                 are intended: Ember Tail fades at 2400 m, Moonhoof thrives there)
- *   - odds calibration: mean |implied - actual| <= 3pp and worst runner <= 8pp per distance
+ *   - odds calibration: mean |implied - actual| <= 3pp and worst runner <= 8pp per distance;
+ *     M4: also on mixed fields (roster + random runners, levels 1-8, any condition / mood /
+ *     energy, 4-10 runners): every implied-probability bucket within 4pp of the actual rate
  *   - style-clone fields (2 per style, all stats 40): each style wins 15-35% per distance
- *   - 8 identical clones each 12.5% +/- 3; a +20 Speed clone wins >= 35% vs 7 base clones
  *   - Ember Tail wins more at 1200 m than at 2400 m; Moonhoof the reverse
- *   - --streamday: 20 trains without rest leave the runner Tired/Exhausted for its race
+ *   - M4 sensitivity (8-runner clone fields, all stats 40, Excellent + Happy unless stated,
+ *     >= 2000 races each at --distance, fixed seed):
+ *       8 identical clones each 12.5% +/- 3, and the clone with the best hidden per-race form
+ *         wins < 60% (race-level luck exists, but one roll does not decide the race)
+ *       condition (one clone, others Excellent): Good >= 8%, Tired >= 5%, Exhausted >= 2.5%,
+ *         and Good >= Tired >= Exhausted
+ *       mood (one clone, others Happy): Sleepy >= 9%, Nervous >= 8%, and every mood within
+ *         12.5% +/- 4 points
+ *       stats: +20 Speed 25-45%; +8 to every stat (a level-5-ish runner) >= 35%; a +20
+ *         Stamina clone gains more at 2400 m than at 1200 m
+ *       4-runner case @1200 m (Thunder Fern + Moonhoof: Lv1 Excellent Happy; Moss Runner Lv3
+ *         Normal Happy 45/45/42/43/40; Velvet Comet Lv2 Good Sleepy 58/40/35/43/31):
+ *         Velvet Comet >= 15% and Moss Runner >= 15% (better stats must count), and making
+ *         Velvet Comet Happy + Excellent may at most double her win rate
+ *   - --streamday: 20 trains without rest leave the runner Exhausted for its first race,
+ *     with a visible race-day penalty (stat multiplier and odds vs its fresh self)
+ * Changed bound (M4): "+20 Speed >= 35%" became "+20 Speed in 25-45%". M4 doubled the stat
+ * slope AND the race-level randomness so condition / mood stop deciding races; a +20 Speed
+ * clone now wins ~33%, and the new "+8 to every stat >= 35%" check carries the "a better
+ * runner must win clearly more often" intent. The upper bound keeps randomness alive.
  * --dump SEED prints one full RaceRecord; --streamday plays a 20-train / 3-rest /
  * 3-race stream day on one runner and prints the energy/fatigue/condition trajectory.
  */
@@ -75,12 +97,12 @@ function rosterRunners() {
   return SD.DATA.ROSTER.map(function (e, i) { return SD.runners.spawnFromRoster(e, i); });
 }
 
-function clone(id, name, stats, style, abilityId) {
-  return {
+function clone(id, name, stats, style, abilityId, extra) {
+  return Object.assign({
     id: id, name: name, emoji: '', style: style || 'paceChaser', abilityId: abilityId || null,
     stats: Object.assign({ speed: 40, stamina: 40, power: 40, wisdom: 40, luck: 40 }, stats || {}),
     level: 1, energy: 100, maxEnergy: 100, fatigue: 10, condition: 'Excellent', mood: 'Happy', owner: null
-  };
+  }, extra || {});
 }
 
 function checkRecordSane(rec) {
@@ -109,7 +131,7 @@ function runBatch(label, count, distance, events, fieldFor, seedBase, extra) {
   extra = extra || {};
   const stats = {};    // runnerId -> aggregates
   const styleWins = {}; const styleEntries = {};
-  let evTotal = 0, critTotal = 0, tickSum = 0, tickSq = 0, simMs = 0, photo = 0, upsets = 0;
+  let evTotal = 0, critTotal = 0, tickSum = 0, tickSq = 0, simMs = 0, photo = 0, upsets = 0, bestForm = 0;
   const nominal = distance / (SD.CONFIG.RACE.BASE_SPEED * SD.CONFIG.RACE.DT);
   const maxTicks = Math.ceil(nominal * SD.CONFIG.RACE.MAX_TICKS_MULT);
   for (let i = 0; i < count; i++) {
@@ -136,6 +158,8 @@ function runBatch(label, count, distance, events, fieldFor, seedBase, extra) {
     if (rec.summary.upset) upsets++;
     const entrantById = {};
     rec.entrants.forEach(function (e) { entrantById[e.runnerId] = e; });
+    const topForm = Math.max.apply(null, rec.entrants.map(function (e) { return e.form; }));
+    if (entrantById[rec.results[0].runnerId].form === topForm) bestForm++;
     rec.results.forEach(function (res) {
       const e = entrantById[res.runnerId];
       const s = stats[res.runnerId] || (stats[res.runnerId] = {
@@ -159,7 +183,8 @@ function runBatch(label, count, distance, events, fieldFor, seedBase, extra) {
   return {
     label: label, count: count, distance: distance, events: events, stats: stats, styleWins: styleWins, styleEntries: styleEntries,
     eventsPerRace: evTotal / count, critsPerRace: critTotal / count, ticksMean: mean,
-    ticksStd: Math.sqrt(Math.max(0, tickSq / count - mean * mean)), simMs: simMs, photoRate: photo / count, upsetRate: upsets / count
+    ticksStd: Math.sqrt(Math.max(0, tickSq / count - mean * mean)), simMs: simMs, photoRate: photo / count, upsetRate: upsets / count,
+    bestFormRate: bestForm / count
   };
 }
 
@@ -232,14 +257,15 @@ function extremes(rates) {
   };
 }
 
-// Win-rate bounds. A single-distance run checks [5%, 40%] at that distance. In --matrix
+// Win-rate bounds. A single-distance run checks [5%, 40%] at that distance (floor 3% from
+// 2000 m, where M4's stamina pools make distance specialists; see the header). In --matrix
 // mode distance specialists are expected (Ember Tail fades at 2400 m, Moonhoof loves it),
 // so [5%, 40%] applies to each runner's average across the four distances, and every
 // single distance must still keep every runner in [3%, 40%] (nobody hopeless anywhere).
 function rosterChecks(batch, distance, matrix) {
   const rates = ROSTER.map(function (r) { return { name: r.name, wr: winRate(batch, r.id) }; });
   const ex = extremes(rates);
-  const floor = matrix ? 0.03 : 0.05;
+  const floor = matrix || distance >= 2000 ? 0.03 : 0.05;
   check('win rates in [' + (floor * 100) + '%, 40%] with 8 runners @' + distance + 'm', ex.lo.wr >= floor && ex.hi.wr <= 0.40,
     'min ' + ex.lo.name + ' ' + pct(ex.lo.wr) + ', max ' + ex.hi.name + ' ' + pct(ex.hi.wr));
   // Odds calibration: implied win probability (from the odds model) vs actual win rate.
@@ -262,6 +288,155 @@ function styleChecks(batch, distance) {
   const vals = Object.keys(sh).map(function (k) { return sh[k]; });
   check('style spread 15-35% (style clones) @' + distance + 'm', Math.min.apply(null, vals) >= 0.15 && Math.max.apply(null, vals) <= 0.35,
     Object.keys(sh).map(function (k) { return SD.DATA.STYLES[k].short + ' ' + pct(sh[k]); }).join(', '));
+}
+
+// -----------------------------------------------------------------------------
+// M4 sensitivity: one modified clone vs 7 base clones (all stats 40, Excellent, Happy)
+// -----------------------------------------------------------------------------
+const FATIGUE_FOR = { Excellent: 10, Good: 25, Normal: 45, Tired: 70, Exhausted: 95 };
+
+function rosterAt(key, patch) {
+  const idx = SD.DATA.ROSTER.findIndex(function (e) { return e.key === key; });
+  const r = SD.runners.spawnFromRoster(SD.DATA.ROSTER[idx], idx);
+  Object.assign(r, patch || {});
+  if (patch && patch.stats) r.stats = Object.assign({}, patch.stats);
+  r.maxEnergy = SD.runners.energyMax(r.level);
+  r.energy = r.maxEnergy;
+  r.fatigue = FATIGUE_FOR[r.condition];
+  return r;
+}
+
+// The exact case from the M4 brief (1200 m): Velvet Comet and Moss Runner have the better
+// stats; before M4 her Sleepy mood + Good condition cut her to ~1% (odds 25x).
+function fourRunnerField(cometPatch) {
+  return [
+    rosterAt('thunderFern', { condition: 'Excellent', mood: 'Happy' }),
+    rosterAt('moonhoof', { condition: 'Excellent', mood: 'Happy' }),
+    rosterAt('mossRunner', { level: 3, condition: 'Normal', mood: 'Happy', stats: { speed: 45, stamina: 45, power: 42, wisdom: 43, luck: 40 } }),
+    rosterAt('velvetComet', Object.assign({ level: 2, condition: 'Good', mood: 'Sleepy', stats: { speed: 58, stamina: 40, power: 35, wisdom: 43, luck: 31 } }, cometPatch || {}))
+  ];
+}
+
+function sensitivity(N, ev) {
+  const sensN = Math.max(N, 2000);
+  const d = opts.distance;
+  const base = [];
+  for (let k = 0; k < 8; k++) base.push(clone('c' + (k + 1), 'Clone ' + (k + 1)));
+  const one = function (label, x, dist) {
+    const b = runBatch(label, sensN, dist || d, ev, function () { return [x].concat(base.slice(0, 7)); }, opts.seed);
+    return { wr: winRate(b, x.id), implied: b.stats[x.id].impliedSum / b.stats[x.id].entered };
+  };
+  const rows = [];
+  const show = function (name, r, target) { rows.push(pad(name, 44) + lpad(pct(r.wr), 7) + lpad(pct(r.implied), 9) + '   ' + target); return r.wr; };
+
+  const ident = runBatch('clones', sensN, d, ev, function () { return base; }, opts.seed);
+  const identRates = base.map(function (c) { return winRate(ident, c.id); });
+  check('8 identical clones each 12.5% +/- 3 (' + sensN + ' races)', identRates.every(function (w) { return Math.abs(w - 0.125) <= 0.03; }),
+    identRates.map(pct).join(' '));
+  check('race-level luck: the clone with the best hidden form wins < 60% of identical-clone races', ident.bestFormRate < 0.60,
+    pct(ident.bestFormRate) + ' (1 in 8 would be 12.5%)');
+
+  const cond = {};
+  ['Good', 'Normal', 'Tired', 'Exhausted'].forEach(function (c) {
+    cond[c] = show('one clone ' + c + ' (others Excellent)', one('cond' + c, clone('x', 'X', null, null, null, { condition: c, fatigue: FATIGUE_FOR[c] })),
+      { Good: '>= 8%', Normal: '', Tired: '>= 5%', Exhausted: '>= 2.5%' }[c]);
+  });
+  check('condition: Good clone >= 8%, Tired >= 5%, Exhausted >= 2.5% (others Excellent)',
+    cond.Good >= 0.08 && cond.Tired >= 0.05 && cond.Exhausted >= 0.025,
+    'Good ' + pct(cond.Good) + ', Tired ' + pct(cond.Tired) + ', Exhausted ' + pct(cond.Exhausted));
+  check('condition penalty grows with fatigue (Good >= Tired >= Exhausted)', cond.Good >= cond.Tired && cond.Tired >= cond.Exhausted,
+    pct(cond.Good) + ' / ' + pct(cond.Tired) + ' / ' + pct(cond.Exhausted));
+
+  const mood = {};
+  Object.keys(SD.DATA.MOODS).filter(function (m) { return m !== 'Happy'; }).forEach(function (m) {
+    mood[m] = show('one clone ' + m + ' (others Happy)', one('mood' + m, clone('x', 'X', null, null, null, { mood: m })),
+      '12.5 +/- 4' + (m === 'Sleepy' ? ', >= 9%' : m === 'Nervous' ? ', >= 8%' : ''));
+  });
+  check('mood: Sleepy clone >= 9%, Nervous >= 8% (others Happy)', mood.Sleepy >= 0.09 && mood.Nervous >= 0.08,
+    'Sleepy ' + pct(mood.Sleepy) + ', Nervous ' + pct(mood.Nervous));
+  check('mood: no mood moves a clone more than 4 points from 12.5%',
+    Object.keys(mood).every(function (m) { return Math.abs(mood[m] - 0.125) <= 0.04; }),
+    Object.keys(mood).map(function (m) { return m + ' ' + pct(mood[m]); }).join(', '));
+
+  const spd = show('+20 Speed vs 7 base clones', one('fast', clone('x', 'X', { speed: 60 })), '25-45%');
+  check('+20 Speed clone wins 25-45% vs 7 base clones', spd >= 0.25 && spd <= 0.45, pct(spd));
+  const all8 = show('+8 to every stat vs 7 base clones', one('all8', clone('x', 'X', { speed: 48, stamina: 48, power: 48, wisdom: 48, luck: 48 })), '>= 35%');
+  check('+8 to every stat (level-5-ish runner) wins >= 35% vs 7 base clones', all8 >= 0.35, pct(all8));
+  const st12 = show('+20 Stamina @1200m', one('stam', clone('x', 'X', { stamina: 60 }), 1200), '');
+  const st24 = show('+20 Stamina @2400m', one('stam', clone('x', 'X', { stamina: 60 }), 2400), '> @1200m');
+  check('+20 Stamina clone gains more at 2400m than at 1200m', st24 > st12 + 0.02, pct(st12) + ' -> ' + pct(st24));
+  ['power', 'wisdom', 'luck'].forEach(function (k) {
+    const o = {}; o[k] = 60;
+    show('+20 ' + SD.DATA.STAT_LABELS[k] + ' (info)', one('s' + k, clone('x', 'X', o)), '');
+  });
+
+  // 4-runner case from the brief
+  const fourN = Math.max(N, 3000);
+  const four = runBatch('four', fourN, 1200, ev, function () { return fourRunnerField(); }, opts.seed);
+  const fourHappy = runBatch('four', fourN, 1200, ev, function () { return fourRunnerField({ condition: 'Excellent', mood: 'Happy' }); }, opts.seed);
+  const f = fourRunnerField();
+  const cometId = f[3].id, mossId = f[2].id;
+  const fline = function (b) {
+    return f.map(function (r) { return r.name + ' ' + pct(winRate(b, r.id)) + ' (odds ' + (b.stats[r.id].oddsSum / b.stats[r.id].entered).toFixed(1) + 'x)'; }).join(', ');
+  };
+  console.log('\nSENSITIVITY (8-runner clone fields, all stats 40, Excellent + Happy unless stated, ' + sensN + ' races @' + d + 'm)');
+  console.log(pad('Field', 44) + lpad('Win%', 7) + lpad('Implied', 9) + '   Target');
+  rows.forEach(function (r) { console.log(r); });
+  console.log('identical clones: ' + identRates.map(pct).join(' ') + ' | best-form clone wins ' + pct(ident.bestFormRate));
+  console.log('\n4-RUNNER CASE @1200m (' + fourN + ' races): ' + fline(four));
+  console.log('  same, Velvet Comet Happy + Excellent: ' + fline(fourHappy));
+  check('4-runner case @1200m: Velvet Comet >= 15% and Moss Runner >= 15% (better stats count)',
+    winRate(four, cometId) >= 0.15 && winRate(four, mossId) >= 0.15, 'Velvet Comet ' + pct(winRate(four, cometId)) + ', Moss Runner ' + pct(winRate(four, mossId)));
+  check('4-runner case: Happy + Excellent at most doubles Velvet Comet\'s win rate (was 50x before M4)',
+    winRate(fourHappy, cometId) <= 2 * winRate(four, cometId), pct(winRate(four, cometId)) + ' -> ' + pct(winRate(fourHappy, cometId)));
+}
+
+// Mixed fields: some roster runners plus random species runners, random levels 1-8 (the
+// level-ups spread 7 points per level over random stats), any condition / mood, some with
+// low energy. Checks the odds model where bettors will actually use it.
+function mixedField(i) {
+  const rng = SD.rng.create(SD.rng.seedFrom(opts.seed, 'mixed-field', i));
+  const n = 4 + rng.int(7);
+  const moods = Object.keys(SD.DATA.MOODS);
+  const conds = Object.keys(FATIGUE_FOR);
+  const field = rng.shuffle(ROSTER.slice()).slice(0, Math.min(n, 6)).map(function (r) { return JSON.parse(JSON.stringify(r)); });
+  while (field.length < n) field.push(SD.runners.spawnRandom(rng, { id: 'm' + field.length }));
+  return field.map(function (r) {
+    const lvl = rng.float() < 0.5 ? 1 : 1 + rng.int(8);
+    r.level = lvl;
+    r.maxEnergy = SD.runners.energyMax(lvl);
+    const cap = SD.runners.statCap(lvl);
+    for (let k = 0; k < (lvl - 1) * 7; k++) { const st = rng.pick(SD.CONFIG.STATS); r.stats[st] = Math.min(cap, r.stats[st] + 1); }
+    r.condition = rng.float() < 0.45 ? 'Excellent' : rng.pick(conds);
+    r.fatigue = FATIGUE_FOR[r.condition];
+    r.mood = rng.float() < 0.4 ? 'Happy' : rng.pick(moods);
+    r.energy = rng.float() < 0.6 ? r.maxEnergy : 15 + rng.int(85);
+    return r;
+  });
+}
+
+function mixedCalibration(count, ev) {
+  const d = opts.distance;
+  const buckets = [[0, 0.05], [0.05, 0.10], [0.10, 0.20], [0.20, 0.35], [0.35, 1.01]].map(function (b) { return { lo: b[0], hi: b[1], n: 0, p: 0, w: 0 }; });
+  for (let i = 0; i < count; i++) {
+    const seed = SD.rng.seedFrom(opts.seed, 'mixed', d, i);
+    const entrants = SD.race.buildEntrants(mixedField(i), { distance: d });
+    const rec = SD.race.simulate({ seed: seed, distance: d, entrants: entrants, eventFrequency: ev });
+    GLOBAL.races++;
+    const bad = checkRecordSane(rec);
+    if (bad) GLOBAL.insane.push('mixed seed ' + seed + ': ' + bad);
+    rec.entrants.forEach(function (e) {
+      const b = buckets.filter(function (x) { return e.winProb >= x.lo && e.winProb < x.hi; })[0];
+      b.n++; b.p += e.winProb; if (e.runnerId === rec.results[0].runnerId) b.w++;
+    });
+  }
+  const txt = buckets.map(function (b) {
+    return Math.round(b.lo * 100) + '-' + Math.round(Math.min(1, b.hi) * 100) + '%: implied ' + pct(b.p / b.n) + ' actual ' + pct(b.w / b.n) + ' (n ' + b.n + ')';
+  });
+  console.log('\nODDS ON MIXED FIELDS @' + d + 'm (' + count + ' races): ' + txt.join(' | '));
+  const worst = buckets.reduce(function (a, b) { return Math.max(a, Math.abs(b.p / b.n - b.w / b.n)); }, 0);
+  check('odds calibration on mixed fields (levels 1-8, any condition / mood / energy) @' + d + 'm: every bucket within 4pp', worst <= 0.04,
+    'worst bucket off by ' + pct(worst));
 }
 
 // -----------------------------------------------------------------------------
@@ -310,7 +485,7 @@ function streamday() {
   console.log('\nSTREAM DAY: ' + hero.name + ' (owned by tester): 20 !train (no rests), race, 3 !rest, 2 more races');
   console.log(pad('#', 4) + pad('Action', 16) + pad('Outcome', 40) + lpad('Energy', 8) + lpad('Fatigue', 9) + '  ' +
     pad('Condition', 11) + pad('Mood', 12) + 'Stats');
-  let step = 0, trains = 0, ok = 0;
+  let step = 0, trains = 0, ok = 0, penalty = null;
   const conditionAtRace = [];
   function row(action, outcome) {
     step++;
@@ -346,6 +521,15 @@ function streamday() {
       const st = SD.game.startRace({ runnerCount: 4, distance: 1600 });
       if (!st.ok) { row('race', 'no race: ' + st.message.slice(0, 30)); return; }
       const inRace = st.record.entrants.some(function (e) { return e.runnerId === hero.id; });
+      if (inRace && !penalty) {
+        // The same field with the hero fresh (Excellent, full energy), for comparison.
+        const ents = st.record.entrants.map(function (e) { return Object.assign({}, e); });
+        const me = ents.filter(function (e) { return e.runnerId === hero.id; })[0];
+        const tiredOdds = me.odds, mult = SD.race.raceStatMult(me);
+        me.condition = 'Excellent'; me.energy = me.maxEnergy;
+        SD.race.assignOdds(ents, st.record.distance);
+        penalty = { condition: condBefore, energy: energyBefore, mult: mult, odds: tiredOdds, freshOdds: me.odds };
+      }
       SD.game.endRace();
       const res = st.record.results.filter(function (x) { return x.runnerId === hero.id; })[0];
       if (inRace) conditionAtRace.push(condBefore);
@@ -354,9 +538,16 @@ function streamday() {
     }
   });
   console.log('Successful trains: ' + ok + '/20. Level ' + hero.level + ', total XP ' + hero.totalXp + '. Season ' + s.season.number + ' day ' + s.season.day + '.');
-  const tiredStory = conditionAtRace.length > 0 && (conditionAtRace[0] === 'Tired' || conditionAtRace[0] === 'Exhausted');
-  check('stream day: overtrained runner races Tired/Exhausted', tiredStory,
+  if (penalty) {
+    console.log('Race penalty at the first race: ' + penalty.condition + ' with ' + Math.floor(penalty.energy) + ' energy -> race-day stats x' +
+      penalty.mult.toFixed(3) + ' (condition x' + SD.runners.conditionRaceMult(penalty.condition) + ', energy x' +
+      (penalty.mult / SD.runners.conditionRaceMult(penalty.condition)).toFixed(3) + '); odds ' + penalty.odds + 'x vs ' + penalty.freshOdds + 'x if fresh.');
+  }
+  check('stream day: 20 trains without rest leave the runner Exhausted for its first race', conditionAtRace[0] === 'Exhausted',
     'condition at first race: ' + (conditionAtRace[0] || 'did not race'));
+  check('stream day: the overtrained runner races with a real penalty (stats x0.9 or less, longer odds than fresh)',
+    !!penalty && penalty.mult <= 0.9 && penalty.odds > penalty.freshOdds,
+    penalty ? 'stats x' + penalty.mult.toFixed(3) + ', odds ' + penalty.odds + 'x vs ' + penalty.freshOdds + 'x fresh' : 'no race');
   SD.clock.reset();
 }
 
@@ -414,19 +605,11 @@ function streamday() {
   check('Ember Tail wins more at 1200m than 2400m', e12 > e24, pct(e12) + ' vs ' + pct(e24));
   check('Moonhoof wins more at 2400m than 1200m', m24 > m12, pct(m24) + ' vs ' + pct(m12));
 
-  // 4. Clone fairness and stat sensitivity
-  const cloneN = Math.max(N, opts.quick ? 1000 : 3000);
-  const baseField = [];
-  for (let k = 0; k < 8; k++) baseField.push(clone('c' + (k + 1), 'Clone ' + (k + 1)));
-  const clones = runBatch('clones', cloneN, opts.distance, ev, function () { return baseField; }, opts.seed);
-  const cloneRates = baseField.map(function (c) { return winRate(clones, c.id); });
-  check('8 identical clones each 12.5% +/- 3 (' + cloneN + ' races)',
-    cloneRates.every(function (w) { return Math.abs(w - 0.125) <= 0.03; }),
-    cloneRates.map(pct).join(' '));
-  const fastField = [clone('fast', 'Fast Clone', { speed: 60 })].concat(baseField.slice(0, 7));
-  const fastN = Math.max(N, opts.quick ? 1000 : 2000);
-  const fast = runBatch('fast', fastN, opts.distance, ev, function () { return fastField; }, opts.seed);
-  check('+20 Speed clone wins >= 35% vs 7 base clones', winRate(fast, 'fast') >= 0.35, pct(winRate(fast, 'fast')));
+  // 4. Clone fairness and sensitivity (M4): stats must matter more than race-day modifiers.
+  sensitivity(N, ev);
+
+  // 4b. Odds on realistic mid-season fields (levels, fatigue, moods, low energy).
+  mixedCalibration(Math.max(N, 2000), ev);
 
   // 5. Determinism (with every system switched on: chaos events, hype 100, chat effects)
   const detField = SD.race.buildEntrants(ROSTER.slice(0, 8), { distance: 2000, hypeLevel: 110 });

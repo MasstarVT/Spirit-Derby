@@ -42,25 +42,29 @@
         FINAL_STRETCH: { speed: 0.45, stamina: 0.15, power: 0.25, wisdom: 0.05, luck: 0.10 }
       },
       PERF_PIVOT: 45,          // core = 1 + SLOPE * (perf - PIVOT) / 100
-      PERF_SLOPE: 0.24,        // 10 perf points ~= 2.4% speed (plan start 0.35; tuned by balance-test)
+      PERF_SLOPE: 0.5,         // 10 perf points = 5% speed (M4: stats must matter more than race-day modifiers)
 
       NOISE: {
-        SIGMA: 0.12,           // segment noise amplitude (triangular -1..1)
+        SIGMA: 0.20,           // in-race swing amplitude (triangular -1..1; stationary sd ~ 0.41 * SIGMA)
         WIS_DIV: 250,          // sigma *= (1 - wisdom / WIS_DIV)
-        SEGMENT_TICKS: 6       // re-rolled every N ticks (offset per runner)
+        // A new swing is drawn every N ticks (offset per runner); per distance so every race
+        // has about 20 swings (race-level luck the same at 1200 and 2400 m).
+        SEGMENT_TICKS: { 1200: 8, 1600: 10, 2000: 12, 2400: 15 },
+        RHO: 0.65              // AR(1) persistence: new = RHO * old + sqrt(1 - RHO^2) * fresh, so good and
+                               // bad spells last ~30 ticks and do not average out within a race
       },
       FORM: {
-        AMP: 0.04,             // per-race form = AMP * (1 - wis/WIS_DIV) * tri()
+        AMP: 0.08,             // per-race ("day") form = AMP * (1 - wis/WIS_DIV) * tri()  (sd ~ 2.8%)
         WIS_DIV: 300
       },
 
       STAMINA: {
-        BASE: 0.90,            // stamMax = (BASE + sta/STA_DIV) * POOL_SCALE * DIST_FACTOR
-        STA_DIV: 100,
+        BASE: 0.50,            // stamMax = (BASE + sta/STA_DIV) * POOL_SCALE * DIST_FACTOR
+        STA_DIV: 50,           // (M4) 24 Stamina = 75% of a 40-Stamina pool, 58 Stamina = 128%
         POOL_SCALE: 1600,
         // Pool per metre falls with distance: 1200 is a sprint, 2400 punishes low stamina.
-        DIST_FACTOR: { 1200: 0.92, 1600: 1.04, 2000: 1.20, 2400: 1.40 },
-        DRAIN_SCALE: 0.815,    // drain per metre at nominal speed (fresh Excellent+Happy runners run ~1.05x)
+        DIST_FACTOR: { 1200: 0.92, 1600: 1.02, 2000: 1.10, 2400: 1.20 },
+        DRAIN_SCALE: 0.815,    // drain per metre at nominal speed; drain ~ metres x (v / BASE_SPEED)^2.5
         // pool fraction thresholds -> velocity multiplier
         FADE_AT: [0.25, 0.12, 0.03],        // tiring / fading / wall
         FADE_MULT: [1.0, 0.96, 0.90, 0.80], // ok / tiring / fading / wall
@@ -69,7 +73,9 @@
         DRAFT_MULT: 0.92       // drain multiplier while drafting
       },
 
-      ENERGY: { LOW: 0.5, SLOPE: 0.16, MIN: 0.92 }, // e < LOW -> 1 - (LOW - e) * SLOPE
+      // Race-day STAT multiplier from energy (M4: scales effective stats, like condition):
+      // e < LOW -> 1 - (LOW - e) * SLOPE, never below MIN.
+      ENERGY: { LOW: 0.5, SLOPE: 0.16, MIN: 0.92 },
 
       CRIT: {
         BASE: 0.0010,          // chance per tick
@@ -117,31 +123,35 @@
         BOOST: 0.025, BOOST_TICKS: 15,
         SABOTAGE: 0.96, SABOTAGE_TICKS: 15,
         BACKFIRE_BASE: 0.15, BACKFIRE_WIS_DIV: 200, BACKFIRE_MAX: 0.5, BACKFIRE_BONUS: 1.02,
-        CHEER_PER: 0.0005, CHEER_CAP: 0.02,
+        CHEER_PER: 0.0005, CHEER_CAP: 0.02, CHEER_GLOW_TICKS: 6, // cheers: +0.05% each (max +2%), shown at the gate
         MAX_BOOSTS_PER_RUNNER: 3, MAX_SABOTAGE_PER_TARGET: 2, MAX_SABOTAGE_PER_RACE: 4,
         DELAY_MAX: 6           // ticks after entering the seeded phase
       },
 
       PHOTO_FINISH_M: 0.4,
-      UPSET_ODDS: 8,
+      UPSET_ODDS: 10,
 
-      // Odds model (plan: softmax over a rating). Calibrated by maximum likelihood against
-      // simulated races (roster + random runners); see tools/balance-test.js calibration check.
+      // Odds model (plan: softmax over a rating). Refitted in M4 by maximum likelihood on
+      // 24,000 simulated races (roster fields at level 1 + mixed fields of roster / random
+      // runners at levels 1-8 with random condition, mood and energy); see the odds
+      // calibration check in tools/balance-test.js.
       ODDS: {
-        TEMP: 5.7,             // softmax temperature over ratings (perf points)
+        // Softmax temperature in perf points, per distance (interpolated). Longer races average
+        // out more of the in-race swing, so the favourite is surer at 2400 m.
+        TEMP: { 1200: 6.28, 1600: 5.77, 2000: 5.44, 2400: 5.23 },
         HOUSE: 0.85,           // odds = HOUSE / p  (15% house edge)
         MIN: 1.3,
         MAX: 25,
-        SAFE_REMAIN: 0.25,     // expected pool left below this -> rating penalty
-        SHORTFALL_PTS: 8.7,    // perf points per 100% shortfall
-        REMAIN_PTS: 6.7,       // perf points per 100% expected stamina reserve ...
-        REMAIN_CAP: 0.4,       // ... counted up to this fraction (beyond it nobody is short)
+        SAFE_REMAIN: 0.14,     // expected pool left below this -> rating penalty
+        SHORTFALL_PTS: 8.86,   // perf points per 100% shortfall
+        REMAIN_PTS: 10.41,     // perf points per 100% expected stamina reserve ...
+        REMAIN_CAP: 0.38,      // ... counted up to this fraction (beyond it nobody is short)
         // Style correction in perf points by distance (interpolated in between).
         STYLE_PTS: {
-          1200: { frontRunner: -0.4, paceChaser: 0, lateSurger: -0.4, wildCard: 1.1 },
-          1600: { frontRunner: -2.1, paceChaser: 0, lateSurger: -0.4, wildCard: 0.55 },
-          2000: { frontRunner: -2.4, paceChaser: 0, lateSurger: -0.8, wildCard: -0.55 },
-          2400: { frontRunner: -2.9, paceChaser: 0, lateSurger: -1.5, wildCard: -0.65 }
+          1200: { frontRunner: 0.79, paceChaser: 0, lateSurger: -0.49, wildCard: 0.26 },
+          1600: { frontRunner: 0.72, paceChaser: 0, lateSurger: -0.45, wildCard: -0.12 },
+          2000: { frontRunner: 0.57, paceChaser: 0, lateSurger: -0.19, wildCard: -0.04 },
+          2400: { frontRunner: -1.3, paceChaser: 0, lateSurger: -0.34, wildCard: -0.95 }
         }
       }
     },
@@ -215,7 +225,9 @@
       PASSIVE: { ENERGY_PER_MIN: 0.75, FATIGUE_PER_10MIN: 1, SLEEPY_IDLE_MS: 30 * 60 * 1000 }
     },
 
-    // Condition = hidden fatigue bands: [maxFatigue, label, raceMult, trainMult]
+    // Condition = hidden fatigue bands: [maxFatigue, label, raceMult, trainMult].
+    // raceMult scales the runner's effective STATS on race day (M4), not its velocity:
+    // Exhausted = stats count 90% (~5 perf points = ~2.6% speed for an average runner).
     CONDITION: {
       BANDS: [
         [15, 'Excellent', 1.03, 1.15],
@@ -284,7 +296,7 @@
 
     // Playback pacing (UI): ticks per second by leader phase.
     PLAYBACK: {
-      TPS: { START: 4, EARLY: 6, MID: 8, FINAL_TURN: 10, FINAL_STRETCH: 14, FINISH: 14 },
+      TPS: { START: 3, EARLY: 5, MID: 6, FINAL_TURN: 7, FINAL_STRETCH: 9, FINISH: 9 },
       COUNTDOWN_S: 3,
       MAX_FRAME_DT_MS: 100,
       FINISH_HOLD_MS: 1500    // pause on the final frame before race:playbackDone

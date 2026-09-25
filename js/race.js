@@ -30,6 +30,9 @@
   const RUN_PHASES = 5; // phases a runner can actually be running in
   const EMPTY_FX = Object.freeze([]);
   const PHASE_SEVERITY = ['epic', 'info', 'info', 'good', 'epic', 'epic'];
+  // Bumped whenever the same inputs would simulate differently (M4 rebalance = 2), so a
+  // replay of a race saved by an older build is reported as stale, not as broken determinism.
+  const ENGINE_VERSION = 2;
 
   // ===========================================================================
   // 1. Phase + lookup helpers
@@ -84,6 +87,18 @@
     const e = maxEnergy > 0 ? energy / maxEnergy : 1;
     if (e >= E.LOW) return 1;
     return Math.max(E.MIN, 1 - (E.LOW - e) * E.SLOPE);
+  }
+
+  // Race-day stat multiplier: condition x energy. Both scale a runner's EFFECTIVE STATS
+  // (its perf score), not its raw velocity, so a well-trained Tired runner can still beat
+  // a weak fresh one: Exhausted = stats count 90%, Excellent = 103% (CONFIG.CONDITION.BANDS).
+  function raceStatMult(e) {
+    return SD.runners.conditionRaceMult(e.condition) * energyMult(e.energy, e.maxEnergy);
+  }
+  // Velocity multiplier from an (effective) perf score.
+  function coreOf(perf) {
+    const C = SD.CONFIG.RACE;
+    return 1 + C.PERF_SLOPE * (perf - C.PERF_PIVOT) / 100;
   }
 
   // Mood velocity multiplier per running phase.
@@ -173,8 +188,7 @@
     const ptsPerVel = 100 / C.PERF_SLOPE;
     const moodVel = moodVelArray(e.mood);
     const mood = SD.DATA.MOODS[e.mood] || {};
-    const condMult = SD.runners.conditionRaceMult(e.condition);
-    const eMult = energyMult(e.energy, e.maxEnergy);
+    const statMult = raceStatMult(e);
     let perfAvg = 0, moodAvg = 0, drainPerM = 0;
     const ab = e.abilityId ? SD.DATA.ABILITIES[e.abilityId] : null;
     for (let i = 0; i < RUN_PHASES; i++) {
@@ -184,7 +198,7 @@
       // Rough stamina use per phase: speed^2.5 x style drain (ignores drafting and events).
       let drain = style.drain[i];
       if (ab && ab.drainMult && ab.phase === PHASES[i] && ab.hook === 'tick') drain *= ab.drainMult; // Moonlight Pace
-      const speedRel = (1 + C.PERF_SLOPE * (perf - C.PERF_PIVOT) / 100) * style.vel[i] * condMult * moodVel[i] * eMult;
+      const speedRel = coreOf(perf * statMult) * style.vel[i] * moodVel[i];
       drainPerM += share[i] * drain * Math.pow(Math.max(0.5, speedRel), 2.5);
     }
     // Wild Cards: expected value of the hidden roll (luck lowers the collapse chance).
@@ -194,8 +208,9 @@
       const cp = U.clamp(W.COLLAPSE_P - ((e.stats.luck || 0) - 40) * (W.LUCK_TILT || 0), W.COLLAPSE_MIN, W.COLLAPSE_MAX);
       wildMean = cp * W.COLLAPSE_VEL + W.GREAT_P * W.GREAT_VEL + (1 - cp - W.GREAT_P);
     }
-    // Race-day multipliers (condition, energy, mood, cheers, wild roll) converted to perf points.
-    const formPts = ((condMult - 1) + (eMult - 1) + (moodAvg - 1) + (e.cheerBonus || 0) + (wildMean - 1)) * ptsPerVel;
+    // Race-day modifiers in perf points: condition + energy scale the stats directly; mood,
+    // cheers and the wild roll are velocity multipliers converted to perf points.
+    const formPts = perfAvg * (statMult - 1) + ((moodAvg - 1) + (e.cheerBonus || 0) + (wildMean - 1)) * ptsPerVel;
     // Expected stamina fraction left at the line.
     const expectedDrain = distance * drainPerM * C.STAMINA.DRAIN_SCALE * (mood.drain || 1);
     const remain = 1 - expectedDrain / Math.max(1, e.stamMax);
@@ -215,13 +230,29 @@
     return rating;
   }
 
+  // In-race swing segment length: a number or a per-distance table. Scaling it with the
+  // distance keeps the number of independent swings per race (and so the race-level luck)
+  // about the same at 1200 and 2400 m.
+  function segmentTicks(distance) {
+    const s = SD.CONFIG.RACE.NOISE.SEGMENT_TICKS;
+    return Math.max(1, Math.round(typeof s === 'number' ? s : interpByDistance(s, distance)));
+  }
+
+  // Softmax temperature (perf points): a number or a per-distance table. Longer races
+  // average out more of the in-race swing, so the favourite is surer at 2400 m.
+  function oddsTemp(distance) {
+    const T = SD.CONFIG.RACE.ODDS.TEMP;
+    return Math.max(0.5, typeof T === 'number' ? T : interpByDistance(T, distance));
+  }
+
   // Softmax over ratings -> win probability -> decimal odds with house edge.
   function assignOdds(list, distance) {
     const O = SD.CONFIG.RACE.ODDS;
     if (!list.length) return list;
     const ratings = list.map(function (e) { return ratingOf(e, distance); });
     const maxR = Math.max.apply(null, ratings);
-    const ex = ratings.map(function (r) { return Math.exp((r - maxR) / O.TEMP); });
+    const temp = oddsTemp(distance);
+    const ex = ratings.map(function (r) { return Math.exp((r - maxR) / temp); });
     const sum = ex.reduce(function (a, b) { return a + b; }, 0);
     list.forEach(function (e, i) {
       const p = ex[i] / sum;
@@ -286,7 +317,9 @@
     const DT = C.DT;
     const BASE = C.BASE_SPEED;
     const maxTicks = Math.ceil(distance / (BASE * DT) * C.MAX_TICKS_MULT);
-    const SEG = C.NOISE.SEGMENT_TICKS;
+    const SEG = segmentTicks(distance);
+    const RHO = U.clamp(Number(C.NOISE.RHO) || 0, 0, 0.99);
+    const RHO_Q = Math.sqrt(1 - RHO * RHO); // keeps the stationary spread equal to sigma
     const dayEvent = SD.events.dayEventById(opts.dayEvent);
     const dm = SD.events.dayModifiers(dayEvent);
     const hype = Math.max(0, Number(opts.hypeLevel) || 0);
@@ -352,12 +385,11 @@
         wildVel: 1, wildDrain: 1, formMul: 1, seg: 0, segOffset: 0,
         sigma: C.NOISE.SIGMA * (1 - st.wisdom / C.NOISE.WIS_DIV) * (mood.sigma || 1) * (style.sigma || 1) *
           (loud ? H.LOUD_SIGMA : 1) * dm.sigmaMult,
-        condMult: SD.runners.conditionRaceMult(e.condition),
-        energyMult: energyMult(e.energy, e.maxEnergy),
+        statMult: raceStatMult(e),
         energyFrac: e.maxEnergy > 0 ? e.energy / e.maxEnergy : 1,
         moodDrain: mood.drain || 1,
         moodEventW: mood.eventW || 1,
-        cheerMult: 1 + (e.cheerBonus || 0),
+        cheerMult: 1 + Math.min(C.CHAT.CHEER_CAP, e.cheerBonus || 0),
         pushAmt: st.power / 100 * OV.PUSH,
         critP: (C.CRIT.BASE + C.CRIT.PER_LUCK * st.luck) * (feral ? H.FERAL_CRIT : 1) * (mood.critMult || 1) *
           dm.critMult * (ab && ab.critMult ? ab.critMult : 1),
@@ -370,7 +402,7 @@
         activations: [], majorEvents: [], chat: [], overtakes: 0,
         moodOverride: null, sabotaged: false, tieRoll: 0
       };
-      for (let p = 0; p < RUN_PHASES; p++) r.core[p] = 1 + C.PERF_SLOPE * (e.perf[PHASES[p]] - C.PERF_PIVOT) / 100;
+      for (let p = 0; p < RUN_PHASES; p++) r.core[p] = coreOf(e.perf[PHASES[p]] * r.statMult);
 
       // Static ability setup
       if (r.abilityId === 'acornHoard') {
@@ -409,9 +441,10 @@
       byId[r.id] = r;
     }
 
-    // --- chat effects (boost / sabotage) pre-queued into seeded phases ---
+    // --- chat effects (boost / sabotage / cheer) pre-queued into seeded phases ---
     const chatIn = Array.isArray(opts.chatEffects) ? opts.chatEffects : [];
     const boostCount = Object.create(null), sabCount = Object.create(null);
+    const cheers = Object.create(null); // runnerId -> { count, names[] }
     let sabTotal = 0;
     chatIn.forEach(function (ce) {
       const r = ce && byId[ce.runnerId];
@@ -430,9 +463,27 @@
           backfire: rng.float() < pBack, fired: false
         });
       } else if (ce.type === 'cheer') {
-        r.cheerMult = Math.min(1 + CH.CHEER_CAP, r.cheerMult + Math.max(1, ce.count || 1) * CH.CHEER_PER);
+        const c = cheers[r.id] || (cheers[r.id] = { count: 0, names: [] });
+        c.count += Math.max(1, Math.round(Number(ce.count) || 1));
+        const who = String(ce.by || 'chat');
+        if (c.names.indexOf(who) < 0) c.names.push(who);
       }
     });
+    // Cheers: the entrant's pre-race cheerBonus (buildEntrants) and cheer chat effects are the
+    // same crowd, so the larger of the two counts (never both), capped at CHEER_CAP. A cheered
+    // runner gets a 'chat' line at the gate and a short 'boost' glow; no randomness is used.
+    for (let i = 0; i < n; i++) {
+      const r = R[i];
+      const c = cheers[r.id];
+      const bonus = Math.min(CH.CHEER_CAP, Math.max(r.e.cheerBonus || 0, c ? c.count * CH.CHEER_PER : 0));
+      r.cheerMult = 1 + bonus;
+      if (!c || bonus <= 0) continue;
+      const shown = c.names.slice(0, 2).join(' & ') + (c.names.length > 2 ? ' and ' + (c.names.length - 2) + ' more' : '');
+      const bonus4 = Math.round(bonus * 10000) / 10000;
+      addEvent(1, 'chat', r.id, shown + (c.names.length === 1 ? ' cheers ' : ' cheer ') + r.name + ' on! The crowd lifts them (+' +
+        (Math.round(bonus * 10000) / 100) + '%).', 'good', { type: 'cheer', by: c.names[0], names: c.names.slice(), count: c.count, bonus: bonus4 });
+      addMod(r, 1, 1, 1, CH.CHEER_GLOW_TICKS || 6, 'boost');
+    }
 
     // ------------------------------------------- 5. per-runner mechanics
     let critsTotal = 0;
@@ -740,6 +791,8 @@
             addMod(r, CH.BACKFIRE_BONUS, 1, t, CH.SABOTAGE_TICKS, 'boost');
             addEvent(t, 'chat', r.id, c.by + "'s sabotage BACKFIRES! " + r.name + ' kicks the pebble away and speeds up!', 'good',
               { type: 'sabotage', by: c.by, backfire: true });
+          } else if (!negOk(r, t)) {
+            c.fired = false; // a sabotage waits until the target is clear of its last bad luck
           } else {
             addMod(r, CH.SABOTAGE, 1, t, CH.SABOTAGE_TICKS, 'sabotage');
             r.sabotaged = true;
@@ -816,7 +869,8 @@
       // Luck crit
       if (t >= r.critReadyAt && rng.float() < r.critP) doCrit(r, t);
       // Segment noise, re-rolled every SEG ticks (offset per runner)
-      if ((t + r.segOffset) % SEG === 0) r.seg = r.sigma * rng.tri();
+      // AR(1): each new segment keeps RHO of the old swing, so good and bad spells last a while.
+      if ((t + r.segOffset) % SEG === 0) r.seg = RHO * r.seg + RHO_Q * r.sigma * rng.tri();
 
       // Timed modifiers (events, abilities, crits, chat)
       let modVel = 1, modDrain = 1, noFade = false, fx = null;
@@ -843,7 +897,7 @@
       const draft = gap >= S.DRAFT_MIN && gap <= S.DRAFT_MAX ? S.DRAFT_MULT : 1;
 
       const noise = 1 + r.seg * (fogActive ? E.FOG_SIGMA : 1);
-      const mult = r.core[p] * r.styleVel[p] * r.wildVel * r.formMul * noise * fade * r.condMult * r.energyMult *
+      const mult = r.core[p] * r.styleVel[p] * r.wildVel * r.formMul * noise * fade *
         r.moodVel[p] * r.phaseVel[p] * r.persistVel * r.cheerMult * modVel * (1 + push);
       let v = BASE * mult;
       if (v < 1) v = 1;
@@ -971,6 +1025,20 @@
       }
     }
 
+    // Chat effects that never fired (runner finished first, or a sabotage was still waiting
+    // out the negative cooldown) are reported so every queued effect appears in the record.
+    for (let i = 0; i < n; i++) {
+      const r = R[i];
+      for (let k = 0; k < r.chat.length; k++) {
+        const c = r.chat[k];
+        if (c.fired) continue;
+        c.fired = true;
+        addEvent(Math.min(totalTicks, Math.max(1, Math.ceil(r.finishTick))), 'chat', r.id,
+          c.by + "'s " + (c.type === 'boost' ? 'boost' : 'sabotage') + ' never caught up with ' + r.name + '.', 'info',
+          { type: c.type, by: c.by, fizzled: true });
+      }
+    }
+
     // ------------------------------------ 7. finish order, results, summary
     for (let i = 0; i < n; i++) R[i].tieRoll = rng.float();
     const finishOrder = R.slice().sort(function (a, b) {
@@ -1072,6 +1140,7 @@
       day: opts.day != null ? opts.day : null,
       indexInDay: opts.indexInDay != null ? opts.indexInDay : null,
       seed: seed,
+      engineVersion: ENGINE_VERSION,
       distance: distance,
       trackName: trackName,
       settingsSnapshot: { eventFrequency: freq, hypeLevel: hype, dayEventId: dayEvent ? dayEvent.id : null },
@@ -1116,6 +1185,7 @@
   }
 
   SD.race = {
+    ENGINE_VERSION: ENGINE_VERSION,
     PHASES: PHASES,
     phaseOf: phaseOf,
     phaseIndexOf: phaseIndexOf,
@@ -1124,6 +1194,10 @@
     interpByDistance: interpByDistance,
     stylePts: stylePts,
     energyMult: energyMult,
+    raceStatMult: raceStatMult,
+    oddsTemp: oddsTemp,
+    segmentTicks: segmentTicks,
+    coreOf: coreOf,
     buildEntrants: buildEntrants,
     ratingOf: ratingOf,
     oddsFeatures: oddsFeatures,

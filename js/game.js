@@ -142,11 +142,18 @@
       st.raceEffects = queued.filter(function (e) { return ids.indexOf(e.runnerId) < 0; });
       const chatEffects = [];
       const cheerBonus = {};
+      // Viewers are stored by username key; the race shows their display names.
+      const shownName = function (by) {
+        const p = by && st.players ? st.players[String(by).toLowerCase()] : null;
+        return p && p.displayName ? p.displayName : (by || 'chat');
+      };
       used.forEach(function (e) {
         if (e.type === 'cheer') {
           cheerBonus[e.runnerId] = (cheerBonus[e.runnerId] || 0) + Math.max(1, e.count || 1);
+          // Also passed to the engine so the cheer shows up as a 'chat' line with the viewer's name.
+          chatEffects.push({ runnerId: e.runnerId, type: 'cheer', by: shownName(e.by), count: Math.max(1, e.count || 1) });
         } else if (e.type === 'boost' || e.type === 'sabotage') {
-          for (let k = 0; k < Math.max(1, e.count || 1); k++) chatEffects.push({ runnerId: e.runnerId, type: e.type, by: e.by || 'chat' });
+          for (let k = 0; k < Math.max(1, e.count || 1); k++) chatEffects.push({ runnerId: e.runnerId, type: e.type, by: shownName(e.by) });
         }
       });
 
@@ -360,6 +367,10 @@
     if (!s) return fail('The game has not been initialised yet.');
     const rec = s.raceHistory.length ? s.raceHistory[s.raceHistory.length - 1] : (s.currentRace && s.currentRace.record);
     if (!rec) return fail('No race to replay yet.');
+    if ((rec.engineVersion || 1) !== SD.race.ENGINE_VERSION) {
+      return fail('The last race was run by an older version of the race engine (v' + (rec.engineVersion || 1) +
+        '), so it cannot be replayed exactly. Run a new race first.', { stale: true, recordId: rec.id });
+    }
     const again = SD.race.simulate(replayInputs(rec));
     const same = again.hash === rec.hash;
     return {

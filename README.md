@@ -38,3 +38,25 @@ Runners earn XP from every race by finishing place (1st 100, 2nd 70, 3rd 50, 4th
 ## Leaderboards
 
 The **Boards** tab in the sidebar shows six independent boards (runner wins, runner XP, Spirit Points, participation, race victories, hype) with a Season / All-time toggle; chat reaches the same numbers with `!lb` and `!rank`. Participation counts commands + trains × 2 + cheers + rests + bets and never SP, so no single stat decides every board. Ties share a rank. The paddock shows the season's leading runner ("👑 Leader: …") once someone has won a race.
+
+## Balance & tuning
+
+Races are simulated up front from one seed (the same inputs always give the same race), then played back. What decides a race, roughly in order:
+
+- **Stats** (`SD.CONFIG.RACE.WEIGHTS`, `PERF_SLOPE` 0.5): each phase weighs the five stats differently; 10 points of phase-weighted stats = 5% speed. A +20 Speed runner wins about a third of races against seven equal rivals, +8 in every stat (a level-5-ish runner) about 37%. Stamina also sets the stamina pool (`STAMINA`), which only bites in long races: at 2400 m low-Stamina runners fade and can hit the wall.
+- **Luck of the day**: every runner rolls a hidden per-race form (`FORM.AMP`, about ±3%) plus in-race swings that last several seconds (`NOISE`); Wisdom calms both. The best-form runner still only wins ~40% of races between identical clones.
+- **Condition** (hidden fatigue) scales a runner's stats on race day: Excellent 103%, Good 101%, Normal 100%, Tired 96%, Exhausted 90% (`CONDITION.BANDS`); energy below half trims stats down to 92%. **Mood** is a nudge of at most ±0.6% over a race (`SD.DATA.MOODS`). Neither can outweigh a real stat edge.
+- **Style, ability, events, chat**: running style changes the pace by phase, abilities give short bursts, race events and chat boosts / sabotages / cheers add drama.
+
+Admin drawer → **Tuning**: *Event frequency* (none / low / normal / high / chaos: how often random race events happen, ×0 / ×0.5 / ×1 / ×1.6 / ×2.5, max 6 per race or 12 on chaos), *Hype multiplier* (scales every hype gain), *Playback speed* and *Final-stretch speedup* (presentation only: a 1200 m race plays in about 20 s, 2400 m in about 40 s), *User cooldown*. Every other number lives in `js/config.js` (`SD.CONFIG`), with ability magnitudes and moods in `js/data.js`. The betting odds come from a rating (stats, race-day modifiers, style, expected stamina left, ability) through a softmax (`RACE.ODDS`), fitted so implied and actual win rates agree within a couple of points.
+
+Checking a change:
+
+```
+node tools/run-tests.js                          # everything (balance, race systems, parser, progression)
+node tools/balance-test.js --matrix              # roster win rates per distance, style clones, odds calibration, sensitivity
+node tools/balance-test.js --distance 2400 --races 3000
+node tools/balance-test.js --streamday           # 20 trains without rest -> Exhausted -> race penalty
+node tools/balance-test.js --dump 12345          # one full race record, tick by tick
+node tools/race-test.js --verbose                # abilities, events, hype tiers, chat effects, replay, day events
+```

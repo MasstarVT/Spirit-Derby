@@ -168,53 +168,53 @@
       name: "Forest's Favor", hook: 'phaseEntry', phase: 'FINAL_STRETCH',
       desc: 'At the final stretch: a Luck-scaled chance (at least 40%) of a +18% burst for 6 ticks. Guaranteed when running 3rd to 5th.',
       chanceBase: 0.25, chancePerLuck: 0.005, chanceMin: 0.40, chanceMax: 0.85,
-      burst: 0.18, burstPerLevel: 0.004, ticks: 6, guaranteedRanks: [3, 5], rating: -0.7
+      burst: 0.18, burstPerLevel: 0.004, ticks: 6, guaranteedRanks: [3, 5], rating: -0.02
     },
     moonlightPace: {
       name: 'Moonlight Pace', hook: 'tick', phase: 'MID',
       desc: 'During the mid race: stamina drain x0.80 and +2% speed.',
-      drainMult: 0.80, vel: 0.02, velPerLevel: 0.001, rating: -0.3
+      drainMult: 0.80, vel: 0.02, velPerLevel: 0.001, rating: 0.11
     },
     thunderStep: {
       name: 'Thunder Step', hook: 'overtake', phases: ['MID', 'FINAL_TURN'],
       desc: 'Overtaking in the mid race or final turn: +30% speed for 3 ticks (max 3 procs, 20-tick cooldown).',
-      burst: 0.30, burstPerLevel: 0.005, ticks: 3, maxProcs: 3, cooldown: 20, rating: 0.3
+      burst: 0.30, burstPerLevel: 0.005, ticks: 3, maxProcs: 3, cooldown: 20, rating: 0.39
     },
     secondWind: {
       name: 'Second Wind', hook: 'tick',
       desc: 'Once per race, when stamina drops below 12%: restore 15% stamina and ignore fatigue for 10 ticks.',
-      threshold: 0.12, restore: 0.15, restorePerLevel: 0.005, noFadeTicks: 10, rating: -0.3
+      threshold: 0.12, restore: 0.15, restorePerLevel: 0.005, noFadeTicks: 10, rating: 0.01
     },
     cometTail: {
       name: 'Comet Tail', hook: 'phaseEntry', phase: 'FINAL_STRETCH',
       desc: 'At the final stretch: +9% for 12 ticks when running 2nd to 5th, +6% when 6th or worse. Nothing when already leading.',
-      burst: 0.09, burstPerLevel: 0.003, burstBack: 0.06, ticks: 12, rating: 0
+      burst: 0.09, burstPerLevel: 0.003, burstBack: 0.06, ticks: 12, rating: 0.29
     },
     readingTheWind: {
       name: 'Reading the Wind', hook: 'phaseEntry', phase: 'FINAL_TURN',
       desc: 'At the final turn: a Wisdom roll (50% + Wis/200) grants +5% through the turn and stamina drain x0.85 afterwards. Passive: bad events find her half as often.',
-      chanceBase: 0.5, chancePerWis: 0.005, vel: 0.05, velPerLevel: 0.002, drainMult: 0.85, negEventWeight: 0.5, rating: 0.3
+      chanceBase: 0.5, chancePerWis: 0.005, vel: 0.05, velPerLevel: 0.002, drainMult: 0.85, negEventWeight: 0.5, rating: 0.29
     },
     acornHoard: {
       name: 'Acorn Hoard', hook: 'passive', phase: 'FINAL_STRETCH',
       desc: 'Crit chance x2.5 and crits give +22% for 6 ticks. Good events find her 1.5x as often. One guaranteed crit at the final stretch if none yet.',
-      critMult: 2.5, critBoost: 0.22, critBoostPerLevel: 0.004, critTicks: 6, posEventWeight: 1.5, rating: 0.8
+      critMult: 2.5, critBoost: 0.22, critBoostPerLevel: 0.004, critTicks: 6, posEventWeight: 1.5, rating: 0.96
     },
     longNight: {
       name: 'Long Night', hook: 'phaseEntry', phase: 'FINAL_STRETCH',
       desc: 'At the final stretch: bonus speed equal to remaining stamina x 14%. Stamina pool x1.06 in races of 2000 m or more.',
-      perStam: 0.14, perStamPerLevel: 0.006, poolMult: 1.06, poolMinDistance: 2000, rating: 1.0
+      perStam: 0.14, perStamPerLevel: 0.006, poolMult: 1.06, poolMinDistance: 2000, rating: 0.98
     },
     hedgeHop: {
       name: 'Hedge Hop', hook: 'event',
       desc: 'When hit by a bad event: 50% + Luck/200 to shrug it off, bounce it onto the runner directly ahead and spring forward (+12% for 10 ticks).',
       chanceBase: 0.5, chancePerLuck: 0.005, chancePerLevel: 0.005, chanceMax: 0.95,
-      bounceBoost: 0.12, bounceBoostPerLevel: 0.002, bounceTicks: 10, rating: -1.2
+      bounceBoost: 0.12, bounceBoostPerLevel: 0.002, bounceTicks: 10, rating: -0.61
     },
     afterglow: {
       name: 'Afterglow', hook: 'phaseEntry', phase: 'FINAL_STRETCH',
       desc: 'At the final stretch: +2% speed per runner ahead (max +10%) for the rest of the race.',
-      perAhead: 0.02, perAheadPerLevel: 0.0005, max: 0.10, maxPerLevel: 0.002, rating: 0.75
+      perAhead: 0.02, perAheadPerLevel: 0.0005, max: 0.10, maxPerLevel: 0.002, rating: 0.09
     }
   };
 
@@ -378,37 +378,41 @@
   ];
 
   // ---------------------------------------------------------------------------
-  // Moods (max +/-3% velocity). velPhases null = all phases.
+  // Moods: small race-day nudges (M4). Every mood's race-level velocity effect stays
+  // within +/-0.6% (per-phase values up to 2%) so mood can never outweigh stats: in a
+  // field of identical Happy clones any single other mood keeps a 8.5-16.5% win rate
+  // (tools/balance-test.js). vel applies in velPhases (null = all phases); sigma scales
+  // the in-race swing; drain scales stamina use.
   // ---------------------------------------------------------------------------
   const MOODS = {
     'Determined': {
-      emoji: '\u{1F624}', desc: 'Locked in. +1% in the final stretch, +8% training gains.',
-      vel: 0.01, velPhases: ['FINAL_STRETCH'], sigma: 1, drain: 1, critMult: 1,
+      emoji: '😤', desc: 'Locked in. +1.2% speed through the final turn and stretch, +8% training gains.',
+      vel: 0.012, velPhases: ['FINAL_TURN', 'FINAL_STRETCH'], sigma: 1, drain: 1, critMult: 1,
       trainGain: 1.08, trainCrit: 0, trainFail: 0, eventW: 1, hypeMult: 1, regen: 1
     },
     'Happy': {
-      emoji: '\u{1F60A}', desc: 'Feeling great. +2% speed, hype contributions x1.2.',
-      vel: 0.02, velPhases: null, sigma: 1, drain: 1, critMult: 1,
+      emoji: '😊', desc: 'Feeling great. +0.4% speed all race, hype contributions x1.2.',
+      vel: 0.004, velPhases: null, sigma: 1, drain: 1, critMult: 1,
       trainGain: 1, trainCrit: 0, trainFail: 0, eventW: 1, hypeMult: 1.2, regen: 1
     },
     'Nervous': {
-      emoji: '\u{1F630}', desc: 'Jittery. -2% speed, more erratic, training fails more often. Cured by a crit or 10 cheers.',
-      vel: -0.02, velPhases: null, sigma: 1.2, drain: 1, critMult: 1,
+      emoji: '😰', desc: 'Jittery. -0.4% speed and more erratic, bad events find them more often, training fails more. Cured by a crit or 10 cheers.',
+      vel: -0.004, velPhases: null, sigma: 1.2, drain: 1, critMult: 1,
       trainGain: 1, trainCrit: 0, trainFail: 0.05, eventW: 1.2, hypeMult: 1, regen: 1
     },
     'Fired Up': {
-      emoji: '\u{1F525}', desc: 'Pumped! +3% at the start and early race, but stamina drain x1.06.',
-      vel: 0.03, velPhases: ['START', 'EARLY'], sigma: 1, drain: 1.06, critMult: 1,
+      emoji: '🔥', desc: 'Pumped! +2% at the start and early race, but stamina drain x1.05.',
+      vel: 0.02, velPhases: ['START', 'EARLY'], sigma: 1, drain: 1.05, critMult: 1,
       trainGain: 1, trainCrit: 0.02, trainFail: 0, eventW: 1, hypeMult: 1, regen: 1
     },
     'Sleepy': {
-      emoji: '\u{1F634}', desc: 'Drowsy. -2% early on, stamina drain x0.95, energy recovers x1.3.',
-      vel: -0.02, velPhases: ['START', 'EARLY'], sigma: 1, drain: 0.95, critMult: 1,
+      emoji: '😴', desc: 'Drowsy. -1% out of the gate, but stamina drain x0.95 and energy recovers x1.3.',
+      vel: -0.01, velPhases: ['START'], sigma: 1, drain: 0.95, critMult: 1,
       trainGain: 1, trainCrit: 0, trainFail: 0.02, eventW: 1.1, hypeMult: 1, regen: 1.3
     },
     'Chaotic': {
-      emoji: '\u{1F300}', desc: 'Unhinged. Much more random, crits x1.5, training gains anywhere from x0.7 to x1.3.',
-      vel: 0, velPhases: null, sigma: 1.5, drain: 1, critMult: 1.5,
+      emoji: '🌀', desc: 'Unhinged. Much more erratic, crits x1.5, training gains anywhere from x0.7 to x1.3.',
+      vel: 0, velPhases: null, sigma: 1.3, drain: 1, critMult: 1.5,
       trainGain: 1, trainGainRange: [0.7, 1.3], trainCrit: 0, trainFail: 0, eventW: 1, hypeMult: 1, regen: 1
     }
   };

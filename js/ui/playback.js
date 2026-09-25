@@ -34,7 +34,7 @@
     aborted: evName('RACE_ABORTED', 'race:aborted')
   };
 
-  const DEFAULT_TPS = { START: 4, EARLY: 6, MID: 8, FINAL_TURN: 10, FINAL_STRETCH: 14 };
+  const DEFAULT_TPS = { START: 3, EARLY: 5, MID: 6, FINAL_TURN: 7, FINAL_STRETCH: 9 };
   const DEFAULT_COUNTDOWN_S = 3;
   const DEFAULT_HOLD_MS = 1500;
 
@@ -119,7 +119,7 @@
     if (!isFinite(v)) v = phase === 'FINISH' ? num(table.FINAL_STRETCH, 14) : 8;
     v *= num(s.playbackSpeed, 1) || 1;
     // FINISH = leader already home, rest still in their final stretch → keep the stretch speed.
-    if (phase === 'FINAL_STRETCH' || phase === 'FINISH') v *= num(s.finalStretchSpeedup, num(pcfg().FINAL_STRETCH_SPEEDUP, 1.75)) || 1;
+    if (phase === 'FINAL_STRETCH' || phase === 'FINISH') v *= num(s.finalStretchSpeedup, num(pcfg().FINAL_STRETCH_SPEEDUP, 1.25)) || 1;
     v *= speedMult;
     return Math.max(0.25, v);
   }

@@ -31,7 +31,7 @@
       eventFrequency: 'normal',     // none | low | normal | high | chaos
       hypeMultiplier: 1,
       playbackSpeed: 1,
-      finalStretchSpeedup: 1.75,
+      finalStretchSpeedup: 1.25,
       userCooldownS: SD.CONFIG.COOLDOWNS.USER_S,
       openTraining: true,
       allowCreate: true,
