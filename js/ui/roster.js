@@ -32,6 +32,7 @@
     chosenStat: {},
     offs: [],
     fxTimers: {},
+    pendingRings: {},
 
     init: function (root) {
       const self = this;
@@ -68,6 +69,12 @@
         'RUNNER_CLAIMED', 'RUNNER_CONDITION', 'RACE_STARTED', 'RACE_FINISHED', 'RACE_ABORTED', 'RACE_PAUSED', 'RACE_RESUMED']
         .forEach(function (k) { self.offs.push(dom.on(k, rerender)); });
       this.offs.push(dom.on('RUNNER_LEVELUP', function (p) { self.onLevelUp(p); }));
+      // Race level-ups land just before the results modal opens: their rings play once it closes.
+      this.offs.push(dom.on('ui:resultsClosed', function () {
+        const ids = Object.keys(self.pendingRings);
+        self.pendingRings = {};
+        ids.forEach(function (id) { self.pulse(id, 'rcard--levelup', 3300); });
+      }));
 
       const s = dom.state();
       if (s) this.render(s);
@@ -103,11 +110,17 @@
     onLevelUp: function (p) {
       const id = p && (p.runnerId || (p.runner && p.runner.id) || p.id);
       if (!id) return;
-      this.pulse(id, 'rcard--levelup', 3300);
+      const self = this;
+      // Next tick: race:finished (and the results modal) follow runner:levelup synchronously.
+      setTimeout(function () {
+        if (SD.ui.results && typeof SD.ui.results.isOpen === 'function' && SD.ui.results.isOpen()) self.pendingRings[id] = true;
+        else self.pulse(id, 'rcard--levelup', 3300);
+      }, 0);
       const s = dom.state();
       const r = s && (s.runners || []).filter(function (x) { return x.id === id; })[0];
       const level = (p && (p.level || p.newLevel)) || (r && r.level);
-      if (r) dom.toast(r.name + ' reached level ' + level + '!', 'epic');
+      const name = (r && r.name) || (p && p.name);
+      if (name) dom.toast('⬆ ' + name + ' reached level ' + level + '!', 'epic');
       dom.schedule(this);
     },
 
@@ -165,6 +178,14 @@
       const eColor = eFrac < 0.2 ? 'var(--ember)' : eFrac < 0.5 ? 'var(--gold)' : 'var(--teal)';
       const xp = Math.round(Number(r.xp) || 0);
       const xpNext = Math.round(Number(dom.info.xpToNext(level)) || 1);
+      const isMax = level >= (Number(dom.cfg('PROGRESSION.MAX_LEVEL', 20)) || 20);
+      const xpRow = isMax
+        ? '<div class="sbar sbar--wide sbar--max" title="Max level reached (' + esc(dom.fmt.int(r.totalXp || 0)) + ' XP this season)"><span class="sbar__label">XP</span>' +
+            '<span class="sbar__track"><i class="sbar__fill" style="width:100%"></i></span>' +
+            '<span class="sbar__num">MAX</span></div>'
+        : '<div class="sbar sbar--wide" title="XP ' + xp + ' / ' + xpNext + ' to level ' + (level + 1) + '"><span class="sbar__label">XP</span>' +
+            '<span class="sbar__track"><i class="sbar__fill" style="width:' + pct(xp, xpNext) + ';--c:var(--gold)"></i></span>' +
+            '<span class="sbar__num">' + xp + '/' + xpNext + '</span></div>';
 
       const cond = condClass(r.condition);
       const mood = r.mood || 'Happy';
@@ -180,7 +201,7 @@
             '<div class="rcard__name" title="' + esc(r.name) + (r.personality ? ' — ' + esc(r.personality) : '') + '">' + esc(r.name) + '</div>' +
             '<div class="rcard__sub" title="' + esc(species) + ' · ' + esc(style.name) + '">' + esc(sub) + '</div>' +
           '</div>' +
-          '<div class="rcard__tags"><span class="pill pill--lv">Lv ' + level + '</span>' +
+          '<div class="rcard__tags"><span class="pill pill--lv' + (isMax ? ' pill--max' : '') + '">Lv ' + level + (isMax ? ' MAX' : '') + '</span>' +
             (racing ? '<span class="pill pill--race">RACING</span>' : '') + '</div>' +
         '</header>' +
         '<div class="rcard__stats">' + statRows + totalRow + '</div>' +
@@ -188,9 +209,7 @@
           '<div class="sbar sbar--wide" title="Energy ' + energy + ' / ' + maxE + '"><span class="sbar__label">EN</span>' +
             '<span class="sbar__track"><i class="sbar__fill" style="width:' + pct(energy, maxE) + ';--c:' + eColor + '"></i></span>' +
             '<span class="sbar__num">' + energy + '/' + maxE + '</span></div>' +
-          '<div class="sbar sbar--wide" title="XP ' + xp + ' / ' + xpNext + ' to next level"><span class="sbar__label">XP</span>' +
-            '<span class="sbar__track"><i class="sbar__fill" style="width:' + pct(xp, xpNext) + ';--c:var(--gold)"></i></span>' +
-            '<span class="sbar__num">' + xp + '/' + xpNext + '</span></div>' +
+          xpRow +
         '</div>' +
         '<div class="rcard__line">' +
           '<span>' + dom.info.moodEmoji(mood) + ' ' + esc(mood) + '</span><span aria-hidden="true">·</span>' +

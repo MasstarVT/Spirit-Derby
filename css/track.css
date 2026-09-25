@@ -654,6 +654,13 @@
   color: var(--gold-bright);
 }
 .paddock__sub { font-size: var(--fs-md); color: var(--text-dim); }
+.paddock__leader {
+  margin-top: 2px;
+  font-size: var(--fs-min);
+  font-weight: 700;
+  color: var(--gold-bright);
+  letter-spacing: 0.02em;
+}
 .paddock__status {
   display: inline-flex;
   align-items: center;

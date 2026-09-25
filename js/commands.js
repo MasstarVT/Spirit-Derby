@@ -257,6 +257,14 @@
     return Math.max(0, len - (now - last));
   }
 
+  // Read-only commands (def.cooldownMs === 0) count toward stats.commands (the participation
+  // board) at most once per this window per viewer, so spamming !status / !lb cannot farm it.
+  function activityWindowMs() {
+    const L = SD.CONFIG.LEADERBOARDS;
+    const s = L && L.READONLY_ACTIVITY_S != null ? Number(L.READONLY_ACTIVITY_S) : SD.CONFIG.COOLDOWNS.USER_S;
+    return Math.max(0, (isFinite(s) ? s : 0) * 1000);
+  }
+
   function stampCooldown(username, def, now) {
     const rt = SD.state.runtime;
     if (!rt.cooldowns) rt.cooldowns = {};
@@ -366,10 +374,15 @@
     }
     // 5. per-user cooldown (the streamer's own console, source 'admin', is exempt)
     const now = SD.clock.now();
+    const rt = SD.state.runtime;
+    const readOnly = def.cooldownMs === 0;
+    const lastActivity = readOnly && rt.activity ? rt.activity[username] : undefined;
     const ctx = {
       state: state, username: username, displayName: displayName, source: source, isMod: isMod, player: player,
       parsed: parsed, args: parsed.args, argText: parsed.argText, command: def.name, now: now,
-      effects: effects, touched: false
+      effects: effects, touched: false,
+      // false for a read-only command repeated inside CONFIG.LEADERBOARDS.READONLY_ACTIVITY_S
+      countActivity: !(lastActivity != null && now - lastActivity < activityWindowMs())
     };
     const cdLen = cooldownLength(def, ctx);
     if (cdLen > 0 && source !== 'admin') {
@@ -391,7 +404,9 @@
         const r = normalizeOut(def.handler(ctx, parsed.args));
         if (r.ok && !ctx.touched && P() && P().get(st, username)) {
           // The streamer console (source admin) can speak as anyone: it never changes player.isMod.
-          const t = P().touch(st, username, { isMod: source === 'admin' ? undefined : isMod, displayName: displayName, now: now });
+          const t = P().touch(st, username, {
+            isMod: source === 'admin' ? undefined : isMod, displayName: displayName, now: now, count: ctx.countActivity
+          });
           if (t.dailyBonus) {
             r.message += DOT + 'Daily bonus +' + t.dailyBonus + ' SP!';
             effects.push({ type: 'sp', amount: t.dailyBonus, reason: 'daily' });
@@ -413,6 +428,10 @@
 
     // 8. stamp the cooldown (successful commands only)
     if (out.ok && cdLen > 0) stampCooldown(username, def, now);
+    if (out.ok && readOnly && ctx.countActivity && P() && P().get(SD.state.get(), username)) {
+      if (!rt.activity) rt.activity = {};
+      rt.activity[username] = now;
+    }
     return finish(out.ok, out.message, {
       severity: out.severity || (out.ok ? 'good' : 'bad'),
       cooldownMs: out.ok ? cdLen : (out.cooldownMs || 0)
@@ -455,7 +474,7 @@
     handler: function (ctx) {
       if (!P()) throw new CommandError('Player profiles are not available right now.');
       const r = P().join(ctx.state, ctx.username, ctx.displayName,
-        { source: ctx.source, isMod: ctx.source === 'admin' ? undefined : ctx.isMod, now: ctx.now });
+        { source: ctx.source, isMod: ctx.source === 'admin' ? undefined : ctx.isMod, now: ctx.now, count: ctx.countActivity });
       if (!r.player) throw new CommandError('That name cannot join the derby.');
       ctx.touched = true;
       const p = r.player;
@@ -642,6 +661,8 @@
       const p = ctx.player;
       const r = P().runnerOf(S, ctx.username);
       const parts = [p.displayName + ': ' + p.spiritPoints + ' SP'];
+      const spRank = SD.leaderboards ? SD.leaderboards.rankOf(S, 'spiritPoints', ctx.username) : null;
+      if (spRank) parts.push('#' + spRank.rank + ' in SP');
       if (r) {
         parts.push(r.emoji + ' ' + r.name + ' Lv ' + r.level, statsLine(r), 'Energy ' + Math.floor(r.energy) + '/' + r.maxEnergy,
           r.condition, r.mood, recordLine(r));
@@ -759,9 +780,69 @@
   });
 
   // ---------------------------------------------------------------------------
+  // M3: leaderboards (read-only, no cooldown, never locked)
+  // ---------------------------------------------------------------------------
+  function boardNames() {
+    return SD.leaderboards.CATEGORIES.map(function (c) { return c.short; }).join(', ');
+  }
+
+  register({
+    name: 'leaderboard',
+    aliases: ['lb', 'top'],
+    usage: '!leaderboard [wins|xp|sp|part|victories|hype] [all]',
+    description: 'Top ' + SD.CONFIG.LEADERBOARDS.CHAT_TOP_N + ' on a board (default: Spirit Points). Add "all" for all-time: !lb wins all',
+    cooldownMs: 0,
+    handler: function (ctx, args) {
+      const L = SD.leaderboards;
+      if (!L) throw new CommandError('Leaderboards are not available right now.', { severity: 'info' });
+      let cat = null, scope = 'season';
+      const unknown = [];
+      args.forEach(function (a) {
+        const sc = L.resolveScope(a);
+        const c = L.resolve(a);
+        if (c && !cat) cat = c;
+        else if (sc) scope = sc;
+        else unknown.push(a);
+      });
+      if (!cat && unknown.length) {
+        return {
+          message: 'No board called "' + String(unknown[0]).slice(0, 20) + '". Boards: ' + boardNames() + ' (e.g. !lb wins, add "all" for all-time).',
+          severity: 'info'
+        };
+      }
+      const line = L.format(ctx.state, cat || 'spiritPoints', SD.CONFIG.LEADERBOARDS.CHAT_TOP_N, scope);
+      return { message: line + (args.length ? '' : DOT + 'More: !lb ' + boardNames().split(', ').filter(function (s) { return s !== 'sp'; }).join(' | ')), severity: 'info' };
+    }
+  });
+
+  register({
+    name: 'rank',
+    usage: '!rank [viewer]',
+    description: 'Your rank on the Spirit Points, victories and hype boards (or another viewer\'s).',
+    cooldownMs: 0,
+    handler: function (ctx, args) {
+      const L = SD.leaderboards;
+      if (!L) throw new CommandError('Leaderboards are not available right now.', { severity: 'info' });
+      const S = ctx.state;
+      let p = ctx.player;
+      if (args.length) {
+        p = P().get(S, args[0]);
+        if (!p) throw new CommandError('No viewer called "' + cleanName(args[0]).slice(0, 25) + '" has joined the derby.', { severity: 'info' });
+      }
+      if (!p) throw new CommandError("You're not in the derby yet — type !join", { severity: 'info' });
+      const parts = SD.CONFIG.LEADERBOARDS.RANK_BOARDS.map(function (id) {
+        const cat = L.get(id);
+        if (!cat) return null;
+        const r = L.rankOf(S, id, p.username);
+        return r ? '#' + r.rank + ' in ' + cat.noun + ' (' + L.fmtNum(r.value) + ')' : 'unranked in ' + cat.noun;
+      }).filter(Boolean);
+      return { message: p.displayName + ': ' + parts.join(DOT), severity: 'info' };
+    }
+  });
+
+  // ---------------------------------------------------------------------------
   // Later-milestone registration points (do not implement here yet)
   // ---------------------------------------------------------------------------
-  // TODO(M3): register !leaderboard [wins|xp|sp|part|victories|hype] (alias lb) -> top 3 from SD.leaderboards.
   // TODO(M5): register !bet <runner> <amount>, !boost <runner>, !snack <runner>, !sabotage <runner>
   //           (cooldown CONFIG.COOLDOWNS.SABOTAGE_S), !ribbon <colour>; extend !race / !event with mod actions.
   // TODO(M6): register !create <name> (requires settings.allowCreate and no free runner) -> SD.game.spawnRunner + claim.

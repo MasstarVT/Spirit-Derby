@@ -117,7 +117,7 @@
       <nav class="tabs" role="tablist" aria-label="Sidebar">
         <!-- M2: ui/chat.js enables this tab -->
         <button type="button" class="tab" role="tab" id="tab-chat" aria-controls="panel-chat" aria-selected="false" data-tab="chat" disabled>Chat <span class="tab__soon">M2</span></button>
-        <!-- M3: ui/leaderboards.js enables this tab -->
+        <!-- M3: ui/leaderboards.js enables this tab (and removes the badge) -->
         <button type="button" class="tab" role="tab" id="tab-boards" aria-controls="panel-boards" aria-selected="false" data-tab="boards" disabled>Boards <span class="tab__soon">M3</span></button>
         <button type="button" class="tab" role="tab" id="tab-log" aria-controls="panel-log" aria-selected="true" data-tab="log">Log</button>
       </nav>
@@ -128,8 +128,8 @@
       </section>
 
       <section class="tabpanel" id="panel-boards" role="tabpanel" aria-labelledby="tab-boards" hidden>
-        <!-- M3: leaderboards mount here (#boards) -->
-        <p class="tabpanel__placeholder">Leaderboards arrive in Milestone 3.</p>
+        <!-- M3: six boards, season / all-time (ui/leaderboards.js mounts here) -->
+        <div class="boards" id="boards"></div>
       </section>
 
       <section class="tabpanel" id="panel-log" role="tabpanel" aria-labelledby="tab-log">
@@ -168,7 +168,7 @@
   <script src="js/players.js"></script>
   <!-- M5: <script src="js/betting.js"></script> -->
   <!-- M5: <script src="js/achievements.js"></script> -->
-  <!-- M3: <script src="js/leaderboards.js"></script> -->
+  <script src="js/leaderboards.js"></script>
   <script src="js/seasons.js"></script>
   <script src="js/game.js"></script>
   <script src="js/commands.js"></script>
@@ -181,7 +181,7 @@
   <script src="js/ui/results.js"></script>
   <script src="js/ui/roster.js"></script>
   <script src="js/ui/chat.js"></script>
-  <!-- M3: <script src="js/ui/leaderboards.js"></script> -->
+  <script src="js/ui/leaderboards.js"></script>
   <script src="js/ui/eventlog.js"></script>
   <script src="js/ui/admin.js"></script>
 

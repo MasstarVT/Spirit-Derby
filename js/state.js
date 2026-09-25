@@ -16,6 +16,7 @@
   // Non-persisted runtime data. Survives state.set() (it is about this browser session).
   const runtime = {
     cooldowns: {},        // username -> { cmd: timestampMs }
+    activity: {},         // username -> last read-only command that counted toward stats.commands
     runnerCooldowns: {},  // runnerId -> { rest: timestampMs }
     chatFeed: [],
     connected: { twitch: 'off', bridge: 'off' },

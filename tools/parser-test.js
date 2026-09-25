@@ -159,7 +159,10 @@ section('player gate and !join');
   has(j2.message, 'already', 'second !join says already in');
   eq(Object.keys(S().players).length, 1, 'still one player');
   eq(player('foxfan').spiritPoints, 200, 'no second join bonus');
-  eq(player('foxfan').stats.commands, 2, 'stats.commands counts both joins');
+  eq(player('foxfan').stats.commands, 1, 'a repeated read-only command inside the activity window counts once (anti-spam)');
+  tick(SD.CONFIG.LEADERBOARDS.READONLY_ACTIVITY_S * 1000);
+  say('FoxFan', '!join');
+  eq(player('foxfan').stats.commands, 2, 'stats.commands counts the read-only command again after the window');
 
   const keys = Object.keys(player('foxfan')).sort();
   eq(keys, ['achievements', 'backing', 'displayName', 'isMod', 'joinedAt', 'lastDailyDay', 'lastSeen', 'lifetime',
@@ -503,7 +506,7 @@ section('!status / !inspect / !race / !event / !help');
   has(unk.message, '!help', 'unknown command points to !help');
   has(unk.message, '!foo', 'unknown command echoes the name');
   eq(unk.unknown, true, 'result.unknown flag');
-  eq(say('Lurker', '!lb').ok, false, '!lb is not registered until M3');
+  eq(say('Lurker', '!lb').ok, true, '!lb works without joining (M3)');
 }
 
 // -----------------------------------------------------------------------------
@@ -557,7 +560,7 @@ section('registry: admin permission, check-then-commit, processCommand');
   eq(captured[0] && captured[0].source, 'twitch', 'chat line keeps source twitch');
   ok(!!player('twitchtom'), 'player created via processCommand');
   const list = SD.commands.list().map(function (d) { return d.name; });
-  eq(list, ['join', 'claim', 'train', 'rest', 'cheer', 'status', 'inspect', 'race', 'event', 'help'], 'list() in registration order');
+  eq(list, ['join', 'claim', 'train', 'rest', 'cheer', 'status', 'inspect', 'race', 'event', 'help', 'leaderboard', 'rank'], 'list() in registration order');
   ok(SD.commands.list().every(function (d) { return typeof d.handler === 'undefined'; }), 'list() hides handlers');
 }
 

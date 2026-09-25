@@ -1,6 +1,6 @@
 /* =====================================================================
    SPIRIT DERBY — panels: header + hype meter, roster cards, event log,
-   chat (M2), admin drawer, hype banners, toasts.
+   chat (M2), boards (M3), admin drawer, hype banners, toasts.
    ===================================================================== */
 
 /* =====================================================================
@@ -265,7 +265,11 @@ body[data-hype-tier="3"] .hype__fill {
   opacity: 0.85;
 }
 .rcard--racing { border-color: rgba(201, 168, 76, 0.55); }
-.rcard--levelup { animation: sd-levelup-ring 1.6s ease-out 2; }
+.rcard--levelup { animation: sd-levelup-ring 1.6s ease-out 2; border-color: var(--gold-bright); }
+/* The strip clips the card's outer ring at its edges, so the badge and Lv pill ring too. */
+.rcard--levelup .rcard__head .badge,
+.rcard--levelup .pill--lv { animation: sd-levelup-ring 1.6s ease-out 2; }
+.rcard--levelup .pill--lv { background: rgba(230, 198, 94, 0.35); color: #fff4cc; }
 .rcard--crit .badge { animation: sd-crit-flash 0.8s ease-out; }
 .rcard--busy { opacity: 0.8; }
 
@@ -341,6 +345,9 @@ body[data-hype-tier="3"] .hype__fill {
 .sbar--wide { grid-template-columns: 40px minmax(0, 1fr) 72px; }
 .sbar--wide .sbar__num { font-size: var(--fs-min); color: var(--text-dim); }
 .rcard__meters { display: grid; gap: 3px; }
+.sbar--max .sbar__fill { background: linear-gradient(90deg, var(--gold), var(--gold-bright)); box-shadow: 0 0 6px rgba(230, 198, 94, 0.6); }
+.sbar--max .sbar__num { color: var(--gold-bright); font-weight: 800; letter-spacing: 0.06em; }
+.pill--max { background: rgba(230, 198, 94, 0.28); border-color: var(--gold-bright); color: #fff4cc; }
 
 .rcard__line {
   display: flex;
@@ -543,6 +550,181 @@ body[data-hype-tier="3"] .hype__fill {
   line-height: 1.3;
 }
 .chat__hint b { color: var(--cream); font-weight: 700; }
+
+/* =====================================================================
+   BOARDS (sidebar, M3): six category chips, season / all-time, top 10
+   ===================================================================== */
+.boards {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+.boards__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-4) var(--sp-2);
+}
+.boards__title { font-size: var(--fs-min); letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-faint); }
+.boards__scope {
+  display: inline-flex;
+  padding: 2px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-pill);
+  background: var(--surface-sunk);
+}
+.boards__scopebtn {
+  min-height: 30px;
+  padding: 2px 12px;
+  border: 0;
+  border-radius: var(--r-pill);
+  background: transparent;
+  color: var(--text-dim);
+  font-size: var(--fs-min);
+  font-weight: 700;
+}
+.boards__scopebtn:hover { color: var(--cream); }
+.boards__scopebtn[aria-pressed="true"] { background: var(--forest-500); color: var(--gold-bright); box-shadow: inset 0 0 0 1px rgba(201, 168, 76, 0.6); }
+
+.boards__chips {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  padding: 0 var(--sp-3) var(--sp-2);
+}
+.lbchip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: 38px;
+  padding: 4px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-pill);
+  background: var(--surface-3);
+  color: var(--text-dim);
+  font-size: var(--fs-min);
+  font-weight: 700;
+  white-space: nowrap;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.lbchip:hover { background: #2d4a37; color: var(--cream); }
+.lbchip__icon { font-size: 18px; }
+.lbchip__label { overflow: hidden; text-overflow: ellipsis; }
+.lbchip[aria-pressed="true"] {
+  border-color: var(--gold);
+  background: rgba(201, 168, 76, 0.2);
+  color: var(--gold-bright);
+  box-shadow: inset 0 0 0 1px rgba(201, 168, 76, 0.45);
+}
+
+.boards__desc {
+  padding: 0 var(--sp-4) var(--sp-2);
+  color: var(--text-dim);
+  font-size: var(--fs-min);
+  line-height: 1.3;
+}
+.boards__kind {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 0 8px;
+  border-radius: var(--r-pill);
+  background: rgba(243, 233, 210, 0.08);
+  color: var(--cream);
+  font-weight: 700;
+  font-size: var(--fs-min);
+}
+.boards__when { color: var(--text-faint); white-space: nowrap; }
+
+.boards__list {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 0 var(--sp-3) var(--sp-3);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.lbrow {
+  display: grid;
+  grid-template-columns: 34px 32px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 52px;
+  padding: 6px 12px 6px 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: rgba(243, 233, 210, 0.03);
+}
+.lbrow--top { background: rgba(201, 168, 76, 0.06); border-color: rgba(201, 168, 76, 0.28); }
+.lbrow--r1 {
+  background: linear-gradient(90deg, rgba(201, 168, 76, 0.2), rgba(201, 168, 76, 0.05));
+  border-color: rgba(201, 168, 76, 0.6);
+}
+.lbrow__rank {
+  text-align: center;
+  color: var(--text-faint);
+  font-size: var(--fs-md);
+  font-weight: 800;
+}
+.lbrow__rank--medal { font-size: 26px; }
+.lbrow__avatar {
+  --chip: var(--gold);
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 2px solid var(--chip);
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.3);
+  color: var(--chip);
+  font-size: var(--fs-min);
+  font-weight: 800;
+}
+.lbrow__who { min-width: 0; }
+.lbrow__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-base);
+  font-weight: 700;
+  line-height: 1.2;
+}
+.lbrow--r1 .lbrow__name { color: var(--gold-bright); }
+.lbrow__sub {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-dim);
+  font-size: var(--fs-min);
+}
+.lbrow__sub i { color: var(--text-faint); }
+.lbrow__value {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-end;
+  color: var(--gold-bright);
+  font-size: var(--fs-md);
+  font-weight: 800;
+  line-height: 1.05;
+  white-space: nowrap;
+}
+.lbrow__value small { color: var(--text-faint); font-size: var(--fs-min); font-weight: 700; }
+.boards__empty { margin: auto; padding: var(--sp-5); text-align: center; color: var(--text-faint); }
+.boards__more { padding: 4px var(--sp-2); text-align: center; color: var(--text-faint); font-size: var(--fs-min); }
+.boards__foot {
+  flex: none;
+  padding: var(--sp-2) var(--sp-3) var(--sp-3);
+  border-top: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--text-faint);
+  font-size: var(--fs-min);
+}
+.boards__foot b { color: var(--cream); }
 
 /* =====================================================================
    ADMIN DRAWER

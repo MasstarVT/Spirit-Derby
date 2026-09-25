@@ -296,6 +296,21 @@
 
     COOLDOWNS: { USER_S: 10, SABOTAGE_S: 600, CHEER_S: 30 },
 
+    // -------------------------------------------------------------------------
+    // LEADERBOARDS (plan sections 4 and 7) - six independent boards
+    // -------------------------------------------------------------------------
+    LEADERBOARDS: {
+      TOP_N: 10,                // rows per board (Boards tab, SD.leaderboards.top default)
+      CHAT_TOP_N: 3,            // entries in a !leaderboard reply
+      // Participation score = sum(stat x weight). Never counts SP, wins or hype (those have their own boards).
+      PARTICIPATION: { commands: 1, trains: 2, cheers: 1, rests: 1, bets: 1 },
+      // Read-only commands (cooldownMs 0: !status, !lb, !help ...) add to stats.commands at most
+      // once per this many seconds per viewer, so spamming them cannot top the participation board.
+      READONLY_ACTIVITY_S: 10,
+      RANK_BOARDS: ['spiritPoints', 'raceVictories', 'hypeContributions'], // what !rank reports
+      LEADER_NAMES: 2           // paddock "Leader" line: names shown before "+n more"
+    },
+
     NAMES: { MAX_LEN: 24 }
   };
 })(globalThis.SD = globalThis.SD || {});

@@ -11,6 +11,7 @@
  *             sampling noise and fails deterministically on the fixed seed; --quick keeps the
  *             clone / style checks at 1000 races so the whole suite still runs in a few seconds)
  *   parser   tools/parser-test.js (command parser + pipeline)
+ *   progression  tools/progression-test.js (XP / level-ups, leaderboards, !leaderboard / !rank)
  */
 'use strict';
 
@@ -20,7 +21,8 @@ const childProcess = require('child_process');
 const VERBOSE = process.argv.indexOf('--verbose') >= 0;
 const SUITES = [
   { name: 'balance', file: 'balance-test.js', args: ['--races', '1000', '--matrix', '--quick'] },
-  { name: 'parser', file: 'parser-test.js', args: VERBOSE ? ['--verbose'] : [] }
+  { name: 'parser', file: 'parser-test.js', args: VERBOSE ? ['--verbose'] : [] },
+  { name: 'progression', file: 'progression-test.js', args: VERBOSE ? ['--verbose'] : [] }
 ];
 
 function lastLines(text, n) {

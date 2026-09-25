@@ -681,14 +681,37 @@
         '</div>';
       }).join('');
 
+      const leader = this.leaderLine(state);
       return '' +
         '<div class="paddock__head">' +
-          '<div><div class="paddock__title">🌿 The Paddock</div><div class="paddock__sub">' + esc(next) + '</div></div>' +
+          '<div><div class="paddock__title">🌿 The Paddock</div><div class="paddock__sub">' + esc(next) + '</div>' +
+            (leader ? '<div class="paddock__leader">' + esc(leader) + '</div>' : '') + '</div>' +
           '<span class="paddock__status">' + esc(status) + '</span>' +
         '</div>' +
         (cards ? '<div class="paddock__grid">' + cards + '</div>' : '<p class="paddock__empty">No runners are ready to race.</p>') +
         '<p class="paddock__hint">Streamer: open controls with <kbd>`</kbd> or ⚙ → <b>START RACE</b>' +
           (SD.commands ? ' · Chat: <b>!join</b> · <b>!claim</b> · <b>!train</b> · <b>!cheer</b>' : ' · Train runners from their cards below') + '</p>';
+    },
+
+    /** "👑 Leader: Velvet Comet (3 wins)" — the season's top runner by wins; '' before the first win. */
+    leaderLine: function (state) {
+      let names = [], wins = 0;
+      try {
+        if (SD.leaderboards && typeof SD.leaderboards.leader === 'function') {
+          const l = SD.leaderboards.leader(state);
+          if (l) { names = l.names; wins = l.wins; }
+        } else {
+          (state.runners || []).forEach(function (r) {
+            const w = (r && !r.retired && r.record && Number(r.record.wins)) || 0;
+            if (w > wins) { wins = w; names = [r.name]; } else if (w > 0 && w === wins) names.push(r.name);
+          });
+        }
+      } catch (e) { return ''; }
+      if (!names.length || !(wins > 0)) return '';
+      const max = Number(dom.cfg('LEADERBOARDS.LEADER_NAMES', 2)) || 2;
+      const shown = names.slice(0, max).join(' & ') + (names.length > max ? ' +' + (names.length - max) + ' more' : '');
+      const unit = wins === 1 ? 'win' : 'wins';
+      return '👑 ' + (names.length > 1 ? 'Leaders: ' + shown + ' (' + wins + ' ' + unit + ' each)' : 'Leader: ' + shown + ' (' + wins + ' ' + unit + ')');
     },
 
     renderPaddock: function (state) {

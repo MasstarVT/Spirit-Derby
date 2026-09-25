@@ -189,12 +189,13 @@
     return { player: p, dailyBonus: dailyBonus };
   }
 
-  // !join: create (idempotent) + touch. -> { player, created, dailyBonus }
+  // !join: create (idempotent) + touch. opts.count:false skips the stats.commands bump
+  // (the pipeline throttles read-only commands). -> { player, created, dailyBonus }
   function join(state, username, displayName, opts) {
     opts = opts || {};
     const res = ensure(state, username, displayName, opts);
     if (!res.player) return { player: null, created: false, dailyBonus: 0 };
-    const t = touch(state, username, { isMod: opts.isMod, displayName: displayName, now: opts.now });
+    const t = touch(state, username, { isMod: opts.isMod, displayName: displayName, now: opts.now, count: opts.count });
     return { player: res.player, created: res.created, dailyBonus: t.dailyBonus };
   }
 

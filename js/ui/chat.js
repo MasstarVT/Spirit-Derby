@@ -72,7 +72,7 @@
         '<button type="submit" class="btn btn--primary chat__send">Send</button>' +
       '</form>' +
       '<p class="chat__hint" data-ref="hint">Try <b>!join</b> · <b>!claim</b> · <b>!train speed</b> · <b>!rest</b> · <b>!cheer moss</b> · ' +
-        '<b>!status</b> · <b>!inspect moss</b> · <b>!help</b>. Start a line with <b>@Name:</b> to speak as that viewer.</p>';
+        '<b>!status</b> · <b>!inspect moss</b> · <b>!lb wins</b> · <b>!rank</b> · <b>!help</b>. Start a line with <b>@Name:</b> to speak as that viewer.</p>';
   }
 
   const chat = {
@@ -361,6 +361,7 @@
         opts.push([18, pick(CHATTER)]);
         opts.push([6, '!race']);
         opts.push([4, '!train speed']);                 // shows the race-lock reply now and then
+        if (SD.leaderboards) opts.push([3, '!lb wins']);
       } else {
         if (cd('train') === 0) {
           if (mine && mine.energy >= 25) opts.push([40, '!train ' + pick(STAT_WORDS)]);
@@ -376,6 +377,10 @@
         opts.push([6, '!status']);
         opts.push([3, '!inspect ' + short(pick(runners))]);
         opts.push([2, '!race']);
+        if (SD.leaderboards) {
+          opts.push([3, pick(['!lb', '!lb wins', '!lb xp', '!lb hype', '!lb victories', '!lb part', '!top sp'])]);
+          opts.push([2, '!rank']);
+        }
         opts.push([8, pick(CHATTER)]);
       }
       return weighted(opts) || pick(CHATTER);

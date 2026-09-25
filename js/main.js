@@ -17,7 +17,7 @@
     ['results', '#results'],
     ['roster', '#roster'],
     ['chat', '#chat'],                 // M2
-    ['leaderboards', '#boards'],       // M3
+    ['leaderboards', '#boards'],       // M3 (enables the Boards tab in init)
     ['eventlog', '#eventlog'],
     ['admin', '#admin']
   ];

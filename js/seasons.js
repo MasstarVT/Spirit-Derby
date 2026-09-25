@@ -156,6 +156,7 @@
       r.baseStats = Object.assign({}, stats);
       r.level = 1;
       r.xp = 0;
+      r.totalXp = 0;            // season XP (Runner XP board); lifetime.totalXp keeps the all-time total
       r.maxEnergy = SD.runners.energyMax(1);
       r.energy = r.maxEnergy;
       r.fatigue = CFG.CONDITION.START_FATIGUE;
