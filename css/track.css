@@ -803,7 +803,15 @@
 .rtable .place-1 .c-place { color: var(--gold-bright); }
 .rtable .c-runner { min-width: 240px; }
 .rtable .runner-cell { display: flex; align-items: center; gap: var(--sp-3); }
-.rtable .runner-cell__name { font-size: var(--fs-md); font-weight: 700; }
+.rtable .runner-cell__text { min-width: 0; }
+.rtable .runner-cell__name {
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-md);
+  font-weight: 700;
+}
 .rtable .runner-cell__owner { font-size: var(--fs-min); color: var(--text-dim); }
 .rtable .c-num { font-family: var(--font-num); white-space: nowrap; }
 .rtable .c-dim { color: var(--text-dim); font-size: var(--fs-min); }
@@ -949,11 +957,24 @@
   align-items: center;
   gap: var(--sp-2);
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   font-size: var(--fs-lg);
+  line-height: 1.2;
 }
+/* M6: long names (custom runners, 25-character logins) wrap to 2 lines, then an ellipsis;
+   the full name is the title tooltip; names over 14 characters use a smaller font. */
+.season__name {
+  flex: 0 1 auto;
+  min-width: 0;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+.season__name--long { font-size: var(--fs-md); }
+.season__at { flex: none; white-space: nowrap; }
+.season__main .badge,
+.season__main .emoji { flex: none; }
 .season__main b { color: var(--cream); }
 .season__card--champ .season__main b { color: var(--gold-bright); }
 .season__sub { color: var(--text-dim); font-size: var(--fs-min); }
@@ -964,3 +985,26 @@
   line-height: 1.45;
 }
 .season__note b { color: var(--cream); }
+
+/* =====================================================================
+   M6: debug HUD (settings.debug; never on stream)
+   ===================================================================== */
+.track__hud {
+  position: absolute;
+  top: 64px;
+  right: calc(var(--pos-w) + 16px);
+  z-index: var(--z-track-overlay);
+  max-width: 46%;
+  padding: 6px 10px;
+  border: 1px solid rgba(79, 209, 197, 0.5);
+  border-radius: var(--r-sm);
+  background: rgba(6, 12, 8, 0.8);
+  color: var(--teal);
+  font-family: var(--font-num);
+  font-size: var(--fs-min);
+  line-height: 1.3;
+  white-space: pre-line;
+  pointer-events: none;
+}
+.track__hud[hidden] { display: none; }
+body.sd-overlay .track__hud { display: none; }

@@ -183,7 +183,7 @@ A batch (array) of messages:
 When the game connects:
 
 ```json
-{ "type": "hello", "app": "spirit-derby", "version": "0.1.0", "protocol": 1 }
+{ "type": "hello", "app": "spirit-derby", "version": "1.0.0", "protocol": 1 }
 ```
 
 After each command from the bridge **or from read-only Twitch chat**:
@@ -349,6 +349,7 @@ open training off. Mod status comes from Twitch badges and tags, or from the bri
 |---|---|---|---|---|---|
 | `!join` | — | — | no | none | Join the derby (+200 SP the first time; +50 SP daily bonus on your first action each day) |
 | `!claim [runner]` | — | `!join` | yes | 10 s | Claim a free runner (named, or the first free one). One runner per viewer; re-claiming releases the old one |
+| `!create <name>` | — | `!join`, no runner | yes | 10 s | When every runner has an owner (and the streamer allows it): create your own runner (random species, style and ability; stats sum to 200). Names 3–20 letters, digits, spaces or apostrophes, unique |
 | `!train <stat>` / `!train <runner> <stat>` | `!t` | `!join` | yes | 10 s | Train your runner (or any runner while *open training* is on). Stats: speed, stamina, power, wisdom, luck (short forms such as `spd`, `sta`, `pow`, `wis`, `luk` work) |
 | `!rest [runner]` | `!r` | `!join` | yes | 10 s + 3 min per runner | Energy +30, fatigue down, hype −5 |
 | `!cheer [runner]` | `!c` | `!join` | **no** | 30 s | Hype +3 and +2 SP; a named runner gets a tiny pre-race boost |
@@ -377,7 +378,7 @@ open training off. Mod status comes from Twitch badges and tags, or from the bri
   `!sabotage` and `!ribbon` only move SP inside the game.
 - Achievements a viewer unlocks with their own command are appended to that command's reply, so
   they also reach Twitch through the bridge.
-- **Planned (later milestone):** `!create <name>`.
+- `!create <name>` only works once every runner has an owner and **Allow !create** is ticked (admin Tuning); the paddock holds at most 24 runners (`CONFIG.RUNNERS.MAX_ACTIVE`).
 
 ## 10. Troubleshooting
 

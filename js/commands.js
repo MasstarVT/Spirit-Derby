@@ -542,6 +542,69 @@
     }
   });
 
+  // ---------------------------------------------------------------------------
+  // M6: !create <name> — a brand-new runner for a viewer without one, once every runner has an
+  // owner (and settings.allowCreate). Same spawn code as admin SPAWN RUNNER (SD.game.spawnRunner):
+  // random species template, a style that species runs, stats summing to 200 and a style-suited
+  // ability from the catalog; then it is claimed like !claim (Creator achievement via runner:spawned).
+  // ---------------------------------------------------------------------------
+  function andList(names) {
+    if (names.length <= 1) return names.join('');
+    return names.slice(0, -1).join(', ') + ' and ' + names[names.length - 1];
+  }
+  function freeRunnersPhrase(free) {
+    const names = free.slice(0, 3).map(function (r) { return r.name; });
+    const more = free.length > 3 ? ' and ' + (free.length - 3) + ' more' : '';
+    return (more ? names.join(', ') + more : andList(names)) + (free.length === 1 ? ' is' : ' are') + ' still free';
+  }
+
+  register({
+    name: 'create',
+    usage: '!create <name>',
+    description: 'Create your own runner when every runner already has an owner (if the streamer allows it): a random species, style and ability, stats summing to ' +
+      SD.CONFIG.PROGRESSION.STAT_TOTAL + '. Names: ' + ((SD.CONFIG.RUNNERS || {}).CREATE_NAME_MIN || 3) + '–' + ((SD.CONFIG.RUNNERS || {}).CREATE_NAME_MAX || 20) +
+      ' letters, digits, spaces or apostrophes.',
+    requiresPlayer: true,
+    lockedDuringRace: true,
+    minArgs: 1,
+    handler: function (ctx, args) {
+      const S = ctx.state;
+      const mine = P().runnerOf(S, ctx.username);
+      if (mine) throw new CommandError('You already run with ' + mine.emoji + ' ' + mine.name + '. One runner per viewer!', { severity: 'info' });
+      const free = P().freeRunners(S);
+      if (S.settings.allowCreate === false) {
+        throw new CommandError(free.length
+          ? freeRunnersPhrase(free) + ' — !claim one, or wait for the streamer to allow !create.'
+          : 'Every runner has an owner and creating runners is switched off. Ask the streamer to allow !create (or to spawn a runner).',
+        { severity: 'info' });
+      }
+      if (free.length) {
+        throw new CommandError(freeRunnersPhrase(free) + ' — !claim one! (!create opens up once every runner has an owner.)', { severity: 'info' });
+      }
+      const R = SD.CONFIG.RUNNERS || {};
+      const max = Number(R.MAX_ACTIVE) > 0 ? Number(R.MAX_ACTIVE) : 24;
+      if (SD.state.activeRunners(S).length >= max) {
+        throw new CommandError('The paddock is full (' + max + ' runners) and every one has an owner. Owners are cleared when the season ends: !claim one then!', { severity: 'info' });
+      }
+      const check = SD.runners.checkName(S, args.join(' '));
+      if (!check.ok) throw new CommandError(check.message, { severity: 'info' });
+      // --- commit ---
+      const runner = SD.game.spawnRunner({ name: check.name, by: ctx.username, byName: ctx.displayName });
+      if (!runner || runner.ok === false || !runner.id) {
+        return { ok: false, message: (runner && runner.message) || 'The forest could not make a runner right now.', severity: 'bad' };
+      }
+      const c = P().claim(S, ctx.username, runner.id);
+      if (!c.ok) return { ok: false, message: runner.name + ' wandered in, but claiming it failed: ' + c.message, severity: 'bad' };
+      ctx.effects.push({ type: 'create', runnerId: runner.id, name: runner.name }, { type: 'claim', runnerId: runner.id, released: null });
+      const ab = runner.ability && runner.ability.id ? runner.ability.name : null;
+      return {
+        message: '✨ ' + ctx.displayName + ' created ' + runner.emoji + ' ' + runner.name + ', a ' + runner.species + ' ' +
+          styleName(runner.style) + '! ' + statsLine(runner) + (ab ? DOT + 'Ability: ' + ab : '') + DOT + 'Try !train speed',
+        severity: 'epic'
+      };
+    }
+  });
+
   register({
     name: 'train',
     aliases: ['t'],
@@ -750,8 +813,9 @@
         rec.entrants.map(function (e) { return e.name; }).join(', ') + '. Favourite: ' + fav.name + ' at ' + fmtOdds(fav.odds) +
         (bets ? '. ' + bets + ' riding on it' : '') + '. !cheer them on!';
     }
-    if (season.raceIndexInDay >= season.racesPerDay && S.settings.autoAdvanceDay !== false) {
-      return "Today's " + season.racesPerDay + ' races are done. A new day dawns soon — keep training!';
+    if (season.raceIndexInDay >= season.racesPerDay) {
+      return "Today's " + season.racesPerDay + ' races are done. ' +
+        (S.settings.autoAdvanceDay !== false ? 'A new day dawns soon' : 'The streamer starts the next day') + ' — keep training!';
     }
     let line = 'No race running. Next up: Race ' + Math.min(season.raceIndexInDay + 1, season.racesPerDay) + '/' + season.racesPerDay + ' · ' + S.settings.distance + ' m';
     try {
@@ -825,6 +889,10 @@
       const S = ctx.state;
       const look = args.length && /^(today|status|info|now|\?)$/i.test(args[0]);
       if (ctx.isMod && !look) {
+        // M6: a mod's day-event change waits for the results, like every other mutating command.
+        if (SD.state.isRaceLocked(S)) {
+          throw new CommandError('Hold on — a race is running! Change the day event after the results (!event today just looks).', { severity: 'info' });
+        }
         let ev = null;
         if (args.length) {
           const f = findDayEvent(args.join(' '));
@@ -1314,11 +1382,6 @@
       };
     }
   });
-
-  // ---------------------------------------------------------------------------
-  // Later-milestone registration points (do not implement here yet)
-  // ---------------------------------------------------------------------------
-  // TODO(M6): register !create <name> (requires settings.allowCreate and no free runner) -> SD.game.spawnRunner + claim.
 
   SD.commands = {
     CommandError: CommandError,

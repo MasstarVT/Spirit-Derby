@@ -9,6 +9,7 @@
   SD.EVENTS = {
     STATE_CHANGED: 'state:changed',
     STATE_LOADED: 'state:loaded',
+    STATE_SAVED: 'state:saved',       // M6: persistence wrote the save { at, bytes, stats }
     SETTINGS_CHANGED: 'settings:changed',
     LOG_ENTRY: 'log:entry',
     RUNNER_SPAWNED: 'runner:spawned',

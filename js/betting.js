@@ -162,6 +162,10 @@
     const p = P().get(state, username);
     if (!p) return fail("You're not in the derby yet — type !join");
     if (state.currentRace) return fail('Betting is closed while a race is running. Wait for the results!');
+    // M6: after the day's last race (auto-advance off) a bet could only ever be refunded at NEXT DAY.
+    if (state.season && state.season.raceIndexInDay >= state.season.racesPerDay) {
+      return fail("Today's races are done. Betting opens again when the next day starts.");
+    }
     const runner = SD.state.runnerById(runnerId, state);
     if (!runner || runner.retired) return fail('That runner is not racing any more.');
     const fo = fieldOdds(state);

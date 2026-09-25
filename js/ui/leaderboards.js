@@ -13,18 +13,14 @@
   const dom = SD.ui.dom;
   const esc = dom.esc;
 
-  const UI_KEY = 'spiritderby.ui';
   const DEFAULT_CATEGORY = 'spiritPoints';
   const NAME_COLORS = ['#e6c65e', '#9fd67a', '#e0875f', '#8fb5e6', '#c69be6', '#7fe0c0', '#f0a3b5', '#d9b38c', '#b5d98f', '#f2c38a'];
 
   function L() { return SD.leaderboards || null; }
 
-  function readPrefs() {
-    try { return JSON.parse(localStorage.getItem(UI_KEY) || '{}') || {}; } catch (e) { return {}; }
-  }
-  function writePrefs(patch) {
-    try { localStorage.setItem(UI_KEY, JSON.stringify(Object.assign(readPrefs(), patch))); } catch (e) { /* private mode */ }
-  }
+  // UI prefs live in spiritderby.ui (SD.ui.dom.prefs, shared with main.js and the chat panel).
+  function readPrefs() { return dom && dom.prefs ? dom.prefs.read() : {}; }
+  function writePrefs(patch) { if (dom && dom.prefs) dom.prefs.write(patch); }
 
   function hashStr(s) {
     if (SD.rng && typeof SD.rng.hash === 'function') return SD.rng.hash(String(s));

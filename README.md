@@ -1,98 +1,271 @@
-# Spirit Derby
+# 🌲 Spirit Derby
 
-A Twitch-chat-driven forest spirit racing and management game. Open `index.html` (no build step, no server needed), or run `node tools/serve.js`. Headless tests: `node tools/run-tests.js`.
+**A Twitch-chat-driven forest-spirit racing and management game.** Chat joins, claims runners, trains them, cheers, bets fictional Spirit Points, slips pebbles into rivals' shoes and watches the results unfold in animated races on stream. In short, chat accidentally became a horse-racing management company.
 
-## Commands
+Spirit Derby is original work: the runners, art direction (emoji on coloured badges), text and rules were all written for this project. It borrows the *genre* (chat-played idle racing and management games), not any third-party assets, names or code. It uses plain HTML, CSS and JavaScript with no build step, no dependencies and no server.
 
-Chat commands work the same whether they come from the simulated chat in the sidebar, the streamer's **SEND AS** box in the admin drawer (⚙ or backtick), Twitch chat or the local bridge. Spirit Points (SP) are fictional and have no real-world value (see [Spirit Points](#spirit-points)).
+Version **1.0.0** · [Architecture](docs/ARCHITECTURE.md) · [Twitch / Mix It Up / OBS guide](docs/INTEGRATION.md) · MIT licence
 
-| Command | Aliases | What it does |
-|---|---|---|
-| `!join` | | Join the Spirit Derby. +200 SP the first time; +50 SP for your first action each in-game day. |
-| `!claim [runner]` | | Claim a free runner (named, or the first free one). One runner per viewer: claiming another releases your old one. |
-| `!train <stat>` / `!train <runner> <stat>` | `!t` | Train your runner (or any runner by name while *open training* is on). Stats: `speed`, `stamina`, `power`, `wisdom`, `luck` (short forms like `spd`, `sta`, `pow`, `wis`, `luk` work). Costs 12 energy; +5 SP (+15 on a critical session), hype +1. |
-| `!rest [runner]` | `!r` | Energy +30 and less fatigue (hype −5). Each runner can rest once every 3 minutes. |
-| `!cheer [runner]` | `!c` | Hype +3 and +2 SP. Cheering a named runner before a race gives it a tiny boost, and 10 cheers calm a Nervous runner. Works during races too. |
-| `!status` | `!stats` | Your SP (and your rank on the SP board) and your runner's level, stats, energy, condition, mood and record. |
-| `!inspect [runner]` | `!i` | A runner's full card: style, ability, owner, stats, condition, mood, record and odds for the next race. |
-| `!race` | | Viewers: what is happening on the track, the next field with odds, the favourite and the open bets. **Mods and the streamer:** starts the race (`!race 2000` picks the distance; `!race status` only looks). |
-| `!event` | | Viewers: today's day event and what it changes. **Mods and the streamer:** `!event` rolls a new random day event, `!event <name>` sets one (`!event harvest`, `!event fog`), `!event today` only looks. |
-| `!odds` | | Odds for every runner in the next race (or the race that is running). |
-| `!bet <runner> <amount>` | | Bet 10–250 SP on a runner in the next race. Also `!bet <amount> <runner>`, `!bet <runner> all` (all-in, capped at 250), `!bet <amount>` (same runner as your open bet), `!bet` (show your bet) and `!bet cancel`. One bet per viewer: a new bet refunds and replaces the old one. |
-| `!bets` | | The open bets on the next race: how many, how much, on whom, and yours. |
-| `!boost <runner>` | | 40 SP: the runner gets a +2.5% burst for 15 ticks at a random moment of its next race. Max 3 boosts per runner per race; boosting your own runner is fine. |
-| `!snack <runner>` | | 25 SP: +10 energy. Max 2 snacks per runner per in-game day. |
-| `!sabotage <runner>` | | 60 SP: a pebble in the runner's shoe for its next race (×0.96 for 15 ticks). Wise runners may kick it back: backfire chance = 15% + Wisdom / 200 (max 50%), and then *they* get faster. Not your own runner; 10-minute cooldown; max 2 per target and 4 per race. Chat sees "FoxFan slipped a pebble into Moss Runner's shoe…", and whether it sticks is decided at the gate. |
-| `!ribbon <colour>` | | 100 SP: a coloured ribbon ring around your runner's badge (cosmetic). Named colours (`gold`, `teal`, `crimson`, `lilac` …) or `#hex`; `!ribbon` lists them, `!ribbon off` removes it for free. |
-| `!hype` | | The hype meter, the current tier and how far the next threshold is. |
-| `!achievements [viewer]` | `!ach`, `!badges` | Your achievements (count / total and the latest three), or another viewer's. |
-| `!leaderboard [board] [all]` | `!lb`, `!top` | The top 3 on a board. Boards: `wins` (runner wins), `xp` (runner XP), `sp` (Spirit Points, the default), `part` (participation), `victories` (races won by the runner you own or back) and `hype` (hype you added). Add `all` for all-time totals: `!lb wins all`. |
-| `!rank [viewer]` | | Your rank on the SP, victories and hype boards in one line (or another viewer's: `!rank FoxFan`). |
-| `!help [command]` | `!h`, `!commands` | The command list, or details for one command (`!help train`). |
+---
 
-Rules worth knowing:
+## Contents
 
-- Training, resting, claiming and everything that spends SP (`!bet`, `!boost`, `!snack`, `!sabotage`, `!ribbon`) are locked while a race is running (countdown, running or paused). `!cheer`, `!status`, `!inspect`, `!race`, `!event`, `!odds`, `!bets`, `!hype`, `!achievements`, `!leaderboard`, `!rank` and `!help` always work.
-- Each viewer has a per-command cooldown (default 10 s, *User cooldown* in the admin Tuning section; `!cheer` 30 s). The streamer's own console (the **Streamer** sender and SEND AS) is not cooldown-limited.
-- Runner names are case-insensitive and can be shortened: `moss`, `Moss Runner`, `mossrunner` and `@MossRunner` all work. An ambiguous name gets a "Did you mean…?" reply.
-- Read-only commands (`!status`, `!lb`, `!rank`, `!help` …) have no cooldown, but they add to your participation score at most once every 10 s, so spamming them cannot top the participation board.
-- Race payouts: the owner of each runner earns SP by finishing place (50 / 35 / 25 / 15 …). Viewers who mostly trained, rested or cheered a runner they don't own (its *backers*) earn half of that.
+[The loop](#the-loop) · [Quick start](#quick-start) · [Screen tour](#screen-tour) · [Viewer commands](#viewer-commands) · [Spirit Points](#spirit-points) · [Training, energy, condition and mood](#training-energy-condition-and-mood) · [Runners and abilities](#runners-and-abilities) · [Races](#races) · [Hype](#hype) · [Seasons and achievements](#seasons-and-achievements) · [Streamer guide](#streamer-guide) · [Twitch and Mix It Up](#twitch-and-mix-it-up) · [Architecture](#architecture) · [Testing](#testing) · [Project structure](#project-structure) · [Roadmap](#roadmap--ideas) · [Licence](#licence)
 
-Simulated chat: type in the Chat tab; start a line with `@Name:` to speak as that viewer (for example `@FoxFan: !train speed`), or pick a sender from the list. The **🤖 Demo bots** toggle lets six fictional viewers join, claim, train, cheer and (with what they can afford) bet, boost, snack and now and then sabotage every few seconds, so you can test hype, bets and races alone. In overlay mode (`?overlay=1` or key `O`) command replies appear as toasts under the track.
+## The loop
+
+1. Viewers **`!join`** (200 SP) and **`!claim`** one of 10 runners, or **`!create`** their own once every runner has an owner.
+2. Between races, chat **trains** (`!train speed`), **rests**, **cheers**, **snacks**, **boosts**, **sabotages** and **bets** on the next field. Every action has a small cost and a visible effect.
+3. The streamer starts the race (admin **START RACE**, or a mod types `!race`). It is simulated up front from one seed, then played back in about 20–40 s with phases, abilities, random forest events and chat effects.
+4. Results pay owners, backers and winning bets, give XP and level-ups, and update six leaderboards. Three races make a day and seven days make a season, which ends with a summary (champion, MVP, biggest upset). Then everyone starts fresh with a small carry-over.
+
+## Quick start
+
+- **Play:** double-click `index.html` (Chrome, Edge or Firefox). Everything runs from `file://`, and the game autosaves in the browser.
+- **Or serve it:** `node tools/serve.js` (optional; any static server works), then open <http://localhost:8090> (`node tools/serve.js 3000` picks another port).
+- **Try it alone:** open the **Chat** tab and switch on **🤖 Demo bots**. Six fictional viewers join, train, bet and cheer. Press **`** (backtick) for the streamer controls and hit **▶ START RACE**.
+- **Go live:** press **O** for overlay mode, or load `index.html?overlay=1` as an OBS browser source (1920×1080). Add `&twitch=yourchannel` to read your chat. Details are in [docs/INTEGRATION.md](docs/INTEGRATION.md).
+- **Run the tests:** `node tools/run-tests.js` (Node 18+, about 40 s).
+
+## Screen tour
+
+| Area | What it shows |
+|---|---|
+| **Header** | 🌲 logo · `SEASON n · DAY d` and `RACE i/3` · today's day event · the hype meter (value, next threshold) · connection dot (grey off, amber connecting, green on, red error) · 📺 overlay and ⚙ controls buttons |
+| **Track** | Title bar (track name, distance, phase, distance progress bar) · one lane per runner (badge, name, owner, level, style, stamina bar) with the sprite moving along it · live **Positions** column (gaps in metres, finish times) · ticker with the three latest race events · countdown, fog, finish flash and photo-finish / upset / winner banners |
+| **Paddock** (no race) | The exact next field in lane order with odds, condition, energy and owner · chips for open bets, queued boosts, sabotages and cheers · the season's leader |
+| **Roster strip** | One card per runner: stats vs cap, energy, XP, mood, condition, record, owner, ability (hover for details) · local TRAIN / REST controls for the streamer |
+| **Sidebar** | **Chat** (simulated chat: speak as anyone with `@Name: !cmd`, demo bots) · **Boards** (six leaderboards, season or all-time, and past seasons) · **Log** (everything that happened) |
+| **Modals** | Race results (places, times, XP, SP, stat gains, abilities, bets, achievements) · season summary |
+| **Toasts** | Achievements, level-ups, streamer messages; in overlay mode also every command reply (queued, max 4 visible, max 1 new reply per second) |
+
+## Viewer commands
+
+Every source (simulated chat, SEND AS, Twitch, the bridge) goes through the same pipeline: `SD.processCommand(username, text, { source, isMod, displayName })`. Runner names are case-insensitive and can be shortened (`moss`, `Moss Runner`, `@MossRunner`, the id `r01`); an ambiguous name gets a "Did you mean…?" reply. **Locked** = refused while a race is running (countdown, running or paused).
+
+| Command | Aliases | Cost / effect | Cooldown | Locked | Example reply |
+|---|---|---|---|---|---|
+| `!join` | | +200 SP once; +50 SP daily bonus on your first action each in-game day | none | no | *Welcome to the Spirit Derby, FoxFan! You have 225 Spirit Points. Type !claim to pick a runner… · 🏅 Achievement: First Steps (+25 SP)* |
+| `!claim [runner]` | | Claim a free runner (named or the first free one). One per viewer; claiming another releases yours | 10 s | yes | *FoxFan claimed 🦌 Moss Runner (Late Surger)! Now try !train speed.* |
+| `!create <name>` | | Once every runner has an owner (and **Allow !create** is on): a new runner from a random species, style and ability, stats summing to 200, claimed by you. Names: 3–20 letters, digits, spaces, apostrophes; unique | 10 s | yes | *✨ AcornAndy created 🦉 Pebble Dash, a Hollow Owl Wild Card! SPD 37 STA 37 POW 32 WIS 52 LUK 42 · Ability: Acorn Hoard* |
+| `!train <stat>` · `!train <runner> <stat>` | `!t` | −12 energy, +stat, +5 SP (+15 on a critical), hype +1 (+10). Stats `speed stamina power wisdom luck` or `spd sta pow wis luk` | 10 s | yes | *Moss Runner practiced explosive starts. · Speed +2 · Energy -12 · Hype +1 · +5 SP* |
+| `!rest [runner]` | `!r` | +30 energy, −25 fatigue, hype −5 | 10 s + 3 min per runner | yes | *Moss Runner soaks their hooves in the Moonlit Spring. · Energy +30 · Hype -5 · Feeling Good* |
+| `!cheer [runner]` | `!c` | Hype +3, +2 SP; a named runner gets a tiny pre-race boost (+0.05% per cheer, max 2%); 10 cheers calm a Nervous runner | 30 s | **no** | *The forest hears you! Hype +3 (3/120) · Moss Runner feels the love (1 cheer for the next race) · +2 SP* |
+| `!status` | `!stats` | Your SP, SP rank and runner | none | no | *FoxFan: 261 SP · #1 in SP · 🦌 Moss Runner Lv 1 · SPD 42 STA 42 …* |
+| `!inspect [runner]` | `!i` | Full card: style, owner, stats, energy, condition, mood, record, next-race odds, ability | none | no | *🐇 Glow Wisp · Lv 1 Late Surger · Unclaimed · SPD 52 … · Afterglow: …* |
+| `!race` | | Viewers: status, next field with odds, open bets. **Mods / streamer:** start the race (`!race 2000` picks the distance, `!race status` only looks) | none | — | *No race running. Next up: Race 1/3 · 1200 m · Moss Runner 4.2x, …* |
+| `!event` | | Viewers: today's day event. **Mods:** `!event` rolls a new one, `!event harvest` picks one (locked during races), `!event today` looks | none | mods | *Today (Season 1, Day 1): Harvest Festival — … payouts x1.5.* |
+| `!odds` | | Odds of the next field (or the running race) | none | no | *Next race (Race 1/3, 1200 m): Velvet Comet 2.6x · Thunder Fern 2.9x · …* |
+| `!bet <runner> <amount>` | | Bet 10–250 SP; also `!bet 50 moss`, `!bet moss all`, `!bet 50` (same runner), `!bet`, `!bet cancel`. One open bet each; a new bet refunds the old | 10 s | yes | *💰 FoxFan bets 50 SP on Moss Runner at 4.2x — pays 210 SP if Moss Runner wins!* |
+| `!bets` | | Open bets: count, total, per runner, yours | none | no | *Open bets for the next race: 1 bet · 50 SP · Moss Runner 1 (50 SP) · …* |
+| `!boost <runner>` | | 40 SP: +2.5% for 15 ticks at a random moment of its next race (max 3 per runner) | 10 s | yes | *⚡ FoxFan boosts Moss Runner for its next race! 2 more boosts allowed · 171 SP left* |
+| `!snack <runner>` | | 25 SP: +10 energy (max 2 per runner per day) | 10 s | yes | *🍎 Glow Wisp munches a honey-glazed acorn. Energy +10 (78/100) · 1 snack left today · 146 SP left* |
+| `!sabotage <runner>` | | 60 SP: ×0.96 for 15 ticks in its next race. Backfire chance 15% + Wisdom/200 (max 50%). Not your own; max 2 per target, 4 per race; announced publicly | 10 min | yes | *🪨 Sabotage queued on Moss Runner … (35% with its Wisdom) is decided at the gate!* |
+| `!ribbon <colour>` | | 100 SP cosmetic ribbon ring (`gold`, `teal`, `#ff66aa` …); `!ribbon off` is free | 10 s | yes | *🎀 Moss Runner now wears a teal ribbon! · 71 SP left* |
+| `!hype` | | The meter, tier and next threshold | none | no | *🔥 Hype 4/120 · The forest is calm · next: 25 — The crowd is getting loud!* |
+| `!achievements [viewer]` | `!ach` `!badges` | Count / total and the latest three | none | no | *🏅 FoxFan: 2/25 achievements (+50 SP) · latest: 🏡 Stable Hand, 👣 First Steps* |
+| `!leaderboard [board] [all]` | `!lb` `!top` | Top 3 of `sp` (default), `wins`, `xp`, `part`, `victories`, `hype`; `all` = all-time | none | no | *🏆 Runner wins: 1. Velvet Comet (3) · 2. Moss Runner (2) · …* |
+| `!rank [viewer]` | | Your rank on the SP, victories and hype boards | none | no | *FoxFan: #2 in SP (71) · unranked in victories · #1 in hype (5.2)* |
+| `!help [command]` | `!h` `!commands` | The list, or one command's usage | none | no | *!train <stat> or !train <runner> <stat> … — Train your runner …* |
+
+- The per-viewer cooldown (default 10 s) is **Tuning → User cooldown**. Cooldowns start only after a command succeeds. The streamer's own console (the *Streamer* sender, SEND AS) has no cooldowns and may train any runner.
+- Read-only commands have no cooldown but count toward the participation board at most once every 10 s.
+- **Open training** (default on) lets anyone `!train` / `!rest` any runner by name. This is the "chat overtrains the favourite" story. Turn it off and only owners train their runner.
+- Unknown commands (`!discord`, meant for other bots) get a short reply in the Chat tab but no toast on stream and nothing through the bridge.
 
 ## Spirit Points
 
-Spirit Points are a **fictional** in-game currency. They cannot be bought, sold, transferred out of the game or exchanged for anything real, and nothing in Spirit Derby involves real money. Betting uses SP only.
+Spirit Points (SP) are a **fictional** in-game currency. They cannot be bought, sold, transferred or exchanged for anything real. Nothing in Spirit Derby involves real money.
 
-- **Earning (faucets):** joining (+200 once), the daily bonus (+50 on your first action each in-game day), training (+5, +15 on a critical session), cheering (+2), race payouts for owners (50 / 35 / 25 / 15 / 15 / 8 … by place, ×1.5 when the Forest Awakened) and half of that for backers, winning bets, and achievements (+25 to +100 each). The Harvest Festival day event multiplies payouts by 1.5.
-- **Spending (sinks):** bets (10–250), `!boost` 40, `!sabotage` 60, `!snack` 25, `!ribbon` 100. Nothing ever goes below 0.
-- **Betting:** the odds come from the same rating the race engine's odds use (stats, condition, energy, mood, style, stamina for the distance, ability, queued cheers), turned into a win probability with a softmax and a 15% house edge: `odds = 0.85 / p`, clamped to 1.3×–25×. Your bet keeps the odds shown when you placed it. When the race finishes, a winning bet pays `floor(amount × odds)` (the stake is included), a losing bet loses its stake. One open bet per viewer; placing another refunds the first. Open bets are refunded when a race is cancelled, the day advances or is reset, the season ends, the page closed mid-race, or your runner did not make the field at the gate.
-- Refunds give the SP back without counting as "SP earned", so they don't inflate the SP board or the season MVP.
+- **Faucets:** join +200 · daily first action +50 · train +5 (critical +15) · cheer +2 · owner race payout by place 50 / 35 / 25 / 15 / 15 / 8 / 8 / 8 · **backers** (viewers who mostly trained, rested, cheered, boosted or snacked a runner they do not own since its last race) get half · winning bets · achievements +25 to +100. Payouts are ×1.5 when the Forest Awakened and ×1.5 on the Harvest Festival day.
+- **Sinks:** bets 10–250 · `!boost` 40 · `!snack` 25 · `!sabotage` 60 · `!ribbon` 100. Balances never go below 0.
+- **Betting:** odds come from the race engine's own rating (stats, condition, energy, mood, style, stamina for the distance, ability, queued cheers) through a softmax with a 15% house edge: `odds = 0.85 / p`, clamped to 1.3×–25×. A bet keeps the odds shown when it was placed and pays `floor(stake × odds)` (stake included). Open bets are **refunded** when a race is cancelled or interrupted, the day advances or is reset, the season ends, or the runner does not make the field. Refunds reverse the spend, so they never count as "SP earned".
+- **New season:** SP restarts at 200 + 10% of your balance.
 
-## Seasons & achievements
+## Training, energy, condition and mood
 
-A day has 3 races (`SEASON.RACES_PER_DAY`); with *Auto-advance day* on, the day moves on after the last race (or use admin **NEXT DAY**): energy is restored, open bets are refunded, snacks reset and a new day event is rolled. A season lasts 7 days (`SEASON.DAYS`). It ends automatically after the last race of day 7 (or on the 7th **NEXT DAY**, or admin **RESET SEASON**) and a **season summary** appears (after the race results, if a race ended it):
+- **Energy** (0–100, +2 per level) is spent by training (−12) and racing (−25), and comes back by `!rest` (+30), `!snack` (+10), slowly over time (+0.75 per minute) and fully each new day. Below 15 energy a runner only races if nobody else can; below half energy its race-day stats shrink (to ×0.92 at worst).
+- **Fatigue** is hidden (the streamer sees it in the debug table). Training adds 5 (10 when energy is below 30, +8 on a failure), racing adds 15, resting removes 25, a new day removes 40. It sets the **condition** chat sees: **Excellent** 0–15 (race stats ×1.03, training ×1.15) · **Good** 16–35 (×1.01, ×1.05) · **Normal** 36–60 · **Tired** 61–80 (×0.96, ×0.85, more failures) · **Exhausted** 81+ (×0.90, ×0.60). Twenty trainings without rest leave a runner Exhausted for its next race; that is the intended story.
+- **Training:** a critical session (8% + Luck and Wisdom bonuses, max 35%) doubles the gain; a failure (5%, more when low on energy or tired) gains nothing and may make the runner Nervous. Gains shrink near the stat cap (60 + 4 × level).
+- **Mood** is a small nudge (at most ±0.6% over a race): 😤 Determined (3 trainings of one stat, or 4th–6th) · 😊 Happy (podium, rest) · 😰 Nervous (failed training, 7th–8th; 10 cheers or a crit cure it) · 🔥 Fired Up (a crit, or hype ≥ 50 at the gate) · 😴 Sleepy (resting while tired, 30 min idle) · 🌀 Chaotic (hype ≥ 100, a bad mushroom). Neither mood nor condition can outweigh a real stat edge.
+- **Progression:** races give XP by place (100 / 70 / 50 / 35 …, +20 for taking part, ×1.1–1.3 for longer races, ×1.25 for below-average-level runners). Level *L* needs 60 + 20 × (*L* − 1) XP, up to level 20. Each level adds +1 to every stat, +4 to the cap, +2 max energy, stronger abilities and +8 hype.
 
-- **Champion:** the runner with the most wins (then most season XP), with its owner.
-- **MVP:** the viewer who earned the most SP this season.
-- **Biggest upset:** the race won at the longest odds (a true upset at 10× or more).
-- **Top hype contributor**, **achievements unlocked** this season, and a per-runner table (wins, races, podiums, XP).
+## Runners and abilities
 
-The summary is archived in the season history (Boards tab → *Season history*). Then the new season starts: every runner returns to level 1 with its base stats plus 10% of what it gained (`SEASON.STAT_CARRY`) and no owner; viewers keep their profiles and achievements, their season stats roll into the all-time boards, and SP restarts at 200 + 10% of their balance (open bets and paid boosts / sabotages that never ran are refunded first). The header's SEASON number pops when it changes.
+Stats are Speed / Stamina / Power / Wisdom / Luck (each sums to 200 at level 1).
 
-**Achievements** (25 in `js/data.js`, each unlocked once per viewer, kept across seasons, +25 to +100 SP): First Steps (join), Stable Hand (first claim), Trainer (10 trainings), Critical Hit, Overtrainer (train a runner into Exhausted), Well Rested (5 rests), Cheerleader (25 cheers), Hype Train (help push hype past 50), Forest Awakened (help push it to 100), High Roller (a 200+ SP bet), Sharp Eye (win a bet at 5×+), Longshot (win a bet at 10×+), Owner's Pride (your runner wins), Podium Regular (3 podiums), Photo Finish, Comeback Kid (your runner wins from last place at the final turn), Saboteur, Karma (your sabotage backfires), Season Champion (own the champion when the season ends), Cryptid Whisperer, Marathon Mind, Snack Dealer, Double Digits, Spirit Hoarder and Creator. "Helped push hype" means you added hype within the last 3 minutes before the threshold was crossed. Unlocks appear in the command reply, as a gold toast, in chat, and in the race results when a race caused them; `!achievements` lists yours.
+| Runner | Style | SPD / STA / POW / WIS / LUK | Ability |
+|---|---|---|---|
+| 🦌 **Moss Runner** | Late Surger | 40 / 42 / 40 / 40 / 38 | **Forest's Favor**: a Luck-scaled chance (at least 40%) of a +18% burst at the final stretch; guaranteed when 3rd–5th |
+| 🐎 **Moonhoof** | Pace Chaser | 36 / 58 / 36 / 42 / 28 | **Moonlight Pace**: mid race stamina drain ×0.80 and +2% speed |
+| 🐗 **Thunder Fern** | Front Runner | 42 / 36 / 58 / 34 / 30 | **Thunder Step**: overtaking mid race or in the final turn gives +30% for 3 ticks (max 3) |
+| 🦊 **Ember Tail** | Front Runner | 60 / 24 / 44 / 32 / 40 | **Second Wind**: once, below 12% stamina, restore 15% and ignore fatigue for 10 ticks |
+| 🐈 **Velvet Comet** | Late Surger | 56 / 38 / 34 / 42 / 30 | **Comet Tail**: final stretch +9% for 12 ticks from 2nd–5th, +6% from further back |
+| 🦢 **Misty Gale** | Pace Chaser | 38 / 42 / 34 / 58 / 28 | **Reading the Wind**: Wisdom roll at the final turn for +5% and cheaper stamina; bad events find her half as often |
+| 🐿️ **Copper Bloom** | Wild Card | 38 / 36 / 36 / 30 / 60 | **Acorn Hoard**: crits ×2.5 and stronger, good events ×1.5, a guaranteed final-stretch crit |
+| 🦉 **Night Lantern** | Wild Card | 32 / 50 / 30 / 50 / 38 | **Long Night**: final-stretch speed = stamina left × 14%; bigger pool at 2000 m+ |
+| 🦝 **Bramble Jack** | Wild Card | 40 / 34 / 46 / 26 / 54 | **Hedge Hop**: shrugs off bad events (50% + Luck/200), bounces them onto the runner ahead and springs forward |
+| 🐇 **Glow Wisp** | Late Surger | 52 / 30 / 34 / 46 / 38 | **Afterglow**: final stretch +2% per runner ahead (max +10%) for the rest of the race |
 
-## Progression
+**Running styles:** *Front Runner* blasts out of the gate and tries to hold on (burns stamina) · *Pace Chaser* sits just off the lead at an even pace · *Late Surger* saves energy, then explodes down the final stretch · *Wild Card* rolls a hidden "wild roll" each race (great, steady or collapse; Luck helps) and swings more.
 
-Runners earn XP from every race by finishing place (1st 100, 2nd 70, 3rd 50, 4th 35, then 25 / 20 / 15 / 12), plus 20 for taking part, times a distance bonus (1200 m ×1, 1600 m ×1.1, 2000 m ×1.2, 2400 m ×1.3) and ×1.25 for runners below the roster's average level. Training adds a little too (+3 XP, +8 on a critical session). Level *L* needs 60 + 20 × (*L* − 1) XP to reach the next one (60, 80, 100 …), up to level 20. Each level raises every stat by 1, the stat cap by 4 (60 + 4 × level), max energy by 2 and training gains, strengthens the runner's ability, and gives the crowd +8 hype. A gold ring flashes on the runner's card and a toast announces it. At the end of a season runners return to level 1 (keeping 10% of the stats they gained).
+**Created and spawned runners** (`!create`, admin SPAWN RUNNER) come from 12 species templates (🦊 Fox Spirit, 🐇 Moon Hare, 🦌 Forest Stag, 🦉 Hollow Owl, 🐸 Moss Toad, 🦋 Lantern Moth, 🐺 Grey Wolf, 🦎 Ember Salamander, 🐢 Elder Tortoise, 🐈‍⬛ Shadow Lynx, 🦔 Bramble Hedgehog, 🦇 Dusk Bat). Each has a stat bias and the styles it runs; the ability is drawn from the catalog abilities that suit the style. The paddock holds at most `CONFIG.RUNNERS.MAX_ACTIVE` (24) runners.
 
-## Leaderboards
+**Adding a runner:** append an object to `ROSTER` in `js/data.js`:
 
-The **Boards** tab in the sidebar shows six independent boards (runner wins, runner XP, Spirit Points, participation, race victories, hype) with a Season / All-time toggle; chat reaches the same numbers with `!lb` and `!rank`. Participation counts commands + trains × 2 + cheers + rests + bets and never SP, so no single stat decides every board. Ties share a rank. The paddock shows the season's leading runner ("👑 Leader: …") once someone has won a race.
-
-## Balance & tuning
-
-Races are simulated up front from one seed (the same inputs always give the same race), then played back. What decides a race, roughly in order:
-
-- **Stats** (`SD.CONFIG.RACE.WEIGHTS`, `PERF_SLOPE` 0.5): each phase weighs the five stats differently; 10 points of phase-weighted stats = 5% speed. A +20 Speed runner wins about a third of races against seven equal rivals, +8 in every stat (a level-5-ish runner) about 37%. Stamina also sets the stamina pool (`STAMINA`), which only bites in long races: at 2400 m low-Stamina runners fade and can hit the wall.
-- **Luck of the day**: every runner rolls a hidden per-race form (`FORM.AMP`, about ±3%) plus in-race swings that last several seconds (`NOISE`); Wisdom calms both. The best-form runner still only wins ~40% of races between identical clones.
-- **Condition** (hidden fatigue) scales a runner's stats on race day: Excellent 103%, Good 101%, Normal 100%, Tired 96%, Exhausted 90% (`CONDITION.BANDS`); energy below half trims stats down to 92%. **Mood** is a nudge of at most ±0.6% over a race (`SD.DATA.MOODS`). Neither can outweigh a real stat edge.
-- **Style, ability, events, chat**: running style changes the pace by phase, abilities give short bursts, race events and chat boosts / sabotages / cheers add drama.
-
-Admin drawer → **Tuning**: *Event frequency* (none / low / normal / high / chaos: how often random race events happen, ×0 / ×0.5 / ×1 / ×1.6 / ×2.5, max 6 per race or 12 on chaos), *Hype multiplier* (scales every hype gain), *Playback speed* and *Final-stretch speedup* (presentation only: a 1200 m race plays in about 20 s, 2400 m in about 40 s), *User cooldown*. Every other number lives in `js/config.js` (`SD.CONFIG`), with ability magnitudes and moods in `js/data.js`. The betting odds come from a rating (stats, race-day modifiers, style, expected stamina left, ability) through a softmax (`RACE.ODDS`), fitted so implied and actual win rates agree within a couple of points.
-
-Checking a change:
-
-```
-node tools/run-tests.js                          # everything (balance, race systems, parser, progression, integration, community)
-node tools/community-test.js --transcript        # M5: betting, chat effects, achievements, seasons (+ a readable chat transcript)
-node tools/balance-test.js --matrix              # roster win rates per distance, style clones, odds calibration, sensitivity
-node tools/balance-test.js --distance 2400 --races 3000
-node tools/balance-test.js --streamday           # 20 trains without rest -> Exhausted -> race penalty
-node tools/balance-test.js --dump 12345          # one full race record, tick by tick
-node tools/race-test.js --verbose                # abilities, events, hype tiers, chat effects, replay, day events
+```js
+{ key: 'pebbleDash', name: 'Pebble Dash', emoji: '\u{1F994}', badgeColor: '#8a6a4a', species: 'Bramble Hedgehog',
+  personality: 'One line of character.', description: 'Two sentences for the card.',
+  style: 'paceChaser', stats: { speed: 40, stamina: 42, power: 38, wisdom: 40, luck: 40 }, abilityId: 'moonlightPace',
+  avatarUrl: null /* optional image instead of the emoji */ }
 ```
 
-## Twitch and Mix It Up integration
+Keep the stats summing to 200 (each at most 64) and reuse an ability id from `ABILITIES` (a new mechanic needs engine code in `js/race.js`). New games spawn it, and **existing saves pick it up on load**: `SD.persistence.load()` reconciles the roster by `key` without duplicating anyone, and a toast announces it.
 
-See [docs/INTEGRATION.md](docs/INTEGRATION.md) for connecting read-only Twitch chat (no token needed), the local WebSocket bridge protocol for Mix It Up / Streamer.bot, OBS browser-source setup and troubleshooting.
+## Races
+
+- **Distances:** 1200, 1600, 2000 and 2400 m (admin **Distance**, or `!race 2000`). 4–8 runners from the drawer (2–10 through `SD.game.updateSettings`). Owned runners get priority for the field; then the most rested. Lanes are drawn at random, and the paddock shows the exact field before the gate.
+- **Phases** (by each runner's own progress): Start (<5%) · Early Pace (<30%) · Mid Race (<65%) · Final Turn (<85%) · Final Stretch · Finish. Each phase weighs the stats differently: Power at the start, Speed and Wisdom mid race, Speed and Power in the stretch. Stamina is a pool that only bites in long races.
+- **What decides a race**, roughly in order: stats (10 phase-weighted points ≈ 5% speed), a hidden per-race form and in-race swings (Wisdom calms both), condition and energy, style and ability, then events and chat effects. The best-form identical clone still only wins about 40% of the time.
+- **Race events** (16, max 6 per race, 12 on *chaos*; no runner gets two bad ones within 30 ticks): Sudden Rain · Forest Shortcut · Loose Shoe · Cryptid Crossing · Audience Frenzy · Butterfly Distraction · Snack Break · Unknown Creature Appears · Mysterious Fog (hides positions) · Suspicious Mushroom · Forest Wind (hits the leader) · Lucky Acorn · Firefly Trail (lifts the last runner) · Tangled Vines · Owl's Advice · Puddle Jump.
+- **Day events** (one per day, header badge): Clear Skies · Fog of the Hollow (Wisdom ×1.5) · Harvest Festival (payouts ×1.5) · Cryptid Season (events ×1.5) · Still Morning (steadier form) · Wisp Migration (crits ×1.5) · Moonlit Glade (bigger stamina pools).
+- **Flags:** a *photo finish* (winning margin under 0.4 m) and an *upset* (winner at 10× or more) each add hype and get a banner.
+- Playback is presentation only: speed ramps up by phase, and the final stretch plays faster (`finalStretchSpeedup`). With the default settings a race lasts roughly 20 s (1200 m) to 40 s (2400 m) including the countdown.
+
+## Hype
+
+The crowd meter runs from 0 to 120. Cheers +3, training +1 (a crit +10), bets +1, level-ups +8, a backfired sabotage +5, and each race moment (finish, photo finish, upset, Forest Awakened) +15; resting costs 5. It is scaled by **Tuning → Hype multiplier**. After each race it keeps 40%; after 5 idle minutes it loses 1 every 2 minutes.
+
+| Threshold | Banner | Effect |
+|---|---|---|
+| 25 | *The crowd is getting loud!* | wilder in-race swings (×1.10) |
+| 50 | *CHAT HAS ENTERED FERAL MODE.* | race events ×1.5, crits ×1.25, training gains ×1.05, runners may start Fired Up |
+| 100 | *THE FOREST HAS AWAKENED.* | at the final turn: +15% stamina and +4% speed for everyone, the last runner surges, payouts ×1.5; runners may start Chaotic; training crits +5% |
+
+## Seasons and achievements
+
+A day has 3 races and a season has 7 days. With **Auto-advance day** on, the day moves on after the last race: energy is restored, bets are refunded, snacks reset and a new day event rolls. With it off, press **NEXT DAY** (races stop after the third). After the last race of day 7 (or **RESET SEASON**) the **season summary** shows the champion runner (most wins, then XP), the MVP (most SP earned), the biggest upset, the top hype contributor, achievements and a standings table, and archives it under Boards → *Season history*. Then runners return to level 1 with their base stats + 10% of what they gained, and owners are cleared. Viewers keep their profiles and achievements, and their season stats roll into the all-time boards.
+
+**25 achievements** (+25 to +100 SP, once per viewer, kept across seasons): 👣 First Steps · 🏡 Stable Hand · 🏋 Trainer · ⚡ Critical Hit · 💤 Overtrainer · 🛌 Well Rested · 📣 Cheerleader · 🚂 Hype Train · 🌳 Forest Awakened · 🎲 High Roller · 👁 Sharp Eye · 🎯 Longshot · 🏆 Owner's Pride · 🥉 Podium Regular · 📸 Photo Finish · 🔄 Comeback Kid · 🪨 Saboteur · 🪃 Karma · 👑 Season Champion · 👾 Cryptid Whisperer · 🏃 Marathon Mind · 🍎 Snack Dealer · 🔟 Double Digits · 💰 Spirit Hoarder · ✨ Creator. They appear in the command reply, as a gold toast, in chat and in the race results.
+
+**Leaderboards** (Boards tab, `!lb`, `!rank`): runner wins, runner XP, Spirit Points, participation (commands + trainings × 2 + cheers + rests + bets), race victories (races won by the runner you own or back) and hype added. Each has a season and an all-time view, and ties share a rank.
+
+## Streamer guide
+
+**Streamer Controls** (⚙ or **`**) slide over the sidebar. All actions go through `SD.game`, and dangerous ones need a second click.
+
+| Section | Controls |
+|---|---|
+| 🏁 Race | **START RACE** · **END RACE** (plays the result out instantly) · **PAUSE / RESUME** · distance · number of runners |
+| 🌲 World | day event picker + **TRIGGER EVENT** · **ADD HYPE +25** · name + **SPAWN RUNNER** · **NEXT DAY** · **RESET DAY** · **RESET SEASON** (summary + rollover) · **RESET ALL** (new game) |
+| 🎛 Tuning | event frequency (none / low / normal / high / chaos) · hype multiplier · playback speed · final-stretch speedup · user cooldown · open training · allow `!create` · auto-advance day |
+| 🐞 Debug | debug mode (hidden events such as wild rolls in the ticker, a HUD on the track with tick / fps / seed / hash / wild rolls, a perf + fatigue table, error toasts) · **seed override** (every race uses it while debug is on; the paddock matches) · **REPLAY LAST RACE** (re-simulates and compares hashes; races from an older engine are flagged as such) · **COPY LAST RACE JSON** for bug reports |
+| 💾 Save | **EXPORT JSON** / **IMPORT JSON** · `autosave ● 2 s ago · 41 KB` with a *SAVED ✓* flash · counts and storage type · **Save now** |
+| 💬 Send as | run any command as the streamer, a mod or a recent viewer (no cooldowns) |
+| 📡 Twitch & bridge | read-only Twitch chat and the local bridge: connect, auto-connect, live status |
+
+The drawer footer shows the build: `Spirit Derby v1.0.0 · save schema v2 · race engine v2`.
+
+**Keyboard:** **`** controls · **O** overlay mode · **Space** pause / resume · **Esc** closes the results, the season summary or the drawer.
+
+**Overlay mode** (`?overlay=1` or **O**) hides the sidebar, the drawer, the roster's TRAIN / REST controls, the streamer hint and the debug HUD, widens the track and shows command replies as toasts: at most 4 on screen, 1 new reply per second, and the oldest waiting reply is dropped during a raid. For OBS, add a Browser Source at 1920×1080 with `file:///…/index.html?overlay=1&twitch=yourchannel`, and turn **Shutdown source when not visible** off. [docs/INTEGRATION.md](docs/INTEGRATION.md) covers two-instance setups.
+
+**Saves:** the game lives in this browser's `localStorage`: `spiritderby.save` (the game), `spiritderby.backup` (the previous save, written before an upgrade or import) and `spiritderby.ui` (overlay, drawer, tab, chat sender and board choices; RESET ALL keeps them). Saves from any earlier version load and upgrade automatically. A race interrupted by closing the page is cancelled on the next load, and its bets are refunded. Use EXPORT / IMPORT to move a game between browsers or into OBS.
+
+**Tuning beyond the sliders:** every number lives in `SD.CONFIG` (`js/config.js`). The ones worth touching first:
+
+| Constant | Default | Meaning |
+|---|---|---|
+| `SEASON.RACES_PER_DAY` / `SEASON.DAYS` | 3 / 7 | length of a day and a season |
+| `ECONOMY.JOIN_SP`, `DAILY_SP`, `BET_MIN` / `BET_MAX`, `BOOST_COST`, `SNACK_COST`, `SABOTAGE_COST`, `RIBBON_COST` | 200, 50, 10 / 250, 40, 25, 60, 100 | the SP economy |
+| `COOLDOWNS.USER_S` / `CHEER_S` / `SABOTAGE_S` | 10 / 30 / 600 | chat cooldowns (seconds) |
+| `HYPE.GAINS`, `HYPE.AFTER_RACE_KEEP` | see file, 0.4 | hype per action, post-race decay |
+| `RUNNERS.MAX_ACTIVE`, `CREATE_NAME_MIN` / `MAX` | 24, 3 / 20 | roster cap, `!create` names |
+| `UI.TOAST_MAX`, `REPLY_TOASTS_PER_S`, `REPLY_QUEUE_MAX` | 4, 1, 6 | overlay toast flood control |
+| `PLAYBACK.TPS`, `COUNTDOWN_S` | per phase, 3 | how fast races play back |
+| `RACE.EVENTS.SLIDER`, `RACE.EVENTS.MAX` | ×0 … ×2.5, 6 | event frequency presets |
+| `HISTORY_FULL_LOGS`, `HISTORY_MAX` | 10, 200 | races kept with tick data / at all |
+
+Race balance lives in `RACE.*`, `STYLES`, `CONDITION.BANDS` and the ability magnitudes in `js/data.js`. Check any change with the balance harness (below).
+
+**Console helpers** (browser devtools):
+
+```js
+SD.debug.help()                       // this list
+SD.debug.state()                      // the live game state (read-only please)
+SD.debug.lastRace()                   // the race on the track, or the last finished one
+SD.debug.lastRaceJSON(true)           // the same as pretty JSON (what COPY LAST RACE JSON copies)
+SD.debug.simulate(12345, 2400)        // simulate the next field with a seed + distance, without changing the game
+SD.debug.replay()                     // re-simulate the last race and compare hashes
+SD.debug.bus.wildcard(true, /bet|race:finished/)   // log bus events; wildcard(false) stops
+SD.processCommand('FoxFan', '!join', { source: 'sim' })
+```
+
+## Twitch and Mix It Up
+
+Both are optional and off by default. **Read-only Twitch chat** connects anonymously (no token, no login) and feeds `!commands` into the game. The **local WebSocket bridge** lets Mix It Up, Streamer.bot or your own script send chat in and post the game's replies back to Twitch. Mods are recognised from Twitch badges. Setup, frame formats, OBS and troubleshooting: **[docs/INTEGRATION.md](docs/INTEGRATION.md)**.
+
+## Architecture
+
+Classic `<script>` files on one `globalThis.SD` namespace (no modules, so it runs from `file://`). The core (`js/*.js`) is DOM-free and loads unchanged in Node for tests. It has one JSON-serialisable state, `SD.state.mutate()` for every change, a synchronous event bus and a deterministic race engine (all randomness from one seed, so a race replays to the same hash). The UI (`js/ui/*.js`) renders from the state and bus events. Twitch and the bridge are input adapters that only call `SD.processCommand`. The full API contract, load order and per-milestone notes are in **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
+
+## Testing
+
+`node tools/run-tests.js` runs every suite as a child process and exits non-zero on any failure (`--verbose` prints every assertion).
+
+| Suite | File | Covers |
+|---|---|---|
+| balance | `balance-test.js` | determinism, no NaN, win-rate bands per runner / style / distance, odds calibration, stat / condition / mood sensitivity |
+| race | `race-test.js` | abilities, the 16 events, hype tiers, chat effects in races, photo finish / upset, replay, day events, playback length |
+| parser | `parser-test.js` | command parsing, aliases, the pipeline (permissions, race lock, cooldowns), players |
+| progression | `progression-test.js` | XP / level-ups, leaderboards, `!lb` / `!rank` |
+| integration | `integration-test.js` | Twitch IRC parsing and adapter, the bridge (no network) |
+| community | `community-test.js` | betting, boost / snack / sabotage / ribbon, mod commands, achievements, seasons |
+| persistence | `persistence-test.js` | an M1 save (`tools/fixtures/save-m1.json`) migrating and playing on, normalize, roster reconciliation, interrupted races, backups, history trimming, UI prefs |
+| runners | `runners-test.js` | `!create` rules and replies, SPAWN RUNNER, the runner cap, `SD.debug` |
+| fuzz | `fuzz-test.js` | 12 seeded viewers spamming every command (hostile arguments, spam bursts, mid-race attempts, non-mod mod commands, reloads) over 3 full seasons, with invariants checked after every command and race |
+
+Useful flags:
+
+```
+node tools/balance-test.js --matrix                # win rates for every runner at every distance
+node tools/balance-test.js --distance 2400 --races 3000 --events chaos
+node tools/balance-test.js --streamday             # 20 trainings without rest -> Exhausted -> race penalty
+node tools/balance-test.js --dump 12345            # one full race record, tick by tick
+node tools/community-test.js --transcript          # a readable chat transcript of a scripted stream
+node tools/runners-test.js --transcript            # the !create conversation (success and every refusal)
+node tools/fuzz-test.js --seed 7 --seasons 3       # another fuzz run (prints a command-outcome histogram)
+```
+
+## Project structure
+
+```
+index.html              page + script load order (classic scripts, no build)
+css/                    tokens.css (palette, type, keyframes) · layout.css (grid, overlay, drawer) · track.css · panels.css
+js/                     core, DOM-free (loads in Node)
+  namespace.js config.js rng.js data.js bus.js      SD, SD.CONFIG, seeded rng, catalogs, event bus
+  state.js persistence.js                            the game state, save / load / migrate / export
+  runners.js training.js events.js race.js hype.js   runners, training, events, the race engine, hype
+  players.js betting.js achievements.js leaderboards.js seasons.js
+  game.js                                            the director (races, days, settings)
+  commands.js                                        the chat command pipeline (SD.processCommand)
+  debug.js                                           SD.debug console helpers
+  ui/                   browser panels: dom, playback, header, track, results, season, roster, chat, leaderboards, eventlog, admin
+  integrations/         twitch.js (read-only IRC), bridge.js (local WebSocket relay)
+  main.js               boot
+tools/                  load-core.js · run-tests.js · *-test.js suites · serve.js · fixtures/save-m1.json
+docs/                   ARCHITECTURE.md (API contract) · INTEGRATION.md (Twitch, Mix It Up, OBS)
+```
+
+## Roadmap / ideas
+
+- Twitch write-back through a bot token (documented in INTEGRATION.md, deliberately not built).
+- Runner art: `avatarUrl` per runner is already supported; a sprite sheet per species would be next.
+- Channel-point redemptions through the bridge (for example a free boost).
+- Team events and relay races; rival pairs with their own banter; retirement and a hall of fame.
+- A second track layout per distance and weather that lasts a whole day.
+- Localisation: every reply is one string in `js/commands.js` and `js/data.js`.
+
+## Licence
+
+MIT, see [LICENSE](LICENSE). Copyright (c) 2026 Spirit Derby contributors. Spirit Points are fictional and have no monetary value.

@@ -247,6 +247,10 @@ body.sd-overlay .toasts {
 body.sd-overlay .hdr-actions { opacity: 0; transition: opacity 0.2s; }
 body.sd-overlay .hdr-actions:hover,
 body.sd-overlay .hdr-actions:focus-within { opacity: 1; }
+/* M6: nothing streamer-only on stream: the roster cards' TRAIN / REST row and the paddock's
+   "open controls" hint are hidden (viewers use chat commands; press O to leave overlay mode). */
+body.sd-overlay .rcard__ctrl,
+body.sd-overlay .paddock__hint-admin { display: none; }
 
 /* =====================================================================
    RESPONSIVE FALLBACKS (designed for 1920×1080; must not break at 1280)

@@ -3,6 +3,8 @@
  * fog, finish flash, photo-finish/winner banners, and the paddock (idle) view.
  * Lanes are built once on race:started; race:frame applies targeted transform/width/text
  * updates only. Panel contract: SD.ui.track = { init(rootEl), render(state), destroy() }.
+ * M6: a debug HUD (settings.debug, hidden in overlay mode) shows tick / phase / fps / frame cost /
+ * seed / hash and every Wild Card's hidden wild roll; long runner names get a title tooltip.
  */
 (function (SD) {
   'use strict';
@@ -62,6 +64,13 @@
     // idle
     lastPaddock: '',
     lastIdleTicker: '',
+    // debug HUD (M6)
+    hud: null,
+    hudAt: 0,
+    hudText: '',
+    fps: 0,
+    frameMs: 0,
+    lastFrameAt: 0,
 
     // ================================================================ lifecycle
     init: function (root) {
@@ -85,6 +94,10 @@
       on('ui:resultsClosed', function () { self.releaseFinal(); });
       ['STATE_CHANGED', 'STATE_LOADED', 'SETTINGS_CHANGED', 'EVENT_DAY', 'SEASON_DAY_ADVANCED', 'LOG_ENTRY']
         .forEach(function (k) { on(k, function () { dom.schedule(self); }); });
+
+      this.hud = dom.el('div', { class: 'track__hud', 'aria-hidden': 'true', hidden: true });
+      root.appendChild(this.hud);
+      on('SETTINGS_CHANGED', function () { self.renderHud(true); });
 
       this.onResize = function () { self.measure(true); };
       window.addEventListener('resize', this.onResize);
@@ -111,8 +124,10 @@
       if (cr && cr.record) {
         if (!this.record || this.record.id !== cr.record.id) this.build(cr.record);
         this.syncStatus(cr.status);
+        this.renderHud(false);
         return;
       }
+      this.renderHud(false);
       if (this.record && this.holdFinal) return;     // keep the final positions behind the results modal
       if (this.record) this.clearRace();
       this.renderPaddock(state);
@@ -145,6 +160,11 @@
       this.progressText = '';
       this.lastFrame = null;
       this.lastIdleTicker = '';
+      this.fps = 0;
+      this.frameMs = 0;
+      this.lastFrameAt = 0;
+      this.hudText = '';
+      if (this.hud) this.hud.hidden = true;
       clearTimeout(this.cdTimer);
       const r = this.refs;
       this.root.classList.remove('track--racing', 'track--running', 'track--paused', 'track--final', 'track--finished', 'track--awakened');
@@ -206,7 +226,7 @@
                 '<span class="lane__rank">' + lane + '</span>' +
                 dom.badgeHTML(e) +
                 '<div class="lane__text">' +
-                  '<div class="lane__name">' + esc(e.name) + '</div>' +
+                  '<div class="lane__name" title="' + esc(e.name) + '">' + esc(e.name) + '</div>' +
                   '<div class="lane__owner' + (owner ? '' : ' lane__owner--none') + '">' + ownerLine + '</div>' +
                   '<div class="stamina" title="Stamina"><i></i></div>' +
                 '</div>' +
@@ -244,7 +264,7 @@
           const lane = e.lane || i + 1;
           return '<li class="pos-item" data-id="' + esc(e.runnerId) + '" style="' + esc(dom.runnerVars(e)) + '--r:' + lane + '">' +
             '<span class="pos-item__rank">' + lane + '</span>' + dom.badgeHTML(e, 'badge--sm') +
-            '<span class="pos-item__name">' + esc(e.name) + '</span><span class="pos-item__gap">—</span></li>';
+            '<span class="pos-item__name" title="' + esc(e.name) + '">' + esc(e.name) + '</span><span class="pos-item__gap">—</span></li>';
         }).join('');
         const items = this.posItems;
         Array.prototype.slice.call(r.posList.querySelectorAll('.pos-item')).forEach(function (node) {
@@ -283,6 +303,7 @@
     onFrame: function (f) {
       if (!this.record || !f || !f.runners) return;
       if (f.recordId != null && f.recordId !== this.record.id) return;
+      const t0 = nowMs();
       this.lastFrame = f;
       if (!this.travel) this.measure(false);
       if (this.pausedFlag && f.paused === false) this.setPaused(false);
@@ -347,6 +368,43 @@
         this.allDone = true;
         this.root.classList.remove('track--running');
       }
+      // debug HUD: frame rate + the cost of this handler (EMA), text refreshed 4x per second
+      const t1 = nowMs();
+      if (this.lastFrameAt) {
+        const dt = t1 - this.lastFrameAt;
+        if (dt > 0 && dt < 1000) this.fps = this.fps ? this.fps * 0.9 + (1000 / dt) * 0.1 : 1000 / dt;
+      }
+      this.lastFrameAt = t1;
+      this.frameMs = this.frameMs ? this.frameMs * 0.9 + (t1 - t0) * 0.1 : (t1 - t0);
+      if (t1 - this.hudAt > 250) this.renderHud(false);
+    },
+
+    // ================================================================ debug HUD (settings.debug)
+    renderHud: function (force) {
+      const hud = this.hud;
+      if (!hud) return;
+      const on = dom.debugOn() && !!this.record;
+      if (hud.hidden === on) hud.hidden = !on;
+      if (!on) return;
+      this.hudAt = nowMs();
+      const rec = this.record;
+      const f = this.lastFrame;
+      const tickNow = f && f.tick != null ? f.tick : 0;
+      const total = rec.totalTicks || (rec.ticks ? rec.ticks.length - 1 : 0);
+      const pb = SD.playback;
+      const mode = pb && pb.getMode ? pb.getMode() : '';
+      const wild = (rec.entrants || []).filter(function (e) { return e.wildRoll; }).map(function (e) {
+        const w = e.wildRoll;
+        return e.name + ' ' + (w.kind || '?') + ' ×' + (Number(w.vel) || 1).toFixed(3);
+      });
+      const lines = [
+        'tick ' + tickNow + '/' + total + ' · ' + ((f && f.phase) || 'START') + (mode ? ' · ' + mode : '') + (f && f.paused ? ' · paused' : ''),
+        (this.fps ? Math.round(this.fps) + ' fps · ' : '') + this.frameMs.toFixed(2) + ' ms/frame · seed ' + rec.seed + ' · hash ' + (rec.hash || '—') +
+          ' · engine v' + (rec.engineVersion || 1),
+        wild.length ? 'wild: ' + wild.join(' · ') : 'wild: no Wild Card in this race'
+      ];
+      const text = lines.join('\n');
+      if (force || text !== this.hudText) { hud.textContent = text; this.hudText = text; }
     },
 
     onTick: function (p) {
@@ -696,7 +754,7 @@
         return '<div class="paddock__runner' + (chips.length ? ' paddock__runner--fx' : '') + '" style="' + esc(dom.runnerVars(r)) + '">' +
           dom.badgeHTML(r, 'badge--lg') +
           '<div style="min-width:0">' +
-            '<div class="paddock__name">' + esc(r.name) + '</div>' +
+            '<div class="paddock__name" title="' + esc(r.name) + '">' + esc(r.name) + '</div>' +
             '<div class="paddock__meta">' + esc(style.name) + ' · <span class="cond cond--' + cond + '">' + esc(r.condition || 'Normal') + '</span>' +
               ' · ⚡ ' + energy + '/' + maxE + (r.owner ? ' · 👤 ' + esc(r.owner) : '') + '</div>' +
             (chips.length ? '<div class="paddock__fx">' + chips.join('') + '</div>' : '') +
@@ -712,9 +770,9 @@
           '<span class="paddock__status">' + esc(status) + '</span>' +
         '</div>' +
         (cards ? '<div class="paddock__grid">' + cards + '</div>' : '<p class="paddock__empty">No runners are ready to race.</p>') +
-        '<p class="paddock__hint">Streamer: open controls with <kbd>`</kbd> or ⚙ → <b>START RACE</b>' +
-          (SD.commands ? ' · Chat: <b>!join</b> · <b>!claim</b> · <b>!train</b> · <b>!cheer</b>' +
-            (SD.betting ? ' · <b>!bet moss 50</b> · <b>!boost</b> · <b>!odds</b>' : '') : ' · Train runners from their cards below') + '</p>';
+        '<p class="paddock__hint"><span class="paddock__hint-admin">Streamer: open controls with <kbd>`</kbd> or ⚙ → <b>START RACE</b> · </span>' +
+          (SD.commands ? 'Chat: <b>!join</b> · <b>!claim</b> · <b>!train</b> · <b>!cheer</b>' +
+            (SD.betting ? ' · <b>!bet moss 50</b> · <b>!boost</b> · <b>!odds</b>' : '') : 'Train runners from their cards below') + '</p>';
     },
 
     /** Queued chat effects for the next race: { runnerId: { boost, sabotage, cheer } } (counts). */

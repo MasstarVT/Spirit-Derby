@@ -14,7 +14,7 @@ const ROOT = path.join(__dirname, '..');
 const CORE_ORDER = [
   'js/namespace.js', 'js/config.js', 'js/rng.js', 'js/data.js', 'js/bus.js', 'js/state.js', 'js/persistence.js',
   'js/runners.js', 'js/training.js', 'js/events.js', 'js/race.js', 'js/hype.js', 'js/players.js', 'js/betting.js',
-  'js/achievements.js', 'js/leaderboards.js', 'js/seasons.js', 'js/game.js', 'js/commands.js'
+  'js/achievements.js', 'js/leaderboards.js', 'js/seasons.js', 'js/game.js', 'js/commands.js', 'js/debug.js'
 ];
 
 const SD = (globalThis.SD = globalThis.SD || {});

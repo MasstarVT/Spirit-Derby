@@ -5,12 +5,13 @@
  * Optional modules (commands, chat, leaderboards, integrations) are guarded.
  * M7: integrations init + auto-connect (settings.twitch/bridge.enabled or ?twitch= / ?bridge=).
  * M5: SD.achievements.init() after game.init, season summary panel, gold achievement toasts.
+ * M6: shared UI prefs (SD.ui.dom.prefs), save flush on beforeunload / pagehide / hidden tab, roster
+ *     reconciliation toast. SD.debug (js/debug.js) is the console toolbox.
  */
 (function (SD) {
   'use strict';
 
   SD.ui = SD.ui || {};
-  const UI_KEY = 'spiritderby.ui';
   const CLOCK_MS = 30000;
   // [SD.ui panel name, root selector] — panels whose root is missing (or module absent) are skipped.
   const PANELS = [
@@ -27,12 +28,9 @@
   const panels = [];
 
   // ------------------------------------------------------------------ UI prefs (spiritderby.ui)
-  function readPrefs() {
-    try { return JSON.parse(localStorage.getItem(UI_KEY) || '{}') || {}; } catch (e) { return {}; }
-  }
-  function writePrefs(patch) {
-    try { localStorage.setItem(UI_KEY, JSON.stringify(Object.assign(readPrefs(), patch))); } catch (e) { /* private mode etc. */ }
-  }
+  // UI prefs (spiritderby.ui) via SD.ui.dom.prefs; chat.js and leaderboards.js share the same object.
+  function readPrefs() { return SD.ui.dom && SD.ui.dom.prefs ? SD.ui.dom.prefs.read() : {}; }
+  function writePrefs(patch) { if (SD.ui.dom && SD.ui.dom.prefs) SD.ui.dom.prefs.write(patch); }
 
   // ------------------------------------------------------------------ boot error overlay
   function bootError(err) {
@@ -293,10 +291,15 @@
       try { if (SD.game.tickClock) SD.game.tickClock(); } catch (e) { console.error('[clock] tickClock failed', e); }
     }, clockMs);
 
-    // 9. flush pending save on unload
-    window.addEventListener('beforeunload', function () {
+    // 9. flush a pending (debounced) save when the page goes away. beforeunload alone is not enough:
+    //    OBS / mobile browsers may skip it, so pagehide and the tab becoming hidden flush too
+    //    (persistence.flush() only writes when something is pending).
+    const flushSave = function () {
       try { if (SD.persistence && SD.persistence.flush) SD.persistence.flush(); } catch (e) { /* ignore */ }
-    });
+    };
+    window.addEventListener('beforeunload', flushSave);
+    window.addEventListener('pagehide', flushSave);
+    document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'hidden') flushSave(); });
 
     // 10. body[data-hype-tier] + debug class
     ['HYPE_CHANGED', 'STATE_CHANGED', 'STATE_LOADED', 'SETTINGS_CHANGED'].forEach(function (k) { dom.on(k, syncBodyState); });
@@ -324,7 +327,14 @@
       autoConnect(params);
     }
 
-    if (loaded && loaded.migratedFrom != null) dom.toast('Save upgraded from version ' + loaded.migratedFrom + '.', 'info');
+    if (loaded && loaded.migratedFrom != null) {
+      dom.toast('Save upgraded from schema v' + loaded.migratedFrom + ' to v' + (SD.persistence ? SD.persistence.SCHEMA_VERSION : '?') +
+        ' (a backup of the old save was kept).', 'info', { ms: 7000 });
+    }
+    // M6: runners added to SD.DATA.ROSTER since this save was made join the roster on load.
+    if (loaded && loaded.rosterAdded && loaded.rosterAdded.length) {
+      dom.toast('New in the roster: ' + loaded.rosterAdded.map(function (r) { return r.emoji + ' ' + r.name; }).join(', '), 'good', { ms: 7000 });
+    }
     SD.ui.booted = true;
   }
 

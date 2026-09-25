@@ -18,6 +18,11 @@
  *   integration  tools/integration-test.js (M7 Twitch IRC parser / adapter + local bridge, no network)
  *   community    tools/community-test.js (M5 betting, boost / snack / sabotage / ribbon, mod !race / !event,
  *                achievements, season summary + rollover)
+ *   persistence  tools/persistence-test.js (M6 M1-save migration from tools/fixtures/save-m1.json, normalize,
+ *                roster reconciliation, interrupted races, backup key, history trimming, stats, UI prefs)
+ *   runners      tools/runners-test.js (M6 !create, admin SPAWN RUNNER, MAX_ACTIVE, SD.debug)
+ *   fuzz         tools/fuzz-test.js (M6 seeded 3-season fuzz: 12 viewers spamming every command, random race
+ *                starts / pauses / ends / aborts / reloads, invariants after every command and race)
  */
 'use strict';
 
@@ -31,7 +36,10 @@ const SUITES = [
   { name: 'parser', file: 'parser-test.js', args: VERBOSE ? ['--verbose'] : [] },
   { name: 'progression', file: 'progression-test.js', args: VERBOSE ? ['--verbose'] : [] },
   { name: 'integration', file: 'integration-test.js', args: VERBOSE ? ['--verbose'] : [] },
-  { name: 'community', file: 'community-test.js', args: VERBOSE ? ['--verbose'] : [] }
+  { name: 'community', file: 'community-test.js', args: VERBOSE ? ['--verbose'] : [] },
+  { name: 'persistence', file: 'persistence-test.js', args: VERBOSE ? ['--verbose'] : [] },
+  { name: 'runners', file: 'runners-test.js', args: VERBOSE ? ['--verbose'] : [] },
+  { name: 'fuzz', file: 'fuzz-test.js', args: VERBOSE ? ['--verbose'] : [] }
 ];
 
 function lastLines(text, n) {

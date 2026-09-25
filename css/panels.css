@@ -873,14 +873,41 @@ body[data-hype-tier="3"] .hype__fill {
   font-size: var(--fs-min);
   color: var(--text-dim);
 }
-.adm-save::before {
-  content: "";
+/* M6: "autosave ● 2 s ago · 41 KB" (the dot is an inline element so it sits after "autosave") */
+.adm-save__dot {
+  flex: none;
+  display: inline-block;
   width: 9px;
   height: 9px;
   border-radius: 50%;
   background: var(--sev-good);
 }
-.adm-save--pending::before { background: var(--gold-bright); animation: sd-blink 0.6s ease-in-out infinite; }
+.adm-save--pending .adm-save__dot { background: var(--gold-bright); animation: sd-blink 0.6s ease-in-out infinite; }
+.adm-save--error .adm-save__dot { background: var(--sev-bad); }
+.adm-save--error { color: var(--sev-bad); }
+/* "SAVED ✓" flash on every write (state:saved) */
+.adm-saved {
+  margin-left: var(--sp-2);
+  color: var(--sev-good);
+  font-size: var(--fs-min);
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  opacity: 0;
+  pointer-events: none;
+}
+.adm-saved--on { animation: sd-saved-flash 1.4s ease-out both; }
+.adm-save__stats { overflow-wrap: anywhere; }
+.adm-replay { overflow-wrap: anywhere; }
+.admin__foot {
+  flex: none;
+  padding: 6px var(--sp-4);
+  border-top: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--text-faint);
+  font-family: var(--font-num);
+  font-size: var(--fs-min);
+  text-align: right;
+}
 
 /* =====================================================================
    TOASTS
@@ -1015,3 +1042,8 @@ body[data-hype-tier="3"] .hype__fill {
 .boards__hchamp { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .boards__hchamp b { color: var(--cream); }
 .boards__hmvp { flex: none; color: var(--text-dim); }
+
+/* =====================================================================
+   M6: reply toasts (overlay mode) are queued + throttled by ui/dom.js
+   ===================================================================== */
+.toast--reply .toast__text { overflow-wrap: anywhere; }

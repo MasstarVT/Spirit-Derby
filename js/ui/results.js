@@ -164,7 +164,7 @@
         return '<tr class="place-' + place + '">' +
           '<td class="c-place">' + esc(place <= 3 ? fmt.medal(place) : place) + '</td>' +
           '<td class="c-runner"><div class="runner-cell">' + dom.badgeHTML(e) +
-            '<div><div class="runner-cell__name">' + esc(e.name) + '</div>' +
+            '<div class="runner-cell__text"><div class="runner-cell__name" title="' + esc(e.name) + '">' + esc(e.name) + '</div>' +
             '<div class="runner-cell__owner">' + (owner ? '👤 ' + esc(owner) : 'Unclaimed') + moodAfter + '</div></div></div></td>' +
           '<td>' + time + '</td>' +
           '<td class="c-num">' + xp + '</td>' +

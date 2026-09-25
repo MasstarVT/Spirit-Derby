@@ -20,7 +20,6 @@
   const FEED_MAX = 80;
   const RECENT_MAX = 8;
   const STREAMER = 'Streamer';
-  const UI_KEY = 'spiritderby.ui';
   const BOTS = ['FoxFan', 'MothMom', 'AcornAndy', 'WispWatcher', 'BrambleBob', 'LanternLiz'];
   const BOT_MIN_MS = 2000;
   const BOT_SPREAD_MS = 2000;
@@ -52,12 +51,9 @@
   }
   function nameColor(key) { return NAME_COLORS[hashStr(String(key || '').toLowerCase()) % NAME_COLORS.length]; }
 
-  function readPrefs() {
-    try { return JSON.parse(localStorage.getItem(UI_KEY) || '{}') || {}; } catch (e) { return {}; }
-  }
-  function writePrefs(patch) {
-    try { localStorage.setItem(UI_KEY, JSON.stringify(Object.assign(readPrefs(), patch))); } catch (e) { /* private mode */ }
-  }
+  // UI prefs live in spiritderby.ui (SD.ui.dom.prefs, shared with main.js and the Boards tab).
+  function readPrefs() { return dom && dom.prefs ? dom.prefs.read() : {}; }
+  function writePrefs(patch) { if (dom && dom.prefs) dom.prefs.write(patch); }
 
   function template() {
     return '' +
@@ -209,7 +205,8 @@
       if (m.kind === 'user' && m.displayName && m.source !== 'system') this.noteSender(m.displayName);
       // Overlay: viewers only see command feedback through the reply-toast strip.
       if (m.kind === 'reply' && !m.unknown && document.body.classList.contains('sd-overlay')) {
-        dom.toast(m.text, sev(m.severity), { who: '@' + (m.displayName || m.username || ''), ms: 6500 });
+        // reply:true -> queued + throttled (CONFIG.UI.REPLY_TOASTS_PER_S), so a raid cannot bury the stream.
+        dom.toast(m.text, sev(m.severity), { who: '@' + (m.displayName || m.username || ''), ms: 6500, reply: true });
       }
     },
 
@@ -380,6 +377,12 @@
       if (!mine && !locked && cd('claim') === 0) {
         const free = runners.filter(function (r) { return !r.owner; });
         if (free.length) return Math.random() < 0.6 ? '!claim ' + short(pick(free)) : '!claim';
+        // M6: every runner taken -> create one (a made-up name; the pipeline checks the rules).
+        if (s.settings && s.settings.allowCreate !== false && cd('create') === 0 && Math.random() < 0.5) {
+          const parts = (SD.DATA && SD.DATA.NAME_PARTS) || { first: ['Pebble'], second: ['dash'] };
+          const second = pick(parts.second);
+          return '!create ' + pick(parts.first) + ' ' + second.charAt(0).toUpperCase() + second.slice(1) + (Math.random() < 0.4 ? ' ' + (2 + rand(98)) : '');
+        }
       }
 
       const opts = [];

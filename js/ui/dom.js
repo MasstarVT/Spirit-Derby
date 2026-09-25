@@ -311,8 +311,35 @@
     timerId = setTimeout(flush, document.hidden ? 60 : 200);
   }
 
+  // ---------------------------------------------------------------- UI prefs (spiritderby.ui)
+  // One JSON object per browser: overlay, adminOpen, tab (main.js), chat { sender, recent } (chat.js),
+  // boards { category, scope } (leaderboards.js). Separate from the game save, so RESET ALL keeps it.
+  const PREFS_KEY = 'spiritderby.ui';
+  const prefs = {
+    KEY: PREFS_KEY,
+    read: function () {
+      try {
+        const v = JSON.parse(localStorage.getItem(PREFS_KEY) || '{}');
+        return v && typeof v === 'object' && !Array.isArray(v) ? v : {};
+      } catch (e) { return {}; }               // corrupt JSON, private mode, no storage
+    },
+    write: function (patch) {
+      try { localStorage.setItem(PREFS_KEY, JSON.stringify(Object.assign(prefs.read(), patch || {}))); return true; } catch (e) { return false; }
+    },
+    get: function (key, fallback) {
+      const v = prefs.read()[key];
+      return v === undefined ? fallback : v;
+    }
+  };
+
   // ---------------------------------------------------------------- toasts
-  const TOAST_MAX = 5;
+  // At most CONFIG.UI.TOAST_MAX on screen; the rest wait in a queue (other toasts before command
+  // replies). Reply toasts ({ reply:true }, overlay mode) show at most REPLY_TOASTS_PER_S per second
+  // and at most REPLY_QUEUE_MAX wait (the oldest waiting reply is dropped), so a raid cannot flood
+  // the stream. An important toast arriving while the strip is full pushes out the oldest reply.
+  const toastQ = { queue: [], visible: [], lastReplyAt: 0, timer: 0, dropped: 0 };
+  function toastCfg(k, d) { const v = Number(cfg('UI.' + k, d)); return isFinite(v) && v > 0 ? v : d; }
+
   function toastRoot() {
     let root = document.getElementById('toasts');
     if (!root) {
@@ -322,27 +349,77 @@
     return root;
   }
 
+  function replyGapMs() { return 1000 / toastCfg('REPLY_TOASTS_PER_S', 1); }
+
+  function hideToast(item) {
+    if (item.gone) return;
+    item.gone = true;
+    clearTimeout(item.timer);
+    const i = toastQ.visible.indexOf(item);
+    if (i >= 0) toastQ.visible.splice(i, 1);
+    item.node.classList.add('toast--out');
+    setTimeout(function () { if (item.node.parentNode) item.node.parentNode.removeChild(item.node); }, 320);
+    pumpToasts();
+  }
+
+  function showToast(item) {
+    toastRoot().appendChild(item.node);
+    toastQ.visible.push(item);
+    if (item.reply) toastQ.lastReplyAt = Date.now();
+    // Shorter stays while others are waiting, so the queue drains.
+    const ms = toastQ.queue.length ? Math.min(item.ms, 3500) : item.ms;
+    item.timer = setTimeout(function () { hideToast(item); }, ms);
+  }
+
+  function pumpToasts() {
+    clearTimeout(toastQ.timer);
+    toastQ.timer = 0;
+    const max = toastCfg('TOAST_MAX', 4);
+    while (toastQ.queue.length && toastQ.visible.length < max) {
+      let idx = -1;
+      for (let i = 0; i < toastQ.queue.length; i++) if (!toastQ.queue[i].reply) { idx = i; break; }
+      if (idx < 0) {
+        const wait = toastQ.lastReplyAt + replyGapMs() - Date.now();
+        if (wait > 0) { toastQ.timer = setTimeout(pumpToasts, wait + 5); return; }
+        idx = 0;
+      }
+      showToast(toastQ.queue.splice(idx, 1)[0]);
+    }
+  }
+
   /**
-   * toast(text, severity='info'|'good'|'bad'|'epic', { ms, who })
-   * Text is always inserted as textContent (never HTML).
+   * toast(text, severity='info'|'good'|'bad'|'epic', { ms, who, reply })
+   * Text is always inserted as textContent (never HTML). Returns the toast element (it may still be
+   * waiting in the queue; callers may add classes to it).
    */
   function toast(text, severity, opts) {
     opts = opts || {};
     const sev = ({ info: 1, good: 1, bad: 1, epic: 1 })[severity] ? severity : 'info';
-    const root = toastRoot();
-    const node = el('div', { class: 'toast toast--' + sev, role: 'status' }, [
+    const node = el('div', { class: 'toast toast--' + sev + (opts.reply ? ' toast--reply' : ''), role: 'status' }, [
       opts.who ? el('span', { class: 'toast__who', text: opts.who }) : null,
       el('span', { class: 'toast__text', text: String(text == null ? '' : text) })
     ]);
-    root.appendChild(node);
-    while (root.children.length > TOAST_MAX) root.removeChild(root.firstElementChild);
-    const ms = num(opts.ms, sev === 'epic' ? 6000 : 4500);
-    setTimeout(function () {
-      node.classList.add('toast--out');
-      setTimeout(function () { if (node.parentNode) node.parentNode.removeChild(node); }, 320);
-    }, ms);
+    const item = { node: node, reply: !!opts.reply, ms: num(opts.ms, sev === 'epic' ? 6000 : 4500), timer: 0, gone: false };
+    const max = toastCfg('TOAST_MAX', 4);
+    if (!item.reply && toastQ.visible.length >= max) {
+      // Make room for something important: the oldest reply toast leaves early.
+      const oldReply = toastQ.visible.filter(function (x) { return x.reply; })[0];
+      if (oldReply) hideToast(oldReply);
+    }
+    toastQ.queue.push(item);
+    if (item.reply) {
+      const waiting = toastQ.queue.filter(function (x) { return x.reply; });
+      const cap = toastCfg('REPLY_QUEUE_MAX', 6);
+      if (waiting.length > cap) { toastQ.queue.splice(toastQ.queue.indexOf(waiting[0]), 1); toastQ.dropped++; }
+    }
+    const qmax = toastCfg('TOAST_QUEUE_MAX', 12);
+    while (toastQ.queue.length > qmax) { toastQ.queue.shift(); toastQ.dropped++; }
+    pumpToasts();
     return node;
   }
+
+  /** { visible, queued, dropped } - for the debug HUD / console. */
+  function toastStats() { return { visible: toastQ.visible.length, queued: toastQ.queue.length, dropped: toastQ.dropped }; }
 
   // ---------------------------------------------------------------- two-click confirm
   /**
@@ -371,7 +448,7 @@
   }
 
   SD.ui.dom = {
-    $: $, $$: $$, el: el, esc: esc, fmt: fmt, schedule: schedule, toast: toast,
+    $: $, $$: $$, el: el, esc: esc, fmt: fmt, schedule: schedule, toast: toast, toastStats: toastStats, prefs: prefs,
     refs: refs, ev: ev, on: on, emit: emit, state: state, settings: settings, debugOn: debugOn, cfg: cfg,
     clamp: clamp, num: num, safeColor: safeColor, safeUrl: safeUrl, runnerVars: runnerVars, badgeHTML: badgeHTML,
     isRaceLocked: isRaceLocked, confirmClick: confirmClick, info: info, flush: flush

@@ -17,6 +17,14 @@
 
   function plural(n, w) { return fmt.int(n) + ' ' + w + (Number(n) === 1 ? '' : 's'); }
 
+  // A card's headline name: wraps to 2 lines at most, then an ellipsis; the full name is the tooltip.
+  // Long names (custom runners, 25-character Twitch logins) get a smaller font (M6).
+  const LONG_NAME = 14;
+  function nameHTML(name) {
+    name = String(name == null ? '' : name);
+    return '<b class="season__name' + (name.length > LONG_NAME ? ' season__name--long' : '') + '" title="' + esc(name) + '">' + esc(name) + '</b>';
+  }
+
   const season = {
     name: 'season',
     root: null,
@@ -129,19 +137,20 @@
 
       const cards = [];
       cards.push(this.card('\u{1F3C6}', 'Champion',
-        sum.championName ? (champRow ? dom.badgeHTML(champRow, 'badge--sm') + ' ' : '') + '<b>' + esc(sum.championName) + '</b>' : '<span class="c-dim">No races this season</span>',
+        sum.championName ? (champRow ? dom.badgeHTML(champRow, 'badge--sm') + ' ' : '') + nameHTML(sum.championName) : '<span class="c-dim">No races this season</span>',
         sum.championName ? plural(sum.championWins || 0, 'win') + ' · ' + fmt.int(sum.championXp || 0) + ' XP' +
           (sum.championOwner ? ' · 👤 ' + esc(sum.championOwner) : ' · unclaimed') : '', 'season__card--champ'));
       cards.push(this.card('\u{2B50}', 'MVP',
-        sum.mvpUsername ? '<b>' + esc(sum.mvpUsername) + '</b>' : '<span class="c-dim">Nobody joined</span>',
+        sum.mvpUsername ? nameHTML(sum.mvpUsername) : '<span class="c-dim">Nobody joined</span>',
         sum.mvpUsername ? fmt.int(sum.mvpSpEarned || 0) + ' Spirit Points earned' : ''));
       const up = sum.biggestUpset;
       cards.push(this.card('\u{1F4A5}', 'Biggest upset',
-        up ? (up.winnerEmoji ? '<span class="emoji">' + esc(up.winnerEmoji) + '</span> ' : '') + '<b>' + esc(up.winnerName || '?') + '</b> at ' + esc(fmt.odds(up.odds)) : '<span class="c-dim">No races</span>',
+        up ? (up.winnerEmoji ? '<span class="emoji">' + esc(up.winnerEmoji) + '</span> ' : '') + nameHTML(up.winnerName || '?') +
+          '<span class="season__at">at ' + esc(fmt.odds(up.odds)) + '</span>' : '<span class="c-dim">No races</span>',
         up ? (up.upset ? 'A true upset' : 'The favourites mostly held') + (up.trackName ? ' · ' + esc(up.trackName) : '') + (up.day ? ' · Day ' + esc(up.day) : '') : ''));
       const th = sum.topHypeContributor;
       cards.push(this.card('\u{1F525}', 'Top hype',
-        th ? '<b>' + esc(th.displayName || th.username) + '</b>' : '<span class="c-dim">A quiet crowd</span>',
+        th ? nameHTML(th.displayName || th.username) : '<span class="c-dim">A quiet crowd</span>',
         th ? fmt.int(Math.round(th.hype)) + ' hype added' : ''));
       cards.push(this.card('\u{1F3C5}', 'Achievements',
         '<b>' + fmt.int(sum.achievementsCount != null ? sum.achievementsCount : (sum.achievements || []).length) + '</b> unlocked',
@@ -151,7 +160,7 @@
         return '<tr class="place-' + r.rank + '">' +
           '<td class="c-place">' + esc(r.rank <= 3 ? fmt.medal(r.rank) : r.rank) + '</td>' +
           '<td class="c-runner"><div class="runner-cell">' + dom.badgeHTML(r) +
-            '<div><div class="runner-cell__name">' + esc(r.name) + '</div>' +
+            '<div class="runner-cell__text"><div class="runner-cell__name" title="' + esc(r.name) + '">' + esc(r.name) + '</div>' +
             '<div class="runner-cell__owner">' + (r.owner ? '👤 ' + esc(r.owner) : 'Unclaimed') + ' · Lv ' + esc(r.level || 1) + '</div></div></div></td>' +
           '<td class="c-num"><b>' + esc(fmt.int(r.wins)) + '</b></td>' +
           '<td class="c-num">' + esc(fmt.int(r.races)) + '</td>' +

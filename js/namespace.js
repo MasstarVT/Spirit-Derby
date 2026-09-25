@@ -7,7 +7,7 @@
 (function (SD) {
   'use strict';
 
-  SD.VERSION = '0.1.0';
+  SD.VERSION = '1.0.0';
 
   // True when running under Node (tests / balance harness), false in the browser.
   SD.isNode = typeof process !== 'undefined' && !!(process.versions && process.versions.node) &&

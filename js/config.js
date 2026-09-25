@@ -323,7 +323,14 @@
     },
 
     UI: {
-      RESULTS_AUTO_CLOSE_MS: 25000 // default for settings.resultsAutoCloseMs (0 = never)
+      RESULTS_AUTO_CLOSE_MS: 25000, // default for settings.resultsAutoCloseMs (0 = never)
+      // Toasts (M6): at most TOAST_MAX on screen, the rest wait in a queue. Command-reply toasts
+      // (overlay mode) are throttled to REPLY_TOASTS_PER_S and at most REPLY_QUEUE_MAX wait (the
+      // oldest waiting reply is dropped first), so a raid cannot bury the stream in toasts.
+      TOAST_MAX: 4,
+      TOAST_QUEUE_MAX: 12,
+      REPLY_TOASTS_PER_S: 1,
+      REPLY_QUEUE_MAX: 6
     },
 
     COOLDOWNS: { USER_S: 10, SABOTAGE_S: 600, CHEER_S: 30 },
@@ -343,6 +350,18 @@
       LEADER_NAMES: 2           // paddock "Leader" line: names shown before "+n more"
     },
 
-    NAMES: { MAX_LEN: 24 }
+    NAMES: { MAX_LEN: 24 },
+
+    // -------------------------------------------------------------------------
+    // RUNNERS (M6): roster growth through admin SPAWN RUNNER and !create <name>
+    // -------------------------------------------------------------------------
+    RUNNERS: {
+      MAX_ACTIVE: 24,           // SPAWN RUNNER and !create refuse beyond this many active runners
+      CREATE_NAME_MIN: 3,       // !create <name>: 3-20 characters ...
+      CREATE_NAME_MAX: 20,
+      CREATE_NAME_KEY_MIN: 3,   // ... with at least 3 plain letters / digits (A-Z, 0-9) so chat can type it
+      // Words a runner may not be called (they mean something else in !bet / !ribbon / !race ...).
+      RESERVED_NAMES: ['all', 'max', 'allin', 'cancel', 'refund', 'none', 'off', 'status', 'help', 'random', 'me', 'my', 'mine', 'streamer', 'mod']
+    }
   };
 })(globalThis.SD = globalThis.SD || {});

@@ -112,6 +112,10 @@
     const s = cur();
     if (!s) return fail('The game has not been initialised yet.');
     if (s.currentRace) return fail('A race is already in progress. Let it finish (or END / abort it) first.');
+    // M6 (fuzz): with auto-advance off the day used to run a 4th, 5th ... race ("Race 4/3").
+    if (s.season.raceIndexInDay >= s.season.racesPerDay) {
+      return fail("Today's " + s.season.racesPerDay + ' races are done. Start the next day (NEXT DAY) to race again.', { dayDone: true });
+    }
     const C = SD.CONFIG.RACE;
     const distance = C.DISTANCES.indexOf(Number(opts.distance)) >= 0 ? Number(opts.distance)
       : (C.DISTANCES.indexOf(Number(s.settings.distance)) >= 0 ? Number(s.settings.distance) : C.DISTANCES[0]);
@@ -470,29 +474,44 @@
     });
   }
 
-  // Spawn a random runner from a species template. opts: { name, speciesId, style, owner }
+  function maxActiveRunners() {
+    const R = SD.CONFIG.RUNNERS || {};
+    return Number(R.MAX_ACTIVE) > 0 ? Number(R.MAX_ACTIVE) : 24;
+  }
+
+  // Spawn a random runner from a species template: random species (unless speciesId), a style that
+  // species runs, stats summing to PROGRESSION.STAT_TOTAL (200) and a style-suited ability from the
+  // catalog. Admin SPAWN RUNNER and !create <name> both come through here.
+  // opts: { name, speciesId, style, abilityId, owner, by, byName }  (`by` = username key of the viewer
+  // who created it: Creator achievement; `byName` = their display name for the log; `owner` = claim it
+  // straight away without the players module).
+  // Returns the new Runner, or { ok:false, message } when refused (CONFIG.RUNNERS.MAX_ACTIVE reached).
   function spawnRunner(opts) {
     opts = opts || {};
     const s = cur();
-    if (!s) return null;
+    if (!s) return fail('The game has not been initialised yet.');
+    const max = maxActiveRunners();
+    const active = SD.state.activeRunners(s).length;
+    if (active >= max) {
+      return fail('The paddock is full: ' + active + ' runners already (the limit is ' + max + ', CONFIG.RUNNERS.MAX_ACTIVE). ' +
+        'Claim one of them instead.', { full: true });
+    }
     let runner = null;
     commit('runner:spawn', function (st, emit) {
       const rng = actionRng(st, 'spawn');
       runner = SD.runners.spawnRandom(rng, {
         name: opts.name, speciesId: opts.speciesId, style: opts.style, abilityId: opts.abilityId, id: SD.runners.nextId(st)
       });
-      // Names must be unique (case / punctuation-insensitive).
-      const baseName = runner.name.slice(0, SD.CONFIG.NAMES.MAX_LEN - 3);
-      let k = 2;
-      while (st.runners.some(function (r) { return U.nameKey(r.name) === U.nameKey(runner.name); })) runner.name = baseName + ' ' + (k++);
+      // Names must be unique (case / punctuation-insensitive): "Moss Runner 2".
+      runner.name = SD.runners.uniqueName(st, runner.name);
       if (opts.owner) {
         runner.owner = String(opts.owner);
         runner.claimedAt = SD.clock.now();
       }
       st.runners.push(runner);
       SD.state.log('runner', 'A new runner joins the derby: ' + runner.emoji + ' ' + runner.name + ', a ' + runner.species + ' (' +
-        SD.runners.styleName(runner.style) + ').', 'good', { runnerId: runner.id });
-      emit(SD.EVENTS.RUNNER_SPAWNED, { runner: runner, by: opts.owner || null });
+        SD.runners.styleName(runner.style) + ')' + (opts.by ? ', created by ' + (opts.byName || opts.by) : '') + '.', 'good', { runnerId: runner.id });
+      emit(SD.EVENTS.RUNNER_SPAWNED, { runner: runner, by: opts.by || opts.owner || null });
     });
     return runner;
   }

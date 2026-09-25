@@ -1,0 +1,463 @@
+{
+ "schemaVersion": 1,
+ "meta": {
+  "createdAt": 1735732800000,
+  "updatedAt": 1735733788000,
+  "raceCounter": 3,
+  "seedSalt": 20250101,
+  "runnerCounter": 4
+ },
+ "season": {
+  "number": 1,
+  "day": 1,
+  "daysPerSeason": 7,
+  "racesPerDay": 3,
+  "raceIndexInDay": 2,
+  "activeDayEvent": "harvestFestival",
+  "history": []
+ },
+ "hype": {
+  "value": 30,
+  "max": 120,
+  "thresholdsHit": [
+   "loud"
+  ],
+  "contributions": {},
+  "lastChangedAt": 1735733600000
+ },
+ "runners": [
+  {
+   "id": "r01",
+   "name": "Moss Runner",
+   "emoji": "🦌",
+   "badgeColor": "#5c8a4a",
+   "species": "Forest Stag",
+   "personality": "Quiet, steady, and suspiciously good at hide-and-seek.",
+   "description": "A young stag spirit whose antlers sprout real moss every spring. Starts slow, then the whole forest seems to push him home.",
+   "style": "lateSurger",
+   "stats": {
+    "speed": 47,
+    "stamina": 46,
+    "power": 43,
+    "wisdom": 43,
+    "luck": 42
+   },
+   "baseStats": {
+    "speed": 40,
+    "stamina": 42,
+    "power": 40,
+    "wisdom": 40,
+    "luck": 38
+   },
+   "level": 4,
+   "xp": 7,
+   "totalXp": 247,
+   "energy": 44,
+   "maxEnergy": 106,
+   "fatigue": 45,
+   "condition": "Normal",
+   "mood": "Happy",
+   "ability": {
+    "id": "forestsFavor",
+    "name": "Forest's Favor",
+    "desc": "At the final stretch: a Luck-scaled chance (at least 40%) of a +18% burst for 6 ticks. Guaranteed when running 3rd to 5th."
+   },
+   "owner": null,
+   "claimedAt": null,
+   "record": {
+    "races": 2,
+    "wins": 1,
+    "losses": 1,
+    "podiums": 2,
+    "bestTimeSec": 70.74,
+    "winStreak": 1
+   },
+   "custom": false,
+   "retired": false,
+   "lastActionAt": 1735733600000
+  },
+  {
+   "id": "r02",
+   "name": "Moonhoof",
+   "emoji": "🐎",
+   "badgeColor": "#8fa3c7",
+   "species": "Moon Horse",
+   "personality": "Calm as a lake at midnight and has never once hurried.",
+   "description": "A silver-maned horse who only trains by moonlight. Her pace barely changes from gate to finish, and that is exactly the point.",
+   "style": "paceChaser",
+   "stats": {
+    "speed": 40,
+    "stamina": 61,
+    "power": 38,
+    "wisdom": 45,
+    "luck": 30
+   },
+   "baseStats": {
+    "speed": 36,
+    "stamina": 58,
+    "power": 36,
+    "wisdom": 42,
+    "luck": 28
+   },
+   "level": 3,
+   "xp": 7,
+   "totalXp": 147,
+   "energy": 42,
+   "maxEnergy": 104,
+   "fatigue": 45,
+   "condition": "Normal",
+   "mood": "Determined",
+   "ability": {
+    "id": "moonlightPace",
+    "name": "Moonlight Pace",
+    "desc": "During the mid race: stamina drain x0.80 and +2% speed."
+   },
+   "owner": null,
+   "claimedAt": null,
+   "record": {
+    "races": 2,
+    "wins": 0,
+    "losses": 2,
+    "podiums": 1,
+    "bestTimeSec": 74.55,
+    "winStreak": 0
+   },
+   "custom": false,
+   "retired": false,
+   "lastActionAt": 1735733600000
+  },
+  {
+   "id": "r03",
+   "name": "Thunder Fern",
+   "emoji": "🐗",
+   "badgeColor": "#7a5a3a",
+   "species": "Storm Boar",
+   "personality": "Loud, proud, and deeply allergic to being behind anyone.",
+   "description": "A boar spirit who charges through the bracken like a rolling storm. Every runner he passes only makes him louder and faster.",
+   "style": "frontRunner",
+   "stats": {
+    "speed": 44,
+    "stamina": 38,
+    "power": 62,
+    "wisdom": 37,
+    "luck": 32
+   },
+   "baseStats": {
+    "speed": 42,
+    "stamina": 36,
+    "power": 58,
+    "wisdom": 34,
+    "luck": 30
+   },
+   "level": 3,
+   "xp": 30,
+   "totalXp": 170,
+   "energy": 54,
+   "maxEnergy": 104,
+   "fatigue": 40,
+   "condition": "Normal",
+   "mood": "Happy",
+   "ability": {
+    "id": "thunderStep",
+    "name": "Thunder Step",
+    "desc": "Overtaking in the mid race or final turn: +30% speed for 3 ticks (max 3 procs, 20-tick cooldown)."
+   },
+   "owner": null,
+   "claimedAt": null,
+   "record": {
+    "races": 2,
+    "wins": 0,
+    "losses": 2,
+    "podiums": 1,
+    "bestTimeSec": 76.6,
+    "winStreak": 0
+   },
+   "custom": false,
+   "retired": false,
+   "lastActionAt": 1735733600000
+  },
+  {
+   "id": "r04",
+   "name": "Ember Tail",
+   "emoji": "🦊",
+   "badgeColor": "#d9642b",
+   "species": "Fire Fox",
+   "personality": "Talks fast, runs faster, forgets to breathe.",
+   "description": "A fox kit whose tail smoulders when she gets excited, which is always. Blistering off the line, but long races test her lungs.",
+   "style": "frontRunner",
+   "stats": {
+    "speed": 63,
+    "stamina": 27,
+    "power": 47,
+    "wisdom": 34,
+    "luck": 42
+   },
+   "level": 3,
+   "xp": 77,
+   "totalXp": 217,
+   "energy": 54,
+   "maxEnergy": 104,
+   "fatigue": 40,
+   "condition": "Normal",
+   "mood": "Happy",
+   "ability": {
+    "id": "secondWind",
+    "name": "Second Wind",
+    "desc": "Once per race, when stamina drops below 12%: restore 15% stamina and ignore fatigue for 10 ticks."
+   },
+   "owner": null,
+   "claimedAt": null,
+   "record": {
+    "races": 2,
+    "wins": 1,
+    "losses": 1,
+    "podiums": 2,
+    "bestTimeSec": 69.35,
+    "winStreak": 0
+   },
+   "custom": false,
+   "retired": false,
+   "lastActionAt": 1735733600000
+  }
+ ],
+ "currentRace": {
+  "record": {
+   "id": "s1d1r3-3",
+   "season": 1,
+   "day": 1,
+   "indexInDay": 3,
+   "seed": 3325562401,
+   "distance": 1200,
+   "trackName": "Old Root Circuit",
+   "settingsSnapshot": {
+    "eventFrequency": "normal",
+    "hypeLevel": 30,
+    "dayEventId": "harvestFestival"
+   },
+   "inputs": {
+    "chatEffects": [],
+    "rosterAvgLevel": 3.25
+   },
+   "entrants": [{"runnerId":"r03","name":"Thunder Fern","emoji":"🐗","badgeColor":"#7a5a3a","lane":1,"style":"frontRunner","abilityId":"thunderStep","ownerAtRace":null,"level":3,"stats":{"speed":44,"stamina":38,"power":62,"wisdom":37,"luck":32},"condition":"Normal","mood":"Happy","energy":54,"perf":{"START":49.55,"EARLY":42.9,"MID":41.95,"FINAL_TURN":46.55,"FINAL_STRETCH":46.05},"stamMax":1854.7,"wildRoll":null,"odds":3.1},{"runnerId":"r01","name":"Moss Runner","emoji":"🦌","badgeColor":"#5c8a4a","lane":2,"style":"lateSurger","abilityId":"forestsFavor","ownerAtRace":null,"level":4,"stats":{"speed":47,"stamina":46,"power":43,"wisdom":43,"luck":42},"condition":"Normal","mood":"Happy","energy":44,"perf":{"START":44.05,"EARLY":44.9,"MID":45.1,"FINAL_TURN":44.75,"FINAL_STRETCH":45.15},"stamMax":2090.2,"wildRoll":null,"odds":3.9},{"runnerId":"r02","name":"Moonhoof","emoji":"🐎","badgeColor":"#8fa3c7","lane":3,"style":"paceChaser","abilityId":"moonlightPace","ownerAtRace":null,"level":3,"stats":{"speed":40,"stamina":61,"power":38,"wisdom":45,"luck":30},"condition":"Normal","mood":"Determined","energy":42,"perf":{"START":39.9,"EARLY":43.9,"MID":45.8,"FINAL_TURN":43.85,"FINAL_STRETCH":41.9},"stamMax":2531.8,"wildRoll":null,"odds":4.1},{"runnerId":"r04","name":"Ember Tail","emoji":"🦊","badgeColor":"#d9642b","lane":4,"style":"frontRunner","abilityId":"secondWind","ownerAtRace":null,"level":3,"stats":{"speed":63,"stamina":27,"power":47,"wisdom":34,"luck":42},"condition":"Normal","mood":"Happy","energy":54,"perf":{"START":47.55,"EARLY":45.5,"MID":44.1,"FINAL_TURN":45.6,"FINAL_STRETCH":50.05},"stamMax":1530.9,"wildRoll":null,"odds":2.8}],
+   "ticks": [],
+   "events": [{"tick":0,"kind":"phase","runnerId":null,"text":"The gates spring open at Old Root Circuit!","severity":"epic","data":{"phase":"START"}},{"tick":2,"kind":"crit","runnerId":"r03","text":"CRIT! Thunder Fern finds another gear!","severity":"good"},{"tick":6,"kind":"phase","runnerId":"r03","text":"Thunder Fern leads the pack into the early straight.","severity":"info","data":{"phase":"EARLY"}},{"tick":7,"kind":"overtake","runnerId":"r02","text":"Moonhoof slips past Ember Tail into 2nd.","severity":"info","data":{"passed":"r04","place":2}},{"tick":39,"kind":"phase","runnerId":"r03","text":"MID RACE: Thunder Fern sets the pace, Ember Tail tucked in behind.","severity":"info","data":{"phase":"MID"}},{"tick":42,"kind":"overtake","runnerId":"r02","text":"Moonhoof slips past Ember Tail into 2nd.","severity":"info","data":{"passed":"r04","place":2}},{"tick":43,"kind":"ability","runnerId":"r02","text":"MOONLIGHT PACE: Moonhoof settles into a silver rhythm.","severity":"good","data":{"abilityId":"moonlightPace"}},{"tick":50,"kind":"overtake","runnerId":"r02","text":"Moonhoof takes the lead from Thunder Fern!","severity":"good","data":{"passed":"r03","place":1}},{"tick":54,"kind":"event","runnerId":"r01","text":"Something tall and hairy strolls across the track. Moss Runner freezes!","severity":"bad","data":{"eventId":"cryptidCrossing","targets":["r01"],"outcome":"neg"}},{"tick":60,"kind":"overtake","runnerId":"r04","text":"Ember Tail slips past Thunder Fern into 2nd.","severity":"info","data":{"passed":"r03","place":2}},{"tick":70,"kind":"crit","runnerId":"r01","text":"Moss Runner hits a perfect stride. CRITICAL!","severity":"good"},{"tick":88,"kind":"phase","runnerId":"r02","text":"FINAL TURN! Moonhoof leads into the bend!","severity":"good","data":{"phase":"FINAL_TURN"}},{"tick":90,"kind":"event","runnerId":null,"text":"Sudden rain! The glade turns to mud and everyone slows down.","severity":"info","data":{"eventId":"suddenRain","targets":["r03","r01","r02","r04"],"durationTicks":18}},{"tick":116,"kind":"phase","runnerId":"r02","text":"FINAL STRETCH! Moonhoof is clear by 74 m!","severity":"epic","data":{"phase":"FINAL_STRETCH"}},{"tick":135,"kind":"ability","runnerId":"r01","text":"FOREST'S FAVOR! The old trees push Moss Runner forward (+19%)!","severity":"epic","data":{"abilityId":"forestsFavor"}},{"tick":137,"kind":"finish","runnerId":"r02","text":"Moonhoof WINS at Old Root Circuit in 68.2s!","severity":"epic","data":{"place":1,"timeSec":68.24,"margin":80.82}},{"tick":146,"kind":"finish","runnerId":"r04","text":"Ember Tail takes 2nd.","severity":"good","data":{"place":2,"timeSec":72.92,"margin":80.82}},{"tick":151,"kind":"finish","runnerId":"r03","text":"Thunder Fern takes 3rd.","severity":"good","data":{"place":3,"timeSec":75.14,"margin":36.17}},{"tick":154,"kind":"finish","runnerId":"r01","text":"Moss Runner finishes 4th.","severity":"info","data":{"place":4,"timeSec":76.54,"margin":24.65}}],
+   "results": [{"runnerId":"r02","name":"Moonhoof","place":1,"finishTick":136.476,"timeSec":68.24,"margin":80.82,"wallHit":false,"xp":165,"spOwner":0,"statChanges":{"speed":1,"wisdom":1},"energyDelta":-25,"fatigueDelta":15,"moodAfter":"Happy","abilityActivations":[{"tick":43,"id":"moonlightPace","text":"MOONLIGHT PACE: Moonhoof settles into a silver rhythm."}],"majorEvents":["suddenRain"],"levelUps":0,"crits":0,"overtakes":3,"odds":4.1,"ownerAtRace":null},{"runnerId":"r04","name":"Ember Tail","place":2,"finishTick":145.838,"timeSec":72.92,"margin":80.82,"wallHit":false,"xp":124,"spOwner":0,"statChanges":{"power":1,"stamina":1},"energyDelta":-25,"fatigueDelta":15,"moodAfter":"Happy","abilityActivations":[],"majorEvents":["suddenRain"],"levelUps":0,"crits":0,"overtakes":3,"odds":2.8,"ownerAtRace":null},{"runnerId":"r03","name":"Thunder Fern","place":3,"finishTick":150.274,"timeSec":75.14,"margin":36.17,"wallHit":false,"xp":96,"spOwner":0,"statChanges":{"luck":1},"energyDelta":-25,"fatigueDelta":15,"moodAfter":"Happy","abilityActivations":[],"majorEvents":["suddenRain"],"levelUps":0,"crits":1,"overtakes":0,"odds":3.1,"ownerAtRace":null},{"runnerId":"r01","name":"Moss Runner","place":4,"finishTick":153.088,"timeSec":76.54,"margin":24.65,"wallHit":false,"xp":61,"spOwner":0,"statChanges":{"wisdom":1,"stamina":1},"energyDelta":-25,"fatigueDelta":15,"moodAfter":"Determined","abilityActivations":[{"tick":135,"id":"forestsFavor","text":"FOREST'S FAVOR! The old trees push Moss Runner forward (+19%)!"}],"majorEvents":["cryptidCrossing","suddenRain"],"levelUps":0,"crits":1,"overtakes":0,"odds":3.9,"ownerAtRace":null}],
+   "bets": [],
+   "hypeBefore": 30,
+   "hypeAfter": null,
+   "totalTicks": 154,
+   "summary": {
+    "winnerId": "r02",
+    "winnerName": "Moonhoof",
+    "winnerEmoji": "🐎",
+    "photoFinish": false,
+    "forestAwakened": false,
+    "eventsCount": 2,
+    "critsCount": 2,
+    "upset": false,
+    "upsetOdds": null,
+    "margin": 80.82,
+    "wallHits": 0,
+    "timedOut": false
+   },
+   "hash": "98a40b06"
+  },
+  "status": "running",
+  "startedAt": 1735733780000
+ },
+ "raceHistory": [
+  {
+   "id": "s1d1r1-1",
+   "season": 1,
+   "day": 1,
+   "indexInDay": 1,
+   "seed": 3292007163,
+   "distance": 1200,
+   "trackName": "Whispering Birches",
+   "settingsSnapshot": {
+    "eventFrequency": "normal",
+    "hypeLevel": 1.2,
+    "dayEventId": "harvestFestival"
+   },
+   "inputs": {
+    "chatEffects": [],
+    "rosterAvgLevel": 1
+   },
+   "entrants": [{"runnerId":"r02","name":"Moonhoof","emoji":"🐎","badgeColor":"#8fa3c7","lane":1,"style":"paceChaser","abilityId":"moonlightPace","ownerAtRace":null,"level":1,"stats":{"speed":36,"stamina":58,"power":36,"wisdom":42,"luck":28},"condition":"Excellent","mood":"Happy","energy":100,"perf":{"START":37.2,"EARLY":40.8,"MID":42.6,"FINAL_TURN":40.9,"FINAL_STRETCH":38.8},"stamMax":2443.5,"wildRoll":null,"odds":3.9},{"runnerId":"r03","name":"Thunder Fern","emoji":"🐗","badgeColor":"#7a5a3a","lane":2,"style":"frontRunner","abilityId":"thunderStep","ownerAtRace":null,"level":1,"stats":{"speed":42,"stamina":36,"power":58,"wisdom":34,"luck":30},"condition":"Excellent","mood":"Happy","energy":100,"perf":{"START":46.5,"EARLY":40.4,"MID":39.5,"FINAL_TURN":43.8,"FINAL_STRETCH":43.5},"stamMax":1795.8,"wildRoll":null,"odds":3},{"runnerId":"r01","name":"Moss Runner","emoji":"🦌","badgeColor":"#5c8a4a","lane":3,"style":"lateSurger","abilityId":"forestsFavor","ownerAtRace":null,"level":1,"stats":{"speed":43,"stamina":42,"power":40,"wisdom":40,"luck":38},"condition":"Excellent","mood":"Happy","energy":88,"perf":{"START":40.65,"EARLY":41.25,"MID":41.45,"FINAL_TURN":41.2,"FINAL_STRETCH":41.45},"stamMax":1972.5,"wildRoll":null,"odds":4.1},{"runnerId":"r04","name":"Ember Tail","emoji":"🦊","badgeColor":"#d9642b","lane":4,"style":"frontRunner","abilityId":"secondWind","ownerAtRace":null,"level":1,"stats":{"speed":60,"stamina":24,"power":44,"wisdom":32,"luck":40},"condition":"Excellent","mood":"Happy","energy":100,"perf":{"START":44.8,"EARLY":42.8,"MID":41.4,"FINAL_TURN":42.8,"FINAL_STRETCH":47.2},"stamMax":1442.6,"wildRoll":null,"odds":2.9}],
+   "ticks": [],
+   "events": [{"tick":0,"kind":"phase","runnerId":null,"text":"AND THEY'RE OFF at Whispering Birches!","severity":"epic","data":{"phase":"START"}},{"tick":6,"kind":"phase","runnerId":"r04","text":"Ember Tail leads the pack into the early straight.","severity":"info","data":{"phase":"EARLY"}},{"tick":34,"kind":"event","runnerId":"r03","text":"Thunder Fern finds a lucky acorn! Fortune favours the fluffy.","severity":"good","data":{"eventId":"luckyAcorn","targets":["r03"],"outcome":"pos"}},{"tick":36,"kind":"phase","runnerId":"r04","text":"MID RACE: Ember Tail sets the pace, Moss Runner tucked in behind.","severity":"info","data":{"phase":"MID"}},{"tick":48,"kind":"ability","runnerId":"r02","text":"MOONLIGHT PACE: Moonhoof settles into a silver rhythm.","severity":"good","data":{"abilityId":"moonlightPace"}},{"tick":62,"kind":"overtake","runnerId":"r02","text":"Moonhoof slips past Thunder Fern into 3rd.","severity":"info","data":{"passed":"r03","place":3}},{"tick":83,"kind":"phase","runnerId":"r04","text":"FINAL TURN! Ember Tail leads into the bend!","severity":"good","data":{"phase":"FINAL_TURN"}},{"tick":108,"kind":"event","runnerId":null,"text":"The crowd goes FERAL! Every runner digs a little deeper.","severity":"epic","data":{"eventId":"audienceFrenzy","targets":["r02","r03","r01","r04"],"durationTicks":10}},{"tick":116,"kind":"phase","runnerId":"r04","text":"FINAL STRETCH! Ember Tail is clear by 49 m!","severity":"epic","data":{"phase":"FINAL_STRETCH"}},{"tick":132,"kind":"crit","runnerId":"r03","text":"Thunder Fern catches a lucky gust and CRITS!","severity":"good"},{"tick":133,"kind":"ability","runnerId":"r04","text":"SECOND WIND! Ember Tail refuses to fade!","severity":"epic","data":{"abilityId":"secondWind"}},{"tick":139,"kind":"finish","runnerId":"r04","text":"Ember Tail WINS at Whispering Birches in 69.3s!","severity":"epic","data":{"place":1,"timeSec":69.35,"margin":25.93}},{"tick":142,"kind":"finish","runnerId":"r01","text":"Moss Runner takes 2nd.","severity":"good","data":{"place":2,"timeSec":70.74,"margin":25.93}},{"tick":150,"kind":"finish","runnerId":"r02","text":"Moonhoof takes 3rd.","severity":"good","data":{"place":3,"timeSec":74.55,"margin":56.71}},{"tick":154,"kind":"finish","runnerId":"r03","text":"Thunder Fern finishes 4th.","severity":"info","data":{"place":4,"timeSec":76.6,"margin":33.77}}],
+   "results": [{"runnerId":"r04","name":"Ember Tail","place":1,"finishTick":138.699,"timeSec":69.35,"margin":25.93,"wallHit":false,"xp":132,"spOwner":0,"statChanges":{"stamina":1},"energyDelta":-25,"fatigueDelta":15,"moodAfter":"Happy","abilityActivations":[{"tick":133,"id":"secondWind","text":"SECOND WIND! Ember Tail refuses to fade!"}],"majorEvents":["audienceFrenzy"],"levelUps":1,"crits":0,"overtakes":0,"odds":2.9,"ownerAtRace":null},{"runnerId":"r01","name":"Moss Runner","place":2,"finishTick":141.473,"timeSec":70.74,"margin":25.93,"wallHit":false,"xp":99,"spOwner":0,"statChanges":{"stamina":1},"energyDelta":-25,"fatigueDelta":15,"moodAfter":"Happy","abilityActivations":[],"majorEvents":["audienceFrenzy"],"levelUps":1,"crits":0,"overtakes":0,"odds":4.1,"ownerAtRace":null},{"runnerId":"r02","name":"Moonhoof","place":3,"finishTick":149.109,"timeSec":74.55,"margin":56.71,"wallHit":false,"xp":77,"spOwner":0,"statChanges":{"stamina":1},"energyDelta":-25,"fatigueDelta":15,"moodAfter":"Happy","abilityActivations":[{"tick":48,"id":"moonlightPace","text":"MOONLIGHT PACE: Moonhoof settles into a silver rhythm."}],"majorEvents":["audienceFrenzy"],"levelUps":1,"crits":0,"overtakes":1,"odds":3.9,"ownerAtRace":null},{"runnerId":"r03","name":"Thunder Fern","place":4,"finishTick":153.191,"timeSec":76.6,"margin":33.77,"wallHit":false,"xp":61,"spOwner":0,"statChanges":{"power":1},"energyDelta":-25,"fatigueDelta":15,"moodAfter":"Determined","abilityActivations":[],"majorEvents":["luckyAcorn","audienceFrenzy"],"levelUps":1,"crits":1,"overtakes":0,"odds":3,"ownerAtRace":null}],
+   "bets": [],
+   "hypeBefore": 1.2,
+   "hypeAfter": 19,
+   "totalTicks": 154,
+   "summary": {
+    "winnerId": "r04",
+    "winnerName": "Ember Tail",
+    "winnerEmoji": "🦊",
+    "photoFinish": false,
+    "forestAwakened": false,
+    "eventsCount": 2,
+    "critsCount": 1,
+    "upset": false,
+    "upsetOdds": null,
+    "margin": 25.93,
+    "wallHits": 0,
+    "timedOut": false
+   },
+   "hash": "ff33009b",
+   "ticksStripped": true
+  },
+  {
+   "id": "s1d1r2-2",
+   "season": 1,
+   "day": 1,
+   "indexInDay": 2,
+   "seed": 3308784782,
+   "distance": 1600,
+   "trackName": "Glowcap Marsh",
+   "settingsSnapshot": {
+    "eventFrequency": "normal",
+    "hypeLevel": 20.2,
+    "dayEventId": "harvestFestival"
+   },
+   "inputs": {
+    "chatEffects": [],
+    "rosterAvgLevel": 2
+   },
+   "entrants": [{"runnerId":"r04","name":"Ember Tail","emoji":"🦊","badgeColor":"#d9642b","lane":1,"style":"frontRunner","abilityId":"secondWind","ownerAtRace":null,"level":2,"stats":{"speed":61,"stamina":26,"power":45,"wisdom":33,"luck":41},"condition":"Good","mood":"Happy","energy":77,"perf":{"START":45.85,"EARLY":44,"MID":42.65,"FINAL_TURN":44,"FINAL_STRETCH":48.35},"stamMax":1664.6,"wildRoll":null,"odds":3.4},{"runnerId":"r01","name":"Moss Runner","emoji":"🦌","badgeColor":"#5c8a4a","lane":2,"style":"lateSurger","abilityId":"forestsFavor","ownerAtRace":null,"level":2,"stats":{"speed":44,"stamina":44,"power":41,"wisdom":41,"luck":39},"condition":"Good","mood":"Happy","energy":65,"perf":{"START":41.7,"EARLY":42.45,"MID":42.7,"FINAL_TURN":42.4,"FINAL_STRETCH":42.6},"stamMax":2252.2,"wildRoll":null,"odds":3.9},{"runnerId":"r03","name":"Thunder Fern","emoji":"🐗","badgeColor":"#7a5a3a","lane":3,"style":"frontRunner","abilityId":"thunderStep","ownerAtRace":null,"level":2,"stats":{"speed":43,"stamina":37,"power":60,"wisdom":35,"luck":31},"condition":"Good","mood":"Determined","energy":77,"perf":{"START":47.95,"EARLY":41.55,"MID":40.6,"FINAL_TURN":45.1,"FINAL_STRETCH":44.75},"stamMax":2023.7,"wildRoll":null,"odds":3.1},{"runnerId":"r02","name":"Moonhoof","emoji":"🐎","badgeColor":"#8fa3c7","lane":4,"style":"paceChaser","abilityId":"moonlightPace","ownerAtRace":null,"level":2,"stats":{"speed":39,"stamina":60,"power":37,"wisdom":43,"luck":29},"condition":"Good","mood":"Happy","energy":65,"perf":{"START":38.75,"EARLY":42.7,"MID":44.55,"FINAL_TURN":42.7,"FINAL_STRETCH":40.85},"stamMax":2774.4,"wildRoll":null,"odds":3.3}],
+   "ticks": [],
+   "events": [{"tick":0,"kind":"phase","runnerId":null,"text":"A horn echoes through Glowcap Marsh... GO!","severity":"epic","data":{"phase":"START"}},{"tick":9,"kind":"phase","runnerId":"r04","text":"Ember Tail leads the pack into the early straight.","severity":"info","data":{"phase":"EARLY"}},{"tick":17,"kind":"overtake","runnerId":"r01","text":"Moss Runner slips past Moonhoof into 3rd.","severity":"info","data":{"passed":"r02","place":3}},{"tick":19,"kind":"crit","runnerId":"r03","text":"Thunder Fern catches a lucky gust and CRITS!","severity":"good"},{"tick":38,"kind":"overtake","runnerId":"r01","text":"Moss Runner slips past Thunder Fern into 2nd.","severity":"info","data":{"passed":"r03","place":2}},{"tick":51,"kind":"event","runnerId":"r02","text":"Something tall and hairy strolls across the track. Moonhoof freezes!","severity":"bad","data":{"eventId":"cryptidCrossing","targets":["r02"],"outcome":"neg"}},{"tick":52,"kind":"overtake","runnerId":"r03","text":"Thunder Fern slips past Moonhoof into 3rd.","severity":"info","data":{"passed":"r02","place":3}},{"tick":55,"kind":"crit","runnerId":"r03","text":"Thunder Fern catches a lucky gust and CRITS!","severity":"good"},{"tick":56,"kind":"phase","runnerId":"r04","text":"MID RACE: Ember Tail sets the pace, Moss Runner tucked in behind.","severity":"info","data":{"phase":"MID"}},{"tick":62,"kind":"ability","runnerId":"r02","text":"MOONLIGHT PACE: Moonhoof settles into a silver rhythm.","severity":"good","data":{"abilityId":"moonlightPace"}},{"tick":98,"kind":"crit","runnerId":"r02","text":"Moonhoof catches a lucky gust and CRITS!","severity":"good"},{"tick":125,"kind":"phase","runnerId":"r04","text":"FINAL TURN! Ember Tail leads into the bend!","severity":"good","data":{"phase":"FINAL_TURN"}},{"tick":149,"kind":"ability","runnerId":"r03","text":"THUNDER STEP! Thunder Fern thunders past Moonhoof!","severity":"good","data":{"abilityId":"thunderStep"}},{"tick":149,"kind":"overtake","runnerId":"r03","text":"Thunder Fern slips past Moonhoof into 3rd.","severity":"info","data":{"passed":"r02","place":3}},{"tick":164,"kind":"phase","runnerId":"r04","text":"FINAL STRETCH! Ember Tail leads, Moss Runner is closing!","severity":"epic","data":{"phase":"FINAL_STRETCH"}},{"tick":171,"kind":"overtake","runnerId":"r01","text":"Moss Runner takes the lead from Ember Tail!","severity":"good","data":{"passed":"r04","place":1}},{"tick":187,"kind":"crit","runnerId":"r01","text":"Moss Runner CRITS! A burst of wild spirit speed!","severity":"good"},{"tick":192,"kind":"finish","runnerId":"r01","text":"Moss Runner WINS at Glowcap Marsh in 95.7s!","severity":"epic","data":{"place":1,"timeSec":95.72,"margin":33.92}},{"tick":196,"kind":"finish","runnerId":"r03","text":"Thunder Fern takes 2nd.","severity":"good","data":{"place":2,"timeSec":97.72,"margin":33.92}},{"tick":196,"kind":"finish","runnerId":"r04","text":"Ember Tail takes 3rd.","severity":"good","data":{"place":3,"timeSec":97.73,"margin":0.15}},{"tick":200,"kind":"finish","runnerId":"r02","text":"Moonhoof finishes 4th.","severity":"info","data":{"place":4,"timeSec":99.67,"margin":33.04}}],
+   "results": [{"runnerId":"r01","name":"Moss Runner","place":1,"finishTick":191.445,"timeSec":95.72,"margin":33.92,"wallHit":false,"xp":145,"spOwner":0,"statChanges":{"speed":1,"luck":1},"energyDelta":-25,"fatigueDelta":15,"moodAfter":"Happy","abilityActivations":[],"majorEvents":[],"levelUps":2,"crits":1,"overtakes":3,"odds":3.9,"ownerAtRace":null},{"runnerId":"r03","name":"Thunder Fern","place":2,"finishTick":195.43,"timeSec":97.72,"margin":33.92,"wallHit":false,"xp":109,"spOwner":0,"statChanges":{"wisdom":1,"power":1},"energyDelta":-25,"fatigueDelta":15,"moodAfter":"Happy","abilityActivations":[{"tick":149,"id":"thunderStep","text":"THUNDER STEP! Thunder Fern thunders past Moonhoof!"}],"majorEvents":[],"levelUps":1,"crits":2,"overtakes":2,"odds":3.1,"ownerAtRace":null},{"runnerId":"r04","name":"Ember Tail","place":3,"finishTick":195.451,"timeSec":97.73,"margin":0.15,"wallHit":false,"xp":85,"spOwner":0,"statChanges":{"speed":1,"power":1},"energyDelta":-25,"fatigueDelta":15,"moodAfter":"Happy","abilityActivations":[],"majorEvents":[],"levelUps":1,"crits":0,"overtakes":0,"odds":3.4,"ownerAtRace":null},{"runnerId":"r02","name":"Moonhoof","place":4,"finishTick":199.343,"timeSec":99.67,"margin":33.04,"wallHit":false,"xp":67,"spOwner":0,"statChanges":{"wisdom":1},"energyDelta":-25,"fatigueDelta":15,"moodAfter":"Determined","abilityActivations":[{"tick":62,"id":"moonlightPace","text":"MOONLIGHT PACE: Moonhoof settles into a silver rhythm."}],"majorEvents":["cryptidCrossing"],"levelUps":1,"crits":1,"overtakes":2,"odds":3.3,"ownerAtRace":null}],
+   "bets": [],
+   "hypeBefore": 20.2,
+   "hypeAfter": 30,
+   "totalTicks": 200,
+   "summary": {
+    "winnerId": "r01",
+    "winnerName": "Moss Runner",
+    "winnerEmoji": "🦌",
+    "photoFinish": false,
+    "forestAwakened": false,
+    "eventsCount": 1,
+    "critsCount": 4,
+    "upset": false,
+    "upsetOdds": null,
+    "margin": 33.92,
+    "wallHits": 0,
+    "timedOut": false
+   },
+   "hash": "943a27e2",
+   "ticksStripped": true
+  }
+ ],
+ "settings": {
+  "distance": 1200,
+  "runnerCount": 4,
+  "eventFrequency": "normal",
+  "hypeMultiplier": 1,
+  "playbackSpeed": 1,
+  "finalStretchSpeedup": 1.75,
+  "autoAdvanceDay": true,
+  "debug": false,
+  "overlay": false
+ },
+ "log": [
+  {
+   "t": 1735733200000,
+   "season": 1,
+   "day": 1,
+   "type": "levelup",
+   "text": "Moonhoof reached level 2!",
+   "severity": "good"
+  },
+  {
+   "t": 1735733200000,
+   "season": 1,
+   "day": 1,
+   "type": "levelup",
+   "text": "Thunder Fern reached level 2!",
+   "severity": "good"
+  },
+  {
+   "t": 1735733500000,
+   "season": 1,
+   "day": 1,
+   "type": "train",
+   "text": "Moonhoof raced a very smug hare. It was close. | Speed +2 · Energy -12 · Hype +1",
+   "severity": "info"
+  },
+  {
+   "t": 1735733560000,
+   "season": 1,
+   "day": 1,
+   "type": "race",
+   "text": "Race 2/3 at Glowcap Marsh (1600 m): Ember Tail, Moss Runner, Thunder Fern, Moonhoof. Favourite: Thunder Fern at 3.1x.",
+   "severity": "info"
+  },
+  {
+   "t": 1735733600000,
+   "season": 1,
+   "day": 1,
+   "type": "hype",
+   "text": "The crowd is getting loud!",
+   "severity": "epic"
+  },
+  {
+   "t": 1735733600000,
+   "season": 1,
+   "day": 1,
+   "type": "hype",
+   "text": "CHAT HAS ENTERED FERAL MODE.",
+   "severity": "epic"
+  },
+  {
+   "t": 1735733600000,
+   "season": 1,
+   "day": 1,
+   "type": "race",
+   "text": "Moss Runner wins at Glowcap Marsh (1600 m) in 95.7s!",
+   "severity": "epic"
+  },
+  {
+   "t": 1735733600000,
+   "season": 1,
+   "day": 1,
+   "type": "levelup",
+   "text": "Moss Runner reached level 4!",
+   "severity": "good"
+  },
+  {
+   "t": 1735733600000,
+   "season": 1,
+   "day": 1,
+   "type": "levelup",
+   "text": "Thunder Fern reached level 3!",
+   "severity": "good"
+  },
+  {
+   "t": 1735733600000,
+   "season": 1,
+   "day": 1,
+   "type": "levelup",
+   "text": "Ember Tail reached level 3!",
+   "severity": "good"
+  },
+  {
+   "t": 1735733600000,
+   "season": 1,
+   "day": 1,
+   "type": "levelup",
+   "text": "Moonhoof reached level 3!",
+   "severity": "good"
+  },
+  {
+   "t": 1735733780000,
+   "season": 1,
+   "day": 1,
+   "type": "race",
+   "text": "Race 3/3 at Old Root Circuit (1200 m): Thunder Fern, Moss Runner, Moonhoof, Ember Tail. Favourite: Ember Tail at 2.8x.",
+   "severity": "info"
+  }
+ ]
+}
