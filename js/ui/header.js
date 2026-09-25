@@ -1,6 +1,7 @@
 /* SPIRIT DERBY — ui/header.js
  * Logo, SEASON · DAY · RACE i/n, day-event badge, hype meter (value, next threshold,
- * tier glow) and hype-threshold banners. Overlay/admin toggle buttons + connection dot.
+ * tier glow) and hype-threshold banners. Overlay/admin toggle buttons + connection dot
+ * (M7: aggregated Twitch + bridge status from integration:status, tooltip lists both).
  * Panel contract: SD.ui.header = { init(rootEl), render(state), destroy() }.
  */
 (function (SD) {
@@ -38,6 +39,7 @@
         .forEach(function (k) { self.offs.push(dom.on(k, rerender)); });
       this.offs.push(dom.on('HYPE_THRESHOLD', function (p) { self.onThreshold(p); }));
       this.offs.push(dom.on('INTEGRATION_STATUS', function (p) { self.onIntegration(p); }));
+      this.renderConn();
 
       const s = dom.state();
       if (s) this.render(s);
@@ -195,16 +197,46 @@
       }, BANNER_MS);
     },
 
+    // ---------------------------------------------------------------- connection dot (M7)
+    // integration:status { adapter:'twitch'|'bridge', state, ... } → one dot for both adapters:
+    // green when either is 'on', amber while connecting/reconnecting, red on error, grey off.
+    integ: {},
+
     onIntegration: function (p) {
+      if (p && p.adapter) this.integ[p.adapter] = p;
+      this.renderConn();
+    },
+
+    renderConn: function () {
       const dot = this.refs.conn;
-      if (!dot || !p) return;
-      const status = p.status || p.state;
-      if (status) {
-        dot.setAttribute('data-status', String(status));
-        const label = (p.source || p.name || 'twitch') + ': ' + status;
-        dot.title = label;
-        dot.setAttribute('aria-label', label);
-      }
+      if (!dot) return;
+      const self = this;
+      const I = SD.integrations || {};
+      const parts = [];
+      const states = [];
+      [['twitch', 'Twitch'], ['bridge', 'Bridge']].forEach(function (d) {
+        const mod = I[d[0]];
+        let s = self.integ[d[0]] || null;
+        try { if (mod && typeof mod.status === 'function') s = mod.status(); } catch (e) { /* keep the last event */ }
+        if (!mod && !s) return;
+        const state = (s && s.state) || 'off';
+        states.push(state);
+        let text = d[1] + ': ' + state;
+        if (s && state === 'on') {
+          text += ' (' + (d[0] === 'twitch' ? '#' + s.channel + ', ' : '') + (Number(s.messages) || 0) + ' msgs)';
+        } else if (s && (state === 'error' || state === 'reconnecting') && s.lastError) {
+          text += ' — ' + s.lastError;
+        }
+        parts.push(text);
+      });
+      let agg = 'off';
+      if (states.indexOf('on') >= 0) agg = 'on';
+      else if (states.indexOf('connecting') >= 0 || states.indexOf('reconnecting') >= 0) agg = 'connecting';
+      else if (states.indexOf('error') >= 0) agg = 'error';
+      const label = parts.length ? parts.join(' · ') : 'Chat integrations are not loaded';
+      if (dot.getAttribute('data-status') !== agg) dot.setAttribute('data-status', agg);
+      if (dot.title !== label) dot.title = label;
+      dot.setAttribute('aria-label', 'Chat connection ' + agg + '. ' + label);
     }
   };
 

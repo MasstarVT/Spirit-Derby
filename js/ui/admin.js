@@ -1,6 +1,7 @@
 /* SPIRIT DERBY — ui/admin.js
- * Streamer drawer (⚙ button or backtick): RACE, WORLD, TUNING, DEBUG, SAVE, SEND AS sections
- * (+ a placeholder for TWITCH (M7)). SEND AS runs commands through SD.processCommand with
+ * Streamer drawer (⚙ button or backtick): RACE, WORLD, TUNING, DEBUG, SAVE, SEND AS and TWITCH
+ * (M7: read-only Twitch chat + local bridge via SD.integrations.*; auto-connect flags are
+ * settings.twitch.enabled / settings.bridge.enabled). SEND AS runs commands through SD.processCommand with
  * source 'admin' / isMod and shows the reply inline. All game changes go through SD.game.*
  * and SD.persistence.*; settings through SD.game.updateSettings(patch).
  * Destructive actions use a two-click "Confirm?" state (never window.confirm).
@@ -135,14 +136,33 @@
             'The sender still needs to have typed <b>!join</b> for player commands.</p>' +
         '</div></details>' +
 
-        // ---------------- TWITCH (M7 placeholder)
-        '<!-- M7: TWITCH — anonymous read-only IRC + local bridge -->' +
-        '<details class="adm-sec adm-sec--soon"><summary>📡 Twitch <span class="adm-sec__tag">M7</span></summary><div class="adm-sec__body">' +
-          '<p class="adm-note">Read-only Twitch chat (anonymous) and a local WebSocket bridge for Mix It Up / Streamer.bot arrive in Milestone 7. Off by default.</p>' +
-          '<div class="adm-row"><input type="text" class="field" disabled placeholder="channel" style="flex:1" aria-label="Twitch channel (coming in M7)">' +
-            '<button type="button" class="btn" disabled>CONNECT</button></div>' +
-        '</div></details>' +
+        // ---------------- TWITCH (M7): anonymous read-only IRC + local bridge
+        twitchSection() +
       '</div>';
+  }
+
+  // TWITCH section (M7). Buttons use data-int-act (not data-act) and inputs data-int (not
+  // data-set), so the generic RACE/WORLD/TUNING handlers ignore them; initIntegrations() wires them.
+  function intBlock(k, title, sub, inputRef, placeholder, label, maxlength) {
+    return '<div class="int-block">' +
+      '<div class="int-head"><span class="int-title">' + esc(title) + ' <small>' + esc(sub) + '</small></span>' +
+        '<span class="int-pill" data-ref="' + k + 'Pill" data-state="off">OFF</span></div>' +
+      '<div class="adm-row"><input type="text" class="field" data-ref="' + inputRef + '" placeholder="' + esc(placeholder) + '" ' +
+          'maxlength="' + maxlength + '" spellcheck="false" autocomplete="off" style="flex:1 1 170px" aria-label="' + esc(label) + '">' +
+        '<button type="button" class="btn btn--primary" data-int-act="' + k + 'Connect" data-ref="' + k + 'Connect">CONNECT</button>' +
+        '<button type="button" class="btn" data-int-act="' + k + 'Disconnect" data-ref="' + k + 'Disconnect">DISCONNECT</button></div>' +
+      '<label class="adm-check"><input type="checkbox" data-int="' + k + 'Auto" data-ref="' + k + 'Auto"> Auto-connect on load</label>' +
+      '<p class="int-detail" data-ref="' + k + 'Detail" aria-live="polite"></p>' +
+    '</div>';
+  }
+  function twitchSection() {
+    return '<details class="adm-sec adm-int" data-ref="intSec"><summary>📡 Twitch &amp; bridge ' +
+        '<span class="int-sum" data-ref="intSum" data-state="off"></span></summary><div class="adm-sec__body">' +
+      intBlock('tw', 'Twitch chat', '(read-only · no login)', 'twChannel', 'channel, e.g. fox', 'Twitch channel', 60) +
+      intBlock('br', 'Chat bridge', '(Mix It Up · Streamer.bot)', 'brUrl', 'ws://localhost:8765', 'Bridge WebSocket URL', 300) +
+      '<p class="adm-note">Viewers type <b>!join</b>, <b>!claim</b>, <b>!train speed</b> … in Twitch chat; replies show on the overlay ' +
+        '(read-only Twitch needs no token). The bridge can post replies back into chat. Setup and OBS: <b>docs/INTEGRATION.md</b>.</p>' +
+    '</div></details>';
   }
 
   const admin = {
@@ -178,6 +198,7 @@
         'RACE_ABORTED', 'RACE_COUNTDOWN', 'EVENT_DAY', 'SEASON_DAY_ADVANCED']
         .forEach(function (k) { self.offs.push(dom.on(k, rerender)); });
       this.offs.push(dom.on('STATE_CHANGED', function () { self.markSaving(); dom.schedule(self); }));
+      this.initIntegrations();
 
       const s = dom.state();
       if (s) this.render(s);
@@ -507,6 +528,7 @@
       if (r.sendText) r.sendText.disabled = typeof SD.processCommand !== 'function';
       this.syncSettings(settings);
       this.renderDebug(state, settings);
+      this.renderIntegrations(settings);
     },
 
     syncSettings: function (settings) {
@@ -581,6 +603,173 @@
       if (this.lastTable !== html) { r.debugTable.innerHTML = html; this.lastTable = html; }
     }
   };
+
+  // ---------------------------------------------------------------- TWITCH section (M7)
+  const INT_LABEL = { off: 'OFF', connecting: 'CONNECTING…', on: 'ON', error: 'ERROR', reconnecting: 'RECONNECTING…' };
+  const INT_DEFS = [
+    // [ref prefix, SD.integrations key / settings key, status + settings field, label]
+    ['tw', 'twitch', 'channel', 'Twitch'],
+    ['br', 'bridge', 'url', 'Bridge']
+  ];
+
+  function integ(k) { return SD.integrations && SD.integrations[k === 'tw' ? 'twitch' : 'bridge']; }
+  function intStatus(k) {
+    const mod = integ(k);
+    try { return mod && typeof mod.status === 'function' ? mod.status() : null; } catch (e) { return null; }
+  }
+  function aggState(states) {
+    if (states.indexOf('on') >= 0) return 'on';
+    if (states.indexOf('connecting') >= 0 || states.indexOf('reconnecting') >= 0) return 'connecting';
+    if (states.indexOf('error') >= 0) return 'error';
+    return 'off';
+  }
+  function retryText(s) {
+    if (!s || !s.nextRetryAt) return '';
+    const secs = Math.max(0, Math.round((s.nextRetryAt - Date.now()) / 1000));
+    return ' Retry #' + (s.attempt || 1) + (secs ? ' in ~' + secs + ' s.' : ' now.');
+  }
+  function plural(n, w) { n = Number(n) || 0; return fmt.int(n) + ' ' + w + (n === 1 ? '' : 's'); }
+
+  Object.assign(admin, {
+    initIntegrations: function () {
+      const self = this;
+      const r = this.refs;
+      this.root.addEventListener('click', function (e) {
+        const btn = e.target.closest('button[data-int-act]');
+        if (!btn || btn.disabled || !self.root.contains(btn)) return;
+        self.intAction(btn.getAttribute('data-int-act'));
+      });
+      this.root.addEventListener('change', function (e) {
+        const key = e.target && e.target.getAttribute && e.target.getAttribute('data-int');
+        if (key) self.intAuto(key, !!e.target.checked);
+      });
+      this.root.addEventListener('keydown', function (e) {
+        if (e.key !== 'Enter') return;
+        if (e.target === r.twChannel) { e.preventDefault(); self.intAction('twConnect'); }
+        if (e.target === r.brUrl) { e.preventDefault(); self.intAction('brConnect'); }
+      });
+      this.offs.push(dom.on('INTEGRATION_STATUS', function () { self.renderIntegrations(dom.settings()); }));
+    },
+
+    // CONNECT / DISCONNECT. A successful CONNECT remembers the channel / URL in settings.
+    intAction: function (act) {
+      const k = act.slice(0, 2);
+      const verb = act.slice(2);
+      const mod = integ(k);
+      const name = k === 'tw' ? 'Twitch' : 'Bridge';
+      if (!mod) { dom.toast(name + ' adapter (js/integrations/' + (k === 'tw' ? 'twitch' : 'bridge') + '.js) is not loaded.', 'bad'); return; }
+      const input = k === 'tw' ? this.refs.twChannel : this.refs.brUrl;
+      let res;
+      try {
+        res = verb === 'Connect' ? mod.connect(input ? input.value.trim() : '') : mod.disconnect();
+      } catch (e) {
+        console.error('[admin] ' + act + ' failed', e);
+        res = { ok: false, message: (e && e.message) || name + ' failed.' };
+      }
+      if (verb === 'Connect' && res && res.ok) {
+        const s = mod.status();
+        if (input) input.value = k === 'tw' ? s.channel : s.url;
+        this.saveIntSettings(k === 'tw' ? { twitch: { channel: s.channel } } : { bridge: { url: s.url } });
+      }
+      if (res && res.message) dom.toast(res.message, res.ok ? 'info' : 'bad');
+      this.renderIntegrations(dom.settings());
+    },
+
+    // "Auto-connect on load" → settings.twitch.enabled / settings.bridge.enabled (saved with the game).
+    intAuto: function (key, on) {
+      const k = key.slice(0, 2);
+      const mod = integ(k);
+      const input = k === 'tw' ? this.refs.twChannel : this.refs.brUrl;
+      const typed = input ? input.value.trim() : '';
+      let patch;
+      if (k === 'tw') {
+        const ch = mod && mod.normalizeChannel ? mod.normalizeChannel(typed) : '';
+        patch = { twitch: ch ? { enabled: on, channel: ch } : { enabled: on } };
+        if (on && !ch && !((dom.settings().twitch || {}).channel)) {
+          dom.toast('Auto-connect is on: enter the channel and press CONNECT once so it is remembered.', 'info');
+        }
+      } else {
+        const url = mod && mod.normalizeUrl ? mod.normalizeUrl(typed) : '';
+        patch = { bridge: url ? { enabled: on, url: url } : { enabled: on } };
+      }
+      this.saveIntSettings(patch);
+    },
+
+    saveIntSettings: function (patch) {
+      if (!SD.game || typeof SD.game.updateSettings !== 'function') return;
+      try {
+        const res = SD.game.updateSettings(patch);
+        if (res && res.ok === false) dom.toast(res.message || 'Could not save that setting.', 'bad');
+      } catch (e) {
+        console.error('[admin] could not save integration settings', e);
+      }
+    },
+
+    renderIntegrations: function (settings) {
+      const r = this.refs;
+      if (!r.twPill) return;
+      settings = settings || {};
+      const self = this;
+      const active = document.activeElement;
+      const states = [];
+      const sum = [];
+      INT_DEFS.forEach(function (d) {
+        const k = d[0];
+        const mod = integ(k);
+        const s = intStatus(k);
+        const saved = settings[d[1]] || {};
+        const state = s ? s.state : 'off';
+        states.push(state);
+
+        const pill = r[k + 'Pill'];
+        self.setText(pill, (INT_LABEL[state] || String(state).toUpperCase()) + (state === 'on' ? ' · ' + fmt.int(s.messages || 0) : ''));
+        if (pill.getAttribute('data-state') !== state) pill.setAttribute('data-state', state);
+        pill.title = s ? plural(s.messages, 'message') + ' received' + (s.dropped ? ', ' + fmt.int(s.dropped) + ' dropped' : '') : '';
+
+        let detail;
+        const where = s ? (k === 'tw' ? '#' + s.channel : s.url) : '';
+        if (!mod) detail = 'js/integrations/' + d[1] + '.js is not loaded.';
+        else if (state === 'on') {
+          detail = where + ' · ' + plural(s.messages, 'message') +
+            (s.dropped ? ' · ' + fmt.int(s.dropped) + ' dropped (flood guard)' : '') +
+            (k === 'br' && s.malformed ? ' · ' + fmt.int(s.malformed) + ' malformed' : '') +
+            (k === 'br' ? ' · ' + plural(s.sent, 'frame') + ' sent' : '') +
+            ' · since ' + fmt.hhmm(s.since);
+        } else if (state === 'connecting') detail = 'Connecting to ' + where + '…';
+        else if (state === 'reconnecting') detail = 'Connection to ' + where + ' lost — reconnecting.' + retryText(s);
+        else if (state === 'error') {
+          detail = (s.lastError || 'Connection failed.') + (s.nextRetryAt ? retryText(s) : ' Not retrying — press CONNECT to try again.');
+        } else {
+          detail = k === 'tw' ? 'Off. Reads chat as an anonymous guest; nothing is ever posted to Twitch.'
+            : 'Off. Start your local relay (docs/INTEGRATION.md), then CONNECT.';
+        }
+        self.setText(r[k + 'Detail'], detail);
+        if (r[k + 'Detail']) r[k + 'Detail'].classList.toggle('int-detail--bad', state === 'error');
+
+        const input = k === 'tw' ? r.twChannel : r.brUrl;
+        if (input && input !== active && !input.value) {
+          const v = (s && s[d[2]]) || saved[d[2]] || '';
+          if (v) input.value = v;
+        }
+        const auto = r[k + 'Auto'];
+        if (auto && auto !== active) auto.checked = !!saved.enabled;
+        if (r[k + 'Connect']) r[k + 'Connect'].disabled = !mod;
+        if (r[k + 'Disconnect']) r[k + 'Disconnect'].disabled = !mod || (state === 'off' && !(s && s.enabled));
+        if (input) input.disabled = !mod;
+        if (auto) auto.disabled = !mod;
+        if (state !== 'off') sum.push(d[3] + ' ' + (INT_LABEL[state] || state).replace('…', '').toLowerCase());
+      });
+      if (r.intSum) {
+        const agg = aggState(states);
+        this.setText(r.intSum, sum.join(' · '));
+        if (r.intSum.getAttribute('data-state') !== agg) r.intSum.setAttribute('data-state', agg);
+      }
+    },
+
+    setText: function (node, text) {
+      if (node && node.textContent !== text) node.textContent = text;
+    }
+  });
 
   function fmtNum(v, d) { v = Number(v); return isFinite(v) ? v.toFixed(d || 0) : '–'; }
   function fmtWild(w) {

@@ -60,3 +60,7 @@ node tools/balance-test.js --streamday           # 20 trains without rest -> Exh
 node tools/balance-test.js --dump 12345          # one full race record, tick by tick
 node tools/race-test.js --verbose                # abilities, events, hype tiers, chat effects, replay, day events
 ```
+
+## Twitch and Mix It Up integration
+
+See [docs/INTEGRATION.md](docs/INTEGRATION.md) for connecting read-only Twitch chat (no token needed), the local WebSocket bridge protocol for Mix It Up / Streamer.bot, OBS browser-source setup and troubleshooting.

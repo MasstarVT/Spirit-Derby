@@ -3,6 +3,7 @@
  * race:finished → results modal → keyboard shortcuts → ?overlay=1 → 30 s clock →
  * beforeunload flush → body[data-hype-tier] sync → debug error toasts.
  * Optional modules (commands, chat, leaderboards, integrations) are guarded.
+ * M7: integrations init + auto-connect (settings.twitch/bridge.enabled or ?twitch= / ?bridge=).
  */
 (function (SD) {
   'use strict';
@@ -170,6 +171,42 @@
     };
   }
 
+  // ------------------------------------------------------------------ M7 integrations: auto-connect
+  // Saved flags: settings.twitch.enabled (+ .channel) and settings.bridge.enabled (+ .url), set by
+  // the admin "Auto-connect on load" boxes. URL parameters override them for this window only
+  // (nothing is saved), which is handy for an OBS browser source with its own storage:
+  //   ?twitch=<channel>          read that channel's chat          ?twitch=0  never Twitch here
+  //   ?bridge=1 | ?bridge=ws://… connect the bridge (saved URL)    ?bridge=0  never the bridge here
+  //   ?connect=0                 no auto-connect at all in this window (e.g. a second tab)
+  function autoConnect(params) {
+    const I = SD.integrations;
+    if (!I) return;
+    const get = function (k) { try { return params ? params.get(k) : null; } catch (e) { return null; } };
+    if (get('connect') === '0') return;
+    const s = (SD.state.get() || {}).settings || {};
+    const tw = s.twitch || {};
+    const br = s.bridge || {};
+
+    const twParam = get('twitch');
+    const channel = twParam && twParam !== '0' ? twParam : (twParam !== '0' && tw.enabled ? tw.channel : '');
+    if (I.twitch && channel) run('twitch', function () { return I.twitch.connect(channel, { auto: true }); });
+
+    const brParam = get('bridge');
+    let url = null;
+    if (brParam && brParam !== '0') url = /^wss?:\/\//i.test(brParam) ? brParam : (br.url || '');
+    else if (brParam !== '0' && br.enabled) url = br.url || '';
+    if (I.bridge && url !== null) run('bridge', function () { return I.bridge.connect(url, { auto: true }); });
+
+    function run(name, fn) {
+      try {
+        const res = fn();
+        if (res && res.ok === false && SD.ui.dom) SD.ui.dom.toast('Auto-connect (' + name + '): ' + res.message, 'bad');
+      } catch (e) {
+        console.error('[boot] auto-connect ' + name + ' failed', e);
+      }
+    }
+  }
+
   // ------------------------------------------------------------------ boot
   function boot() {
     if (!SD.ui.dom) { bootError(new Error('js/ui/dom.js did not load.')); return; }
@@ -266,6 +303,9 @@
           try { mod.init(); } catch (e) { console.error('[boot] integration ' + k + ' failed', e); }
         }
       });
+      // M7: auto-connect after the panels exist (the header dot and admin pills listen to
+      // integration:status themselves).
+      autoConnect(params);
     }
 
     if (loaded && loaded.migratedFrom != null) dom.toast('Save upgraded from version ' + loaded.migratedFrom + '.', 'info');

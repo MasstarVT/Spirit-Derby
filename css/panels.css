@@ -917,3 +917,64 @@ body[data-hype-tier="3"] .hype__fill {
   .hdr { flex-wrap: wrap; row-gap: var(--sp-2); padding: var(--sp-2) var(--sp-4); height: auto; }
   .app-header { height: auto; }
 }
+
+/* =====================================================================
+   M7 INTEGRATIONS — admin "Twitch & bridge" section (ui/admin.js)
+   ===================================================================== */
+.int-block {
+  display: grid;
+  gap: var(--sp-2);
+  padding-top: var(--sp-2);
+  border-top: 1px solid var(--line);
+}
+.int-block:first-child { padding-top: 0; border-top: 0; }
+.int-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+.int-title { font-size: var(--fs-min); font-weight: 800; color: var(--cream); }
+.int-title small { font-size: var(--fs-min); font-weight: 400; color: var(--text-faint); }
+.int-pill {
+  margin-left: auto;
+  padding: 1px 10px;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--line-strong);
+  background: rgba(243, 233, 210, 0.06);
+  color: var(--text-faint);
+  font-family: var(--font-num);
+  font-size: var(--fs-min);
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+}
+.int-pill[data-state="on"] { color: #d6f2c4; border-color: rgba(159, 214, 122, 0.6); background: rgba(159, 214, 122, 0.14); box-shadow: 0 0 8px rgba(159, 214, 122, 0.25); }
+.int-pill[data-state="connecting"],
+.int-pill[data-state="reconnecting"] { color: var(--gold-bright); border-color: rgba(230, 198, 94, 0.6); background: rgba(230, 198, 94, 0.12); animation: sd-blink 1.2s ease-in-out infinite; }
+.int-pill[data-state="error"] { color: var(--sev-bad); border-color: rgba(238, 136, 102, 0.6); background: rgba(238, 136, 102, 0.14); }
+.int-detail {
+  font-size: var(--fs-min);
+  line-height: 1.35;
+  color: var(--text-dim);
+  overflow-wrap: anywhere;
+}
+.int-detail:empty { display: none; }
+.int-detail--bad { color: #f6c3b1; }
+.int-sum {
+  margin-left: auto;
+  font-size: var(--fs-min);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: none;
+  color: var(--text-faint);
+}
+.int-sum[data-state="on"] { color: var(--sev-good); }
+.int-sum[data-state="connecting"] { color: var(--gold-bright); }
+.int-sum[data-state="error"] { color: var(--sev-bad); }
+/* header dot: "reconnecting" looks like "connecting" (header.js aggregates, this is a fallback) */
+.conn-dot[data-status="reconnecting"] { background: var(--gold-bright); animation: sd-blink 1s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .int-pill[data-state="connecting"],
+  .int-pill[data-state="reconnecting"] { animation: none; }
+}

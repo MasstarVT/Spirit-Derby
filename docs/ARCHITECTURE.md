@@ -296,3 +296,24 @@ Measured (tools/balance-test.js, 8-runner clone fields, 2000 races @1600 m): ide
 
 ## Persistence keys
 `spiritderby.save` (state), `spiritderby.backup` (pre-migration/import copy), `spiritderby.ui` (overlay/drawer/tab prefs, plus `chat: { sender, recent }` for the chat panel and `boards: { category, scope }` for the Boards tab).
+
+## M7 additions — Twitch and bridge input adapters
+
+Both adapters are pure input layers: they only ever call `SD.processCommand(username, text, { source, isMod, displayName })`. Neither stores or asks for tokens.
+
+### `SD.integrations.twitch` (js/integrations/twitch.js)
+- `connect(channel, opts?) → { ok, message }` — anonymous read-only IRC over `wss://irc-ws.chat.twitch.tv:443` (`CAP REQ :twitch.tv/tags twitch.tv/commands`, `NICK justinfanNNNNN`, `JOIN #channel`), PING/PONG, RECONNECT handling, exponential backoff (1 s → 60 s with jitter) while enabled, inbound rate limit of 20 commands/s (extras dropped and counted).
+- `disconnect()`, `status() → { state:'off'|'connecting'|'on'|'error'|'reconnecting', channel, since, messages, dropped, lastError, attempt, nextRetryAt, nick, enabled, readOnly:true }`.
+- Pure helpers for tests: `parseLine(raw) → { tags, prefix, command, params, trailing }`, `parseTags(str)`, `privmsgToChat(parsed) → { username, displayName, text, isMod }` (mod tag, broadcaster/moderator badges).
+- Routes PRIVMSG as `SD.processCommand(login, text, { source:'twitch', isMod, displayName })` so a viewer keeps one stable profile.
+
+### `SD.integrations.bridge` (js/integrations/bridge.js)
+- `connect(url = settings.bridge.url || 'ws://localhost:8765')`, `disconnect()`, `status()`, `receive(jsonString)` (exposed for tests), `send(obj)` (no-op when closed), `configure({ replyUnknown })`.
+- Inbound frames: `{ "username", "text", "isMod"?, "displayName"? }` or an array of them → `SD.processCommand(..., { source:'bridge' })`. Malformed frames are counted and ignored.
+- Outbound frames: `{type:'hello', app, version, protocol:1}` on connect; `{type:'reply', username, displayName, command, ok, message, severity, source, id, chat, cooldown?, locked?}` for every command from `bridge` or `twitch` (unknown-command replies skipped unless `replyUnknown`); `{type:'race', winner, results:[{place,name,owner,runnerId,timeSec}], recordId, track, distance, photoFinish, upset, message}` on `race:finished`; `{type:'pong'}` for pings.
+
+### Events, settings, UI
+- `integration:status { adapter:'twitch'|'bridge', state, ... }` on every state change/retry/inbound batch; `SD.state.runtime.connected.twitch|bridge` mirror it; connect/disconnect/outage lines are posted once as `chat:message` kind `system`.
+- Settings: `settings.twitch { channel, enabled }`, `settings.bridge { url, enabled }` — `enabled` = auto-connect on load (admin checkboxes). URL overrides for one window without saving: `?twitch=<channel>`, `?twitch=0`, `?bridge=1|ws://…`, `?bridge=0`, `?connect=0`.
+- Admin drawer "Twitch & bridge" section (channel / URL inputs, CONNECT/DISCONNECT, status pills); header connection dot (grey off, amber connecting, green on, red error).
+- Tests: `tools/integration-test.js` (211 assertions, no network). Streamer guide: `docs/INTEGRATION.md`.
