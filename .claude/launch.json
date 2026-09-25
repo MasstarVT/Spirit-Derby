@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "spirit-derby",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["tools/serve.js", "8090"],
+      "port": 8090
+    }
+  ]
+}

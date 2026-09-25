@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Spirit Derby — a Twitch-chat-driven forest spirit racing and management game.">
+  <title>Spirit Derby</title>
+  <link rel="stylesheet" href="css/tokens.css">
+  <link rel="stylesheet" href="css/layout.css">
+  <link rel="stylesheet" href="css/track.css">
+  <link rel="stylesheet" href="css/panels.css">
+</head>
+<body data-hype-tier="0">
+  <noscript>
+    <div class="noscript">
+      <p>🌲 Spirit Derby needs JavaScript to run.<br>Enable JavaScript (or allow scripts for local files) and reload the page.</p>
+    </div>
+  </noscript>
+
+  <div class="app" id="app">
+
+    <!-- ================= HEADER ================= -->
+    <header class="app-header" id="header" aria-label="Spirit Derby status">
+      <div class="hdr">
+        <div class="brand">
+          <span class="brand__tree emoji" aria-hidden="true">🌲</span>
+          <h1 class="brand__name">SPIRIT DERBY</h1>
+        </div>
+
+        <div class="hdr-season" aria-live="polite">
+          <span class="hdr-season__main" data-ref="season">SEASON 1 · DAY 1</span>
+          <span class="hdr-season__race" data-ref="race">RACE <b>1/3</b></span>
+        </div>
+
+        <div class="hdr-dayevent hdr-dayevent--none" data-ref="dayEvent" title="No day event is active">
+          <span class="hdr-dayevent__icon emoji" aria-hidden="true">🍃</span>
+          <span class="hdr-dayevent__name">Calm day</span>
+        </div>
+
+        <div class="hype" data-ref="hype" role="meter" aria-label="Hype" aria-valuemin="0" aria-valuemax="120" aria-valuenow="0">
+          <div class="hype__top">
+            <span class="hype__label">HYPE</span>
+            <span class="hype__value num" data-ref="hypeValue">0</span>
+            <span class="hype__max num" data-ref="hypeMax">/ 120</span>
+            <span class="hype__next" data-ref="hypeNext">next: <b>25</b> · the crowd gets loud</span>
+          </div>
+          <div class="hype__bar" data-ref="hypeBar">
+            <div class="hype__fill" data-ref="hypeFill"></div>
+          </div>
+        </div>
+
+        <div class="hdr-actions">
+          <span class="conn-dot" data-ref="conn" data-status="off" title="Twitch: not connected (coming in M7)" role="img" aria-label="Twitch connection: off"></span>
+          <button type="button" class="btn btn--icon" data-action="overlay" aria-pressed="false" title="Toggle overlay mode (O)">📺</button>
+          <button type="button" class="btn btn--icon" data-action="admin" aria-pressed="false" aria-controls="admin" title="Streamer controls (`)">⚙</button>
+        </div>
+      </div>
+    </header>
+
+    <!-- ================= MAIN COLUMN: track + roster ================= -->
+    <main class="app-main" id="main">
+
+      <section class="track-region" aria-label="Race track">
+        <div class="track track--idle" id="track">
+
+          <header class="track__title">
+            <span class="track__flag emoji" aria-hidden="true">🏁</span>
+            <h2 class="track__name" data-ref="name">The Paddock</h2>
+            <span class="track__sep" aria-hidden="true">·</span>
+            <span class="track__dist num" data-ref="dist">1200 m</span>
+            <span class="track__phase" data-ref="phase" data-phase="IDLE">Waiting</span>
+            <span class="track__progress num" data-ref="progress"></span>
+            <div class="track__pbar" aria-hidden="true"><i data-ref="pbar"></i></div>
+          </header>
+
+          <div class="track__body">
+            <div class="track__field">
+              <div class="track__ruler" aria-hidden="true">
+                <div class="ruler__label">Lane</div>
+                <div class="ruler__run" data-ref="ruler"></div>
+              </div>
+              <div class="track__lanes" data-ref="lanes" role="list" aria-label="Lanes"></div>
+              <div class="track__fog" data-ref="fog" aria-hidden="true">
+                <span class="track__fog-label">🌫️ Mysterious fog…</span>
+              </div>
+              <div class="track__flash" data-ref="flash" aria-hidden="true"></div>
+            </div>
+
+            <aside class="positions" data-ref="positions" aria-label="Live positions">
+              <h3 class="positions__title">Positions</h3>
+              <ol class="positions__list" data-ref="posList"></ol>
+              <p class="positions__fog" data-ref="posFog" hidden>🌫️ Lost in the fog…</p>
+            </aside>
+
+            <!-- idle / paddock state (shown when no race is running) -->
+            <div class="paddock" data-ref="paddock" aria-live="polite"></div>
+          </div>
+
+          <div class="ticker" aria-label="Race ticker" aria-live="polite">
+            <ul class="ticker__list" data-ref="ticker"></ul>
+          </div>
+
+          <!-- countdown overlay: 3 · 2 · 1 · GO -->
+          <div class="countdown" data-ref="countdown" aria-live="assertive" hidden></div>
+          <div class="track__paused" data-ref="paused" hidden>⏸ PAUSED</div>
+          <!-- photo-finish / winner banners are appended here by track.js -->
+        </div>
+      </section>
+
+      <section class="roster-region" aria-label="Runner roster">
+        <div class="roster" id="roster"></div>
+      </section>
+    </main>
+
+    <!-- ================= SIDEBAR ================= -->
+    <aside class="sidebar" id="sidebar" aria-label="Chat, boards and log">
+      <nav class="tabs" role="tablist" aria-label="Sidebar">
+        <!-- M2: ui/chat.js enables this tab -->
+        <button type="button" class="tab" role="tab" id="tab-chat" aria-controls="panel-chat" aria-selected="false" data-tab="chat" disabled>Chat <span class="tab__soon">M2</span></button>
+        <!-- M3: ui/leaderboards.js enables this tab -->
+        <button type="button" class="tab" role="tab" id="tab-boards" aria-controls="panel-boards" aria-selected="false" data-tab="boards" disabled>Boards <span class="tab__soon">M3</span></button>
+        <button type="button" class="tab" role="tab" id="tab-log" aria-controls="panel-log" aria-selected="true" data-tab="log">Log</button>
+      </nav>
+
+      <section class="tabpanel" id="panel-chat" role="tabpanel" aria-labelledby="tab-chat" hidden>
+        <!-- M2: simulated chat feed + input + demo-bot toggle mounts here (#chat) -->
+        <p class="tabpanel__placeholder">Simulated chat arrives in Milestone 2.</p>
+      </section>
+
+      <section class="tabpanel" id="panel-boards" role="tabpanel" aria-labelledby="tab-boards" hidden>
+        <!-- M3: leaderboards mount here (#boards) -->
+        <p class="tabpanel__placeholder">Leaderboards arrive in Milestone 3.</p>
+      </section>
+
+      <section class="tabpanel" id="panel-log" role="tabpanel" aria-labelledby="tab-log">
+        <div class="eventlog" id="eventlog"></div>
+      </section>
+    </aside>
+  </div>
+
+  <!-- ================= ADMIN DRAWER (⚙ or backtick) ================= -->
+  <aside class="admin-drawer" id="admin" aria-label="Streamer controls" aria-hidden="true"></aside>
+
+  <!-- ================= RESULTS MODAL ================= -->
+  <div class="modal" id="results" role="dialog" aria-modal="true" aria-labelledby="results-title" hidden></div>
+
+  <!-- ================= BANNERS + TOASTS ================= -->
+  <div class="banner-layer" id="banner-layer" aria-live="assertive"></div>
+  <div class="toasts" id="toasts" aria-live="polite"></div>
+
+  <!-- ================= SCRIPTS =================
+       Order = dependency graph (mirrored by tools/load-core.js).
+       Classic scripts only (no ES modules) so the game runs from file://. -->
+
+  <!-- core (DOM-free) -->
+  <script src="js/namespace.js"></script>
+  <script src="js/config.js"></script>
+  <script src="js/rng.js"></script>
+  <script src="js/data.js"></script>
+  <script src="js/bus.js"></script>
+  <script src="js/state.js"></script>
+  <script src="js/persistence.js"></script>
+  <script src="js/runners.js"></script>
+  <script src="js/training.js"></script>
+  <script src="js/events.js"></script>
+  <script src="js/race.js"></script>
+  <script src="js/hype.js"></script>
+  <!-- M2: <script src="js/players.js"></script> -->
+  <!-- M5: <script src="js/betting.js"></script> -->
+  <!-- M5: <script src="js/achievements.js"></script> -->
+  <!-- M3: <script src="js/leaderboards.js"></script> -->
+  <script src="js/seasons.js"></script>
+  <script src="js/game.js"></script>
+  <!-- M2: <script src="js/commands.js"></script> -->
+
+  <!-- UI (browser only) -->
+  <script src="js/ui/dom.js"></script>
+  <script src="js/ui/playback.js"></script>
+  <script src="js/ui/header.js"></script>
+  <script src="js/ui/track.js"></script>
+  <script src="js/ui/results.js"></script>
+  <script src="js/ui/roster.js"></script>
+  <!-- M2: <script src="js/ui/chat.js"></script> -->
+  <!-- M3: <script src="js/ui/leaderboards.js"></script> -->
+  <script src="js/ui/eventlog.js"></script>
+  <script src="js/ui/admin.js"></script>
+
+  <!-- integrations (off by default) -->
+  <!-- M7: <script src="js/integrations/twitch.js"></script> -->
+  <!-- M7: <script src="js/integrations/bridge.js"></script> -->
+
+  <!-- boot -->
+  <script src="js/main.js"></script>
+</body>
+</html>

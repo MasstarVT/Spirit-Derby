@@ -1,0 +1,395 @@
+/* =====================================================================
+   SPIRIT DERBY — design tokens, base element styles and keyframes.
+   Cozy mystical forest: deep greens, warm brown, cream text, muted gold.
+   Bioluminescent teal is reserved for glows and small accents only.
+   ===================================================================== */
+
+:root {
+  /* ---- palette (plan §7) ---- */
+  --forest-900: #0c1710;
+  --forest-800: #122019;
+  --forest-700: #1a3324;
+  --forest-500: #2f5d3a;
+  --moss: #5c8a4a;
+  --moss-light: #8fbf6a;
+  --brown: #6b4632;
+  --brown-dark: #3d271b;
+  --cream: #f3e9d2;
+  --gold: #c9a84c;
+  --gold-bright: #e6c65e;
+  --teal: #4fd1c5;            /* glow / accent only */
+  --ember: #e07a55;
+  --berry: #c2566b;
+
+  --surface-1: #15221a;
+  --surface-2: #1c2d22;
+  --surface-3: #243a2c;
+  --surface-sunk: #0f1a13;
+  --line: rgba(243, 233, 210, 0.12);
+  --line-strong: rgba(243, 233, 210, 0.24);
+
+  --text: var(--cream);
+  --text-dim: rgba(243, 233, 210, 0.74);
+  --text-faint: rgba(243, 233, 210, 0.52);
+
+  /* severity (ticker, log, toasts) */
+  --sev-info: #d9d2bd;
+  --sev-good: #9fd67a;
+  --sev-bad: #ee8866;
+  --sev-epic: #ecc95c;
+
+  /* conditions */
+  --cond-excellent: #7fe0c0;
+  --cond-good: #9fd67a;
+  --cond-normal: #e4dcc4;
+  --cond-tired: #e6b35a;
+  --cond-exhausted: #ee7a5f;
+
+  /* stat colours (roster bars) */
+  --stat-speed: #e6c65e;
+  --stat-stamina: #7fcf8a;
+  --stat-power: #e0875f;
+  --stat-wisdom: #8fb5e6;
+  --stat-luck: #c69be6;
+
+  /* ---- typography ---- */
+  --font-ui: "Trebuchet MS", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+  --font-display: Georgia, "Palatino Linotype", "Book Antiqua", Palatino, serif;
+  --font-num: "Segoe UI", system-ui, -apple-system, Arial, sans-serif;
+  --font-emoji: "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", "Twemoji Mozilla", sans-serif;
+
+  --fs-min: 16px;
+  --fs-base: 18px;
+  --fs-md: 20px;
+  --fs-lg: 24px;
+  --fs-xl: 32px;
+  --fs-display: 44px;
+  --fs-countdown: 96px;
+
+  /* ---- spacing ---- */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 24px;
+  --sp-6: 32px;
+  --sp-7: 48px;
+
+  /* ---- radii ---- */
+  --r-sm: 6px;
+  --r-md: 10px;
+  --r-lg: 16px;
+  --r-pill: 999px;
+
+  /* ---- elevation ---- */
+  --shadow-1: 0 2px 6px rgba(0, 0, 0, 0.35);
+  --shadow-2: 0 8px 24px rgba(0, 0, 0, 0.45);
+  --shadow-3: 0 18px 60px rgba(0, 0, 0, 0.6);
+
+  /* ---- z-index scale ---- */
+  --z-base: 1;
+  --z-sprite: 5;
+  --z-track-fx: 10;
+  --z-track-overlay: 20;
+  --z-header: 30;
+  --z-drawer: 40;
+  --z-modal: 60;
+  --z-banner: 70;
+  --z-toast: 80;
+
+  /* ---- layout constants ---- */
+  --header-h: 92px;
+  --sidebar-w: 440px;
+  --roster-h: 320px;
+  --drawer-w: 480px;
+
+  /* ---- hype tier (overridden by body[data-hype-tier]) ---- */
+  --hype-color: var(--moss);
+  --hype-glow: rgba(79, 209, 197, 0);
+  --hype-pulse-dur: 0s;
+
+  color-scheme: dark;
+}
+
+body[data-hype-tier="1"] {
+  --hype-color: var(--gold);
+  --hype-glow: rgba(201, 168, 76, 0.35);
+  --hype-pulse-dur: 2.4s;
+}
+body[data-hype-tier="2"] {
+  --hype-color: var(--ember);
+  --hype-glow: rgba(224, 122, 85, 0.55);
+  --hype-pulse-dur: 1.3s;
+}
+body[data-hype-tier="3"] {
+  --hype-color: var(--teal);
+  --hype-glow: rgba(79, 209, 197, 0.7);
+  --hype-pulse-dur: 0.8s;
+}
+
+/* ---- base elements ---- */
+*,
+*::before,
+*::after { box-sizing: border-box; }
+
+html, body { margin: 0; padding: 0; }
+
+html { background: var(--forest-900); }
+
+body {
+  background: var(--forest-900);
+  background-image:
+    radial-gradient(ellipse 80% 60% at 20% 0%, rgba(47, 93, 58, 0.35), transparent 70%),
+    radial-gradient(ellipse 60% 50% at 100% 100%, rgba(107, 70, 50, 0.22), transparent 70%);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: var(--fs-base);
+  line-height: 1.35;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+h1, h2, h3, h4 { margin: 0; font-weight: 700; line-height: 1.15; }
+p { margin: 0; }
+ul, ol { margin: 0; padding: 0; list-style: none; }
+
+button, input, select, textarea {
+  font: inherit;
+  font-size: var(--fs-min);
+  color: inherit;
+}
+
+button { cursor: pointer; }
+button:disabled { cursor: not-allowed; }
+
+:focus-visible {
+  outline: 2px solid var(--teal);
+  outline-offset: 2px;
+}
+
+[hidden] { display: none !important; }
+
+.emoji { font-family: var(--font-emoji); font-style: normal; line-height: 1; }
+.num { font-family: var(--font-num); font-variant-numeric: tabular-nums; }
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+}
+
+/* ---- shared controls ---- */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  min-height: 36px;
+  padding: 6px 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface-3);
+  color: var(--cream);
+  font-weight: 700;
+  font-size: var(--fs-min);
+  letter-spacing: 0.02em;
+  transition: background 0.15s, border-color 0.15s, transform 0.08s, box-shadow 0.15s;
+}
+.btn:hover:not(:disabled) { background: #2d4a37; border-color: rgba(243, 233, 210, 0.4); }
+.btn:active:not(:disabled) { transform: translateY(1px); }
+.btn:disabled { opacity: 0.42; }
+.btn--primary { background: var(--forest-500); border-color: var(--moss); }
+.btn--primary:hover:not(:disabled) { background: #3a7047; }
+.btn--gold { background: var(--gold); color: var(--forest-900); border-color: var(--gold-bright); }
+.btn--gold:hover:not(:disabled) { background: var(--gold-bright); }
+.btn--danger { background: #5a2a20; border-color: #8a4432; }
+.btn--danger:hover:not(:disabled) { background: #74362a; }
+.btn--armed,
+.btn--armed:hover:not(:disabled) {
+  --hype-glow: rgba(224, 122, 85, 0.6);
+  background: var(--ember);
+  color: var(--forest-900);
+  border-color: #ffb08f;
+  animation: sd-hype-pulse 0.9s ease-in-out infinite;
+}
+.btn--ghost { background: transparent; }
+.btn--sm { min-height: 30px; padding: 3px 10px; }
+.btn--icon { width: 48px; height: 48px; padding: 0; font-size: 24px; }
+
+.field {
+  min-height: 34px;
+  padding: 4px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface-sunk);
+  color: var(--cream);
+}
+select.field { padding-right: 4px; }
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 10px;
+  border-radius: var(--r-pill);
+  background: var(--surface-3);
+  border: 1px solid var(--line-strong);
+  font-size: var(--fs-min);
+  font-weight: 700;
+  white-space: nowrap;
+}
+.pill--gold { background: rgba(201, 168, 76, 0.18); border-color: rgba(201, 168, 76, 0.6); color: var(--gold-bright); }
+.pill--teal { background: rgba(79, 209, 197, 0.12); border-color: rgba(79, 209, 197, 0.5); color: #a8efe8; }
+.pill--bad { background: rgba(224, 122, 85, 0.16); border-color: rgba(224, 122, 85, 0.55); color: var(--sev-bad); }
+
+/* Emoji avatar on a coloured gradient token. --badge = runner.badgeColor, --ring = runner.ribbonColor */
+.badge {
+  --badge: var(--moss);
+  --ring: rgba(243, 233, 210, 0.28);
+  position: relative;
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 32% 26%, rgba(255, 255, 255, 0.5), rgba(255, 255, 255, 0) 52%),
+    radial-gradient(circle at 70% 85%, rgba(0, 0, 0, 0.38), rgba(0, 0, 0, 0) 62%),
+    var(--badge);
+  box-shadow: 0 0 0 3px var(--ring), 0 2px 6px rgba(0, 0, 0, 0.5);
+  font-family: var(--font-emoji);
+  font-size: 26px;
+  line-height: 1;
+  overflow: hidden;
+}
+.badge--ribbon { box-shadow: 0 0 0 3px var(--ring), 0 0 10px var(--ring), 0 2px 6px rgba(0, 0, 0, 0.5); }
+.badge img { width: 100%; height: 100%; object-fit: cover; }
+.badge--sm { width: 32px; height: 32px; font-size: 19px; box-shadow: 0 0 0 2px var(--ring); }
+.badge--lg { width: 56px; height: 56px; font-size: 34px; }
+
+/* severity text colours (reused by ticker, log, results, toasts) */
+.sev-info { color: var(--sev-info); }
+.sev-good { color: var(--sev-good); }
+.sev-bad { color: var(--sev-bad); }
+.sev-epic { color: var(--sev-epic); }
+
+/* scrollbars (Chromium / OBS CEF) */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: rgba(0, 0, 0, 0.2); }
+::-webkit-scrollbar-thumb { background: var(--surface-3); border-radius: 6px; border: 2px solid transparent; background-clip: padding-box; }
+::-webkit-scrollbar-thumb:hover { background-color: var(--forest-500); }
+
+/* =====================================================================
+   KEYFRAMES
+   ===================================================================== */
+
+/* Finish line flash — gold/cream burst across the finish column. */
+@keyframes sd-finish-flash {
+  0%   { opacity: 0; transform: scaleX(0.4); }
+  12%  { opacity: 1; transform: scaleX(1.6); }
+  40%  { opacity: 0.8; transform: scaleX(1.1); }
+  100% { opacity: 0; transform: scaleX(1); }
+}
+
+/* Hype pulse — intensity/speed driven by body[data-hype-tier] (--hype-glow, --hype-pulse-dur). */
+@keyframes sd-hype-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 var(--hype-glow), 0 0 6px 0 var(--hype-glow); }
+  50%      { box-shadow: 0 0 0 3px var(--hype-glow), 0 0 22px 4px var(--hype-glow); }
+}
+
+/* Ability activation glow — teal aura that swells and fades. */
+@keyframes sd-ability-glow {
+  0%   { opacity: 0; transform: scale(0.6); }
+  25%  { opacity: 1; transform: scale(1.15); }
+  100% { opacity: 0; transform: scale(1.6); }
+}
+
+/* Critical burst — bright gold flash on the sprite (filter-only so flips/transforms survive). */
+@keyframes sd-crit-flash {
+  0%   { filter: brightness(1) drop-shadow(0 0 0 rgba(230, 198, 94, 0)); }
+  20%  { filter: brightness(1.9) drop-shadow(0 0 14px rgba(230, 198, 94, 0.95)); }
+  100% { filter: brightness(1) drop-shadow(0 0 0 rgba(230, 198, 94, 0)); }
+}
+
+/* Crit burst ring (pseudo element). */
+@keyframes sd-crit-ring {
+  0%   { opacity: 0.95; transform: scale(0.5); }
+  100% { opacity: 0; transform: scale(2.1); }
+}
+
+/* Sprite run bob — paused while .track--paused / not running. */
+@keyframes sd-bob {
+  0%, 100% { transform: translateY(0) rotate(-2deg); }
+  50%      { transform: translateY(-5px) rotate(2deg); }
+}
+
+/* Toast slide-in / out. */
+@keyframes sd-toast-in {
+  0%   { opacity: 0; transform: translateX(24px) scale(0.96); }
+  100% { opacity: 1; transform: translateX(0) scale(1); }
+}
+@keyframes sd-toast-out {
+  0%   { opacity: 1; transform: translateX(0); }
+  100% { opacity: 0; transform: translateX(24px); }
+}
+
+/* Banner drop (hype thresholds, photo finish, winner). Elements are centred with translateX(-50%). */
+@keyframes sd-banner-drop {
+  0%   { opacity: 0; transform: translate(-50%, -60px) scale(0.9); }
+  14%  { opacity: 1; transform: translate(-50%, 6px) scale(1.03); }
+  22%  { transform: translate(-50%, 0) scale(1); }
+  85%  { opacity: 1; transform: translate(-50%, 0) scale(1); }
+  100% { opacity: 0; transform: translate(-50%, -24px) scale(0.98); }
+}
+
+/* Level-up ring — golden ring expanding around a card/badge. */
+@keyframes sd-levelup-ring {
+  0%   { box-shadow: 0 0 0 0 rgba(230, 198, 94, 0.9), 0 0 0 0 rgba(230, 198, 94, 0.5); }
+  60%  { box-shadow: 0 0 0 6px rgba(230, 198, 94, 0.55), 0 0 30px 10px rgba(230, 198, 94, 0.25); }
+  100% { box-shadow: 0 0 0 12px rgba(230, 198, 94, 0), 0 0 40px 16px rgba(230, 198, 94, 0); }
+}
+
+/* Mysterious fog drifting across the lanes. */
+@keyframes sd-fog-drift {
+  0%   { background-position: 0 0, 0 0; }
+  100% { background-position: -800px 0, 600px 0; }
+}
+
+/* Lane parallax — grass stripes scroll left while running. */
+@keyframes sd-bg-scroll {
+  0%   { background-position: 0 0; }
+  100% { background-position: -160px 0; }
+}
+
+/* Countdown number pop (3·2·1·GO). */
+@keyframes sd-count-pop {
+  0%   { opacity: 0; transform: scale(2.2); }
+  18%  { opacity: 1; transform: scale(0.94); }
+  30%  { transform: scale(1); }
+  80%  { opacity: 1; }
+  100% { opacity: 0; transform: scale(0.86); }
+}
+
+/* Generic entrances used by modals. */
+@keyframes sd-fade-in {
+  0%   { opacity: 0; }
+  100% { opacity: 1; }
+}
+@keyframes sd-rise-in {
+  0%   { opacity: 0; transform: translateY(24px) scale(0.98); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* Soft blink for status dots / live markers. */
+@keyframes sd-blink {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.35; }
+}
+
+/* Reduced motion: stop decorative loops only. Banners/toasts keep their (short) entrances
+   because their keyframes end hidden and must play to be seen at all. */
+@media (prefers-reduced-motion: reduce) {
+  .sprite__bob,
+  .lane__bg,
+  .track__fog,
+  .hype__fill { animation: none !important; }
+}
