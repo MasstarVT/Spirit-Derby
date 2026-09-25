@@ -354,18 +354,30 @@ open training off. Mod status comes from Twitch badges and tags, or from the bri
 | `!cheer [runner]` | `!c` | `!join` | **no** | 30 s | Hype +3 and +2 SP; a named runner gets a tiny pre-race boost |
 | `!status` | `!stats` | `!join` | no | none | Your SP, rank and runner at a glance |
 | `!inspect <runner>` | `!i` | — | no | none | Full runner card: style, ability, owner, stats, condition, mood, record, odds |
-| `!race` | — | — | no | none | What is happening on the track (and who is favourite) |
-| `!event` | — | — | no | none | Today's day event and what it changes |
+| `!race` | — | — | no | none | Viewers: what is happening on the track, the next field, favourite and open bets. **Mods / streamer:** starts the race (`!race 2000` picks the distance, `!race status` only looks) |
+| `!event` | — | — | no | none | Viewers: today's day event. **Mods / streamer:** `!event` rolls a new random day event, `!event <name>` sets one (`!event harvest`), `!event today` only looks |
 | `!leaderboard [board] [all]` | `!lb`, `!top` | — | no | none | Top 3 on a board: `wins`, `xp`, `sp`, `part`, `victories`, `hype`; add `all` for all-time |
 | `!rank [viewer]` | — | `!join` (for yourself) | no | none | Your rank on the SP, victories and hype boards |
 | `!help [command]` | `!h`, `!commands` | — | no | none | Command list, or help for one command |
+| `!bet <runner> <amount>` | — | `!join` | yes | 10 s | Bet 10–250 fictional SP on a runner in the next race (`!bet 50 moss`, `!bet moss all`, `!bet cancel`). Pays amount × the odds locked when you bet. One bet each; a new bet refunds the old one |
+| `!bets` | — | — | no | none | Open bets on the next race (count, total, per runner, yours) |
+| `!odds` | — | — | no | none | Odds for every runner in the next race (or the running race) |
+| `!boost <runner>` | — | `!join` | yes | 10 s | 40 SP: a +2.5% burst at a random moment of that runner's next race (max 3 per runner per race; your own runner is fine) |
+| `!snack <runner>` | — | `!join` | yes | 10 s | 25 SP: +10 energy (max 2 snacks per runner per day) |
+| `!sabotage <runner>` | — | `!join` | yes | **10 min** | 60 SP: a pebble in a rival's shoe for its next race (slower for a stretch); wise runners may kick it back at you. Not your own runner; max 2 per target and 4 per race; announced publicly |
+| `!ribbon <colour>` | — | a runner | yes | 10 s | 100 SP: a coloured ribbon ring on your runner (named colours or `#hex`; `!ribbon off` is free) |
+| `!hype` | — | — | no | none | The hype meter and the next threshold |
+| `!achievements [viewer]` | `!ach`, `!badges` | `!join` (for yourself) | no | none | Achievements unlocked (count / total and the latest 3) |
 
 - The 10 s cooldown is per viewer and per command, and can be changed under **Tuning → User
   cooldown**. Read-only commands have no cooldown but count toward activity at most once every 10 s.
 - The game answers commands meant for other bots with `Unknown command` in the feed, but these
   replies are not toasted on the overlay and not sent to the bridge.
-- **Planned (later milestones):** `!bet`, `!boost`, `!snack`, `!sabotage`, `!ribbon`, `!create`,
-  and mod-only `!race` (start a race) and `!event` (trigger a day event).
+- Spirit Points are fictional: they cannot be bought, sold or cashed out. `!bet`, `!boost`, `!snack`,
+  `!sabotage` and `!ribbon` only move SP inside the game.
+- Achievements a viewer unlocks with their own command are appended to that command's reply, so
+  they also reach Twitch through the bridge.
+- **Planned (later milestone):** `!create <name>`.
 
 ## 10. Troubleshooting
 

@@ -534,29 +534,59 @@
   };
 
   // ---------------------------------------------------------------------------
-  // Achievements (checked by achievements.js in a later milestone).
-  // trigger is a machine-readable hint for that module.
+  // Achievements (M5, checked by achievements.js on bus events; unlocked once per viewer,
+  // kept across seasons). sp = reward (CONFIG.ECONOMY.ACHIEVEMENT_SP_MIN..MAX).
+  // trigger = which bus event / check unlocks it (documentation for achievements.js):
+  //   on: join | claim | train | rest | cheer | hype | bet | betWin | race | sabotage | snack |
+  //       levelup | sp | season | create;  min = count needed (all-time); other keys refine it.
   // ---------------------------------------------------------------------------
   const ACHIEVEMENTS = [
-    { id: 'firstSteps', name: 'First Steps', desc: 'Join the Spirit Derby.', sp: 25, trigger: { on: 'join' } },
-    { id: 'trainer', name: 'Trainer', desc: 'Train runners 25 times.', sp: 50, trigger: { on: 'train', stat: 'trains', min: 25 } },
-    { id: 'criticalHit', name: 'Critical Hit', desc: 'Land a critical training.', sp: 25, trigger: { on: 'train', outcome: 'crit' } },
-    { id: 'overtrainer', name: 'Overtrainer', desc: 'Train a runner until it is Exhausted. Oops.', sp: 25, trigger: { on: 'train', condition: 'Exhausted' } },
-    { id: 'highRoller', name: 'High Roller', desc: 'Place a 250 SP bet.', sp: 50, trigger: { on: 'bet', amountMin: 250 } },
-    { id: 'photoFinish', name: 'Photo Finish', desc: 'Own or back a runner in a photo finish.', sp: 50, trigger: { on: 'race', photoFinish: true } },
-    { id: 'comebackKid', name: 'Comeback Kid', desc: 'Own a runner that wins from last place at the final turn.', sp: 100, trigger: { on: 'race', comeback: true } },
-    { id: 'cryptidWhisperer', name: 'Cryptid Whisperer', desc: 'Own a runner that meets a cryptid and still makes the podium.', sp: 75, trigger: { on: 'race', eventIds: ['cryptidCrossing', 'unknownCreature'], podium: true } },
-    { id: 'feralMode', name: 'Feral Mode', desc: 'Help push hype past 50.', sp: 25, trigger: { on: 'hype', threshold: 'feral' } },
-    { id: 'forestAwakened', name: 'Forest Awakened', desc: 'Help push hype to 100.', sp: 100, trigger: { on: 'hype', threshold: 'awakened' } },
-    { id: 'sabotageBackfire', name: 'Sabotage Backfire', desc: 'Have one of your sabotages backfire.', sp: 25, trigger: { on: 'race', backfire: true } },
-    { id: 'winnersCircle', name: "Winner's Circle", desc: 'Own the winner of a race.', sp: 50, trigger: { on: 'race', ownerWin: true } },
-    { id: 'underdogBeliever', name: 'Underdog Believer', desc: 'Win a bet at odds of 8x or more.', sp: 100, trigger: { on: 'bet', wonOddsMin: 8 } },
-    { id: 'cheerleader', name: 'Cheerleader', desc: 'Cheer 50 times.', sp: 50, trigger: { on: 'cheer', stat: 'cheers', min: 50 } },
-    { id: 'snackDealer', name: 'Snack Dealer', desc: 'Buy 10 snacks for runners.', sp: 25, trigger: { on: 'snack', stat: 'snacks', min: 10 } },
-    { id: 'doubleDigits', name: 'Double Digits', desc: 'Get your runner to level 10.', sp: 100, trigger: { on: 'levelup', levelMin: 10 } },
-    { id: 'spiritHoarder', name: 'Spirit Hoarder', desc: 'Hold 1000 Spirit Points at once.', sp: 50, trigger: { on: 'sp', balanceMin: 1000 } },
-    { id: 'creator', name: 'Creator', desc: 'Create your own runner.', sp: 25, trigger: { on: 'create' } },
-    { id: 'marathonMind', name: 'Marathon Mind', desc: 'Own the winner of a 2400 m race.', sp: 50, trigger: { on: 'race', ownerWin: true, distanceMin: 2400 } }
+    { id: 'firstSteps', icon: '\u{1F463}', name: 'First Steps', desc: 'Join the Spirit Derby.', sp: 25, trigger: { on: 'join' } },
+    { id: 'stableHand', icon: '\u{1F3E1}', name: 'Stable Hand', desc: 'Claim your first runner.', sp: 25, trigger: { on: 'claim' } },
+    { id: 'trainer', icon: '\u{1F3CB}', name: 'Trainer', desc: 'Train runners 10 times.', sp: 50, trigger: { on: 'train', min: 10 } },
+    { id: 'criticalHit', icon: '\u{26A1}', name: 'Critical Hit', desc: 'Land a critical training session.', sp: 25, trigger: { on: 'train', outcome: 'crit' } },
+    { id: 'overtrainer', icon: '\u{1F4A4}', name: 'Overtrainer', desc: 'Train a runner until it is Exhausted. Oops.', sp: 25, trigger: { on: 'train', condition: 'Exhausted' } },
+    { id: 'wellRested', icon: '\u{1F6CC}', name: 'Well Rested', desc: 'Rest runners 5 times.', sp: 25, trigger: { on: 'rest', min: 5 } },
+    { id: 'cheerleader', icon: '\u{1F4E3}', name: 'Cheerleader', desc: 'Cheer 25 times.', sp: 50, trigger: { on: 'cheer', min: 25 } },
+    { id: 'hypeTrain', icon: '\u{1F682}', name: 'Hype Train', desc: 'Help push hype past 50 (FERAL MODE).', sp: 25, trigger: { on: 'hype', threshold: 'feral' } },
+    { id: 'forestAwakened', icon: '\u{1F333}', name: 'Forest Awakened', desc: 'Help push hype to 100 and wake the forest.', sp: 100, trigger: { on: 'hype', threshold: 'awakened' } },
+    { id: 'highRoller', icon: '\u{1F3B2}', name: 'High Roller', desc: 'Place a bet of 200 SP or more.', sp: 50, trigger: { on: 'bet', amountMin: 200 } },
+    { id: 'sharpEye', icon: '\u{1F441}', name: 'Sharp Eye', desc: 'Win a bet at odds of 5x or more.', sp: 50, trigger: { on: 'betWin', oddsMin: 5 } },
+    { id: 'longshot', icon: '\u{1F3AF}', name: 'Longshot', desc: 'Win a bet at odds of 10x or more.', sp: 100, trigger: { on: 'betWin', oddsMin: 10 } },
+    { id: 'ownersPride', icon: '\u{1F3C6}', name: "Owner's Pride", desc: 'Own the winner of a race.', sp: 50, trigger: { on: 'race', ownerWin: true } },
+    { id: 'podiumRegular', icon: '\u{1F949}', name: 'Podium Regular', desc: 'Own a runner that finishes in the top 3, three times.', sp: 50, trigger: { on: 'race', podiums: 3 } },
+    { id: 'photoFinish', icon: '\u{1F4F8}', name: 'Photo Finish', desc: 'Own one of the two runners in a photo finish.', sp: 50, trigger: { on: 'race', photoFinish: true } },
+    { id: 'comebackKid', icon: '\u{1F504}', name: 'Comeback Kid', desc: 'Own a runner that wins from last place at the final turn.', sp: 100, trigger: { on: 'race', comeback: true } },
+    { id: 'saboteur', icon: '\u{1FAA8}', name: 'Saboteur', desc: 'Sabotage a runner for the first time.', sp: 25, trigger: { on: 'sabotage' } },
+    { id: 'karma', icon: '\u{1FA83}', name: 'Karma', desc: 'Have one of your sabotages backfire.', sp: 25, trigger: { on: 'race', backfire: true } },
+    { id: 'seasonChampion', icon: '\u{1F451}', name: 'Season Champion', desc: "Own the season's champion runner when the season ends.", sp: 100, trigger: { on: 'season', champion: true } },
+    { id: 'cryptidWhisperer', icon: '\u{1F47E}', name: 'Cryptid Whisperer', desc: 'Own a runner that meets a cryptid and still makes the podium.', sp: 75, trigger: { on: 'race', eventIds: ['cryptidCrossing', 'unknownCreature'], podium: true } },
+    { id: 'marathonMind', icon: '\u{1F3C3}', name: 'Marathon Mind', desc: 'Own the winner of a 2400 m race.', sp: 50, trigger: { on: 'race', ownerWin: true, distanceMin: 2400 } },
+    { id: 'snackDealer', icon: '\u{1F34E}', name: 'Snack Dealer', desc: 'Buy 10 snacks for runners.', sp: 25, trigger: { on: 'snack', min: 10 } },
+    { id: 'doubleDigits', icon: '\u{1F51F}', name: 'Double Digits', desc: 'Own a runner that reaches level 10.', sp: 100, trigger: { on: 'levelup', levelMin: 10 } },
+    { id: 'spiritHoarder', icon: '\u{1F4B0}', name: 'Spirit Hoarder', desc: 'Hold 1,000 Spirit Points at once.', sp: 50, trigger: { on: 'sp', balanceMin: 1000 } },
+    { id: 'creator', icon: '\u{2728}', name: 'Creator', desc: 'Create your own runner.', sp: 25, trigger: { on: 'create' } }
+  ];
+
+  // !ribbon <colour>: named colours (stored as hex on runner.ribbonColor); #rgb / #rrggbb also work.
+  const RIBBON_COLORS = {
+    gold: '#e6c65e', silver: '#c9d1d9', bronze: '#c08a4e', copper: '#d0763f',
+    red: '#e0524a', crimson: '#c2334d', ruby: '#b3264f', rose: '#f0a3b5', pink: '#ff7eb6',
+    orange: '#f29a3f', amber: '#f5b642', yellow: '#f2dc5d', sunflower: '#f7c948',
+    green: '#6fcf6a', moss: '#8fbf6a', emerald: '#2fbf71', mint: '#9ff0c8', teal: '#4fd1c5',
+    sky: '#7cc4f2', blue: '#4f86e0', sapphire: '#2f5fd0', navy: '#2b3f7a',
+    purple: '#9b6be0', violet: '#8a55d6', lilac: '#c9a7f0', lavender: '#b8a9e8',
+    white: '#f4f1ea', snow: '#ffffff', cream: '#f3e9d2', black: '#1a1a1a', midnight: '#232a4a', brown: '#8a5a3a'
+  };
+
+  // !snack flavour ({r} = runner)
+  const SNACK_FLAVOUR = [
+    '{r} munches a honey-glazed acorn.',
+    '{r} crunches a dewdrop berry.',
+    '{r} nibbles a moss cookie, crumbs everywhere.',
+    '{r} gulps down a glowing mushroom cap.',
+    '{r} shares a clover sandwich with a passing beetle.',
+    '{r} sips nectar from a bluebell.'
   ];
 
   SD.DATA = {
@@ -581,6 +611,8 @@
     TRAINING_FLAVOUR: TRAINING_FLAVOUR,
     REST_FLAVOUR: REST_FLAVOUR,
     RACE_TEXT: RACE_TEXT,
-    ACHIEVEMENTS: ACHIEVEMENTS
+    ACHIEVEMENTS: ACHIEVEMENTS,
+    RIBBON_COLORS: RIBBON_COLORS,
+    SNACK_FLAVOUR: SNACK_FLAVOUR
   };
 })(globalThis.SD = globalThis.SD || {});

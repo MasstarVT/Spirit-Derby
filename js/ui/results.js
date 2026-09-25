@@ -1,6 +1,6 @@
 /* SPIRIT DERBY — ui/results.js
  * Results modal shown on race:finished (wired by main.js): placements table, major events,
- * hype before → after, level-ups (and bets/achievements when those milestones exist).
+ * hype before → after, level-ups, bets (winners with payouts, losers, total paid) and achievements (M5).
  * Continue button + auto-close after settings.resultsAutoCloseMs (default 25 s).
  * Emits 'ui:resultsClosed' on close so the track can return to the paddock.
  * Panel contract: SD.ui.results = { init(rootEl), render(state), destroy() } + show(payload), close(), isOpen().
@@ -193,20 +193,32 @@
       const lvl = this.levelUpLines(payload, sorted, entrants);
       if (lvl.length) side += '<h3 style="margin-top:12px">Level ups</h3><ul class="results__list">' + lvl.join('') + '</ul>';
 
+      // M5: bets (winners with payouts, losers counted) and achievements unlocked by this race.
       const bets = (Array.isArray(payload.bets) && payload.bets.length ? payload.bets : rec.bets) || [];
       if (bets.length) {
-        side += '<h3 style="margin-top:12px">Bets</h3><ul class="results__list">' + bets.slice(0, 8).map(function (b) {
-          const e = entrants[b.runnerId] || {};
-          return '<li>' + esc(b.username) + ' · ' + esc(fmt.int(b.amount)) + ' on ' + esc(e.name || b.runnerId) + ' → ' +
-            (b.won ? '<span class="gain">+' + esc(fmt.int(b.payout)) + '</span>' : '<span class="loss">lost</span>') + '</li>';
-        }).join('') + '</ul>';
+        const won = bets.filter(function (b) { return b.won; });
+        const lost = bets.filter(function (b) { return !b.won; });
+        const paid = won.reduce(function (a, b) { return a + (Number(b.payout) || 0); }, 0);
+        const lostSp = lost.reduce(function (a, b) { return a + (Number(b.amount) || 0); }, 0);
+        side += '<h3 style="margin-top:12px">Bets</h3>';
+        side += won.length
+          ? '<ul class="results__list results__bets">' + won.slice(0, 6).map(function (b) {
+            const e = entrants[b.runnerId] || {};
+            return '<li>🎉 <b>' + esc(b.displayName || b.username) + '</b> · ' + esc(fmt.int(b.amount)) + ' on ' + esc(e.name || b.runnerName || b.runnerId) +
+              ' @ ' + esc(fmt.odds(b.odds)) + ' → <span class="gain">+' + esc(fmt.int(b.payout)) + ' SP</span></li>';
+          }).join('') + (won.length > 6 ? '<li class="c-dim">+' + esc(won.length - 6) + ' more winners</li>' : '') + '</ul>'
+          : '<p class="c-dim">No winning bets this time.</p>';
+        side += '<p class="results__betsum">' +
+          (lost.length ? esc(lost.length) + ' losing bet' + (lost.length === 1 ? '' : 's') + ' (' + esc(fmt.int(lostSp)) + ' SP)' : 'No losing bets') +
+          ' · Paid out <b>' + esc(fmt.int(paid)) + ' SP</b></p>';
       }
 
       const ach = Array.isArray(payload.achievements) ? payload.achievements : [];
       if (ach.length) {
-        side += '<h3 style="margin-top:12px">Achievements</h3><ul class="results__list">' + ach.slice(0, 8).map(function (a) {
-          return '<li>🏅 ' + esc(a.username || '') + ' · ' + esc(a.name || a.id || '') + '</li>';
-        }).join('') + '</ul>';
+        side += '<h3 style="margin-top:12px">Achievements unlocked</h3><ul class="results__list results__ach">' + ach.slice(0, 8).map(function (a) {
+          return '<li><span class="emoji">' + esc(a.icon || '🏅') + '</span> <b>' + esc(a.displayName || a.username || '') + '</b> · ' +
+            esc(a.name || a.id || '') + (a.sp ? ' <span class="gain">+' + esc(fmt.int(a.sp)) + ' SP</span>' : '') + '</li>';
+        }).join('') + (ach.length > 8 ? '<li class="c-dim">+' + esc(ach.length - 8) + ' more</li>' : '') + '</ul>';
       }
 
       return '' +

@@ -267,6 +267,25 @@
     },
 
     // -------------------------------------------------------------------------
+    // BETTING (plan section 6.4) - fictional Spirit Points only, never real money.
+    // Odds come from SD.race.buildEntrants (RACE.ODDS); a bet keeps the odds it was placed at.
+    // -------------------------------------------------------------------------
+    BETTING: {
+      PAYOUT_ROUND: 2,          // payout = floor(round(amount x odds, 2)) so 10 x 2.3 pays 23, not 22
+      COUNT_REPLACEMENTS: false,// a replaced bet does not count again in stats.bets / hype
+      LOG_WINNERS: 6            // winners named in the "Bets paid" log line
+    },
+
+    // -------------------------------------------------------------------------
+    // ACHIEVEMENTS (plan section 6.7) - catalog in DATA.ACHIEVEMENTS
+    // -------------------------------------------------------------------------
+    ACHIEVEMENTS: {
+      HYPE_WINDOW_MS: 3 * 60 * 1000, // "helped push hype past 50/100" = added hype this recently (or the crossing action)
+      LATEST_N: 3,                   // !achievements lists the newest N
+      MIN_FIELD_COMEBACK: 3          // Comeback Kid needs at least this many runners (last of 2 is not a comeback)
+    },
+
+    // -------------------------------------------------------------------------
     // HYPE (plan section 6.5)
     // -------------------------------------------------------------------------
     HYPE: {
@@ -291,7 +310,8 @@
       DAYS: 7,
       RACES_PER_DAY: 3,
       DAY_FATIGUE_RECOVERY: 40,
-      STAT_CARRY: 0.10          // new season: base + 10% of gained stats
+      STAT_CARRY: 0.10,         // new season: base + 10% of gained stats
+      HISTORY_TABLE_N: 10       // runner rows kept in each season.history entry's win table
     },
 
     // Playback pacing (UI): ticks per second by leader phase.

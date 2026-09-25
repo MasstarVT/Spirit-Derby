@@ -621,6 +621,15 @@
 
     // ================================================================ paddock (idle)
     previewField: function (state, count) {
+      // M5: the betting module's cached field + odds (queued cheers included, exactly what !bet locks in).
+      if (SD.betting && typeof SD.betting.fieldOdds === 'function') {
+        try {
+          const fo = SD.betting.fieldOdds(state);
+          if (fo && fo.field && fo.field.length) {
+            return fo.field.map(function (r) { const e = fo.byId[r.id]; return { runner: r, odds: e ? e.odds : null }; });
+          }
+        } catch (e) { /* fall back to the plain preview below */ }
+      }
       const active = (state.runners || []).filter(function (r) { return !r.retired; });
       let field = null;
       try {
@@ -657,10 +666,16 @@
       const count = dom.clamp(Number(s.runnerCount) || 4, 2, 8);
       const rows = this.previewField(state, count);
       const dayDone = idx >= racesPerDay;
-      const status = SD.betting ? 'Bets open' : 'Paddock open';
+      // M5: open bets (count + total) in the status pill; per-runner bets and queued chat effects on the cards.
+      let book = null;
+      try { book = SD.betting && typeof SD.betting.open === 'function' ? SD.betting.open(state) : null; } catch (e) { book = null; }
+      const status = SD.betting
+        ? 'Bets open' + (book && book.count ? ' · ' + book.count + ' bet' + (book.count === 1 ? '' : 's') + ' · ' + fmt.int(book.total) + ' SP' : '')
+        : 'Paddock open';
       const next = dayDone
         ? 'Day complete · advance the day to race again'
         : 'Next race · Race ' + (idx + 1) + '/' + racesPerDay + ' · ' + fmt.int(dist) + ' m · ' + rows.length + ' runners';
+      const fx = this.queuedEffects(state);
 
       const cards = rows.map(function (row) {
         const r = row.runner;
@@ -671,12 +686,20 @@
         const right = (row.odds != null && isFinite(Number(row.odds)))
           ? '<span class="odds" title="Decimal odds"><small>ODDS</small>' + fmt.odds(row.odds) + '</span>'
           : '<span class="pill pill--lv">Lv ' + esc(r.level || 1) + '</span>';
-        return '<div class="paddock__runner" style="' + esc(dom.runnerVars(r)) + '">' +
+        const q = fx[r.id] || {};
+        const bets = book && book.byRunner[r.id];
+        const chips = [];
+        if (bets) chips.push('<span class="pfx pfx--bet" title="Open bets on this runner">💰 ' + esc(bets.count) + ' · ' + esc(fmt.int(bets.total)) + ' SP</span>');
+        if (q.boost) chips.push('<span class="pfx pfx--boost" title="Boosts queued for its next race">⚡ boost ×' + esc(q.boost) + '</span>');
+        if (q.sabotage) chips.push('<span class="pfx pfx--sab" title="Sabotage queued: decided at the gate">🪨 sabotage ×' + esc(q.sabotage) + '</span>');
+        if (q.cheer) chips.push('<span class="pfx pfx--cheer" title="Cheers for its next race">📣 cheers ×' + esc(q.cheer) + '</span>');
+        return '<div class="paddock__runner' + (chips.length ? ' paddock__runner--fx' : '') + '" style="' + esc(dom.runnerVars(r)) + '">' +
           dom.badgeHTML(r, 'badge--lg') +
           '<div style="min-width:0">' +
             '<div class="paddock__name">' + esc(r.name) + '</div>' +
             '<div class="paddock__meta">' + esc(style.name) + ' · <span class="cond cond--' + cond + '">' + esc(r.condition || 'Normal') + '</span>' +
               ' · ⚡ ' + energy + '/' + maxE + (r.owner ? ' · 👤 ' + esc(r.owner) : '') + '</div>' +
+            (chips.length ? '<div class="paddock__fx">' + chips.join('') + '</div>' : '') +
           '</div>' + right +
         '</div>';
       }).join('');
@@ -690,7 +713,19 @@
         '</div>' +
         (cards ? '<div class="paddock__grid">' + cards + '</div>' : '<p class="paddock__empty">No runners are ready to race.</p>') +
         '<p class="paddock__hint">Streamer: open controls with <kbd>`</kbd> or ⚙ → <b>START RACE</b>' +
-          (SD.commands ? ' · Chat: <b>!join</b> · <b>!claim</b> · <b>!train</b> · <b>!cheer</b>' : ' · Train runners from their cards below') + '</p>';
+          (SD.commands ? ' · Chat: <b>!join</b> · <b>!claim</b> · <b>!train</b> · <b>!cheer</b>' +
+            (SD.betting ? ' · <b>!bet moss 50</b> · <b>!boost</b> · <b>!odds</b>' : '') : ' · Train runners from their cards below') + '</p>';
+    },
+
+    /** Queued chat effects for the next race: { runnerId: { boost, sabotage, cheer } } (counts). */
+    queuedEffects: function (state) {
+      const out = {};
+      (Array.isArray(state.raceEffects) ? state.raceEffects : []).forEach(function (e) {
+        if (!e || !e.runnerId || !/^(boost|sabotage|cheer)$/.test(e.type)) return;
+        const o = out[e.runnerId] || (out[e.runnerId] = {});
+        o[e.type] = (o[e.type] || 0) + Math.max(1, Number(e.count) || 1);
+      });
+      return out;
     },
 
     /** "👑 Leader: Velvet Comet (3 wins)" — the season's top runner by wins; '' before the first win. */

@@ -4,6 +4,7 @@
  * beforeunload flush → body[data-hype-tier] sync → debug error toasts.
  * Optional modules (commands, chat, leaderboards, integrations) are guarded.
  * M7: integrations init + auto-connect (settings.twitch/bridge.enabled or ?twitch= / ?bridge=).
+ * M5: SD.achievements.init() after game.init, season summary panel, gold achievement toasts.
  */
 (function (SD) {
   'use strict';
@@ -16,6 +17,7 @@
     ['header', '#header'],
     ['track', '#track'],
     ['results', '#results'],
+    ['season', '#season'],             // M5: season summary modal (listens to season:ended itself)
     ['roster', '#roster'],
     ['chat', '#chat'],                 // M2
     ['leaderboards', '#boards'],       // M3 (enables the Boards tab in init)
@@ -119,6 +121,7 @@
 
     if (e.key === 'Escape') {
       if (SD.ui.results && SD.ui.results.isOpen && SD.ui.results.isOpen()) { SD.ui.results.close(); e.preventDefault(); return; }
+      if (SD.ui.season && SD.ui.season.isOpen && SD.ui.season.isOpen()) { SD.ui.season.close(); e.preventDefault(); return; }
       if (document.body.classList.contains('sd-admin-open')) { setAdmin(false); e.preventDefault(); return; }
       if (typing && t.blur) t.blur();
       return;
@@ -223,8 +226,11 @@
     if (!state) state = SD.state.create();
     SD.state.set(state);
 
-    // 2. game director (subscribes to race:playbackDone → finishRace)
+    // 2. game director (subscribes to race:playbackDone → finishRace) + achievements (M5, bus-driven)
     SD.game.init();
+    if (SD.achievements && typeof SD.achievements.init === 'function') {
+      try { SD.achievements.init(); } catch (e) { console.error('[boot] achievements failed to init', e); }
+    }
 
     // 3. panels
     PANELS.forEach(function (pair) {
@@ -244,10 +250,20 @@
       if (SD.ui.results && typeof SD.ui.results.show === 'function') SD.ui.results.show(p);
     });
     // Starting the next race while the previous results are still up closes them.
+    // A season summary that was already showing closes too; one still queued behind the results
+    // modal appears when the results close, so it is never lost.
     dom.on('RACE_STARTED', function () {
+      const seasonOpen = !!(SD.ui.season && SD.ui.season.isOpen && SD.ui.season.isOpen());
       if (SD.ui.results && SD.ui.results.isOpen && SD.ui.results.isOpen()) SD.ui.results.close();
+      if (seasonOpen) SD.ui.season.close();
     });
     dom.on('STATE_LOADED', renderAll);
+    // M5: gold toast for every achievement (race achievements also appear in the results modal).
+    dom.on('ACHIEVEMENT_UNLOCKED', function (a) {
+      if (!a) return;
+      const node = dom.toast((a.icon || '🏅') + ' ' + (a.displayName || a.username) + ' unlocked ' + a.name + ' (+' + (a.sp || 0) + ' SP)', 'epic', { ms: 6500 });
+      if (node && node.classList) node.classList.add('toast--achievement');
+    });
 
     // 5. sidebar tabs
     const tablist = document.querySelector('.tabs');

@@ -4,6 +4,7 @@
  *
  *   join / ensure / touch   profile creation (+JOIN_SP once), daily first-action bonus (+DAILY_SP)
  *   addSp / spendSp / award SP faucets and sinks (never negative, totals tracked, emits player:sp)
+ *   refundSp                give back spent SP (bet refunds): reverses spSpentTotal, not "earned"
  *   claim / release         one runner per player; re-claiming releases the old one
  *   recordAction            participation counters + "backing" (the runner you act on most)
  *
@@ -142,6 +143,19 @@
     return { ok: true, balance: p.spiritPoints, amount: amt };
   }
 
+  // Give back SP that was spent (bet refunds, cancelled chat effects). Reverses the spend in the
+  // ledger (spSpentTotal goes down) instead of counting as SP earned. Returns { ok, balance, amount }.
+  function refundSp(state, username, amount, reason) {
+    const p = get(state, username);
+    if (!p) return { ok: false, balance: 0, amount: 0, message: 'No player called "' + cleanName(username) + '".' };
+    const amt = Math.floor(Number(amount) || 0);
+    if (amt <= 0) return { ok: true, balance: p.spiritPoints, amount: 0 };
+    p.spiritPoints += amt;
+    p.stats.spSpentTotal = Math.max(0, p.stats.spSpentTotal - amt);
+    emit(SD.EVENTS.PLAYER_SP, { username: p.username, displayName: p.displayName, delta: amt, balance: p.spiritPoints, reason: reason || 'refund', refund: true });
+    return { ok: true, balance: p.spiritPoints, amount: amt };
+  }
+
   // Hook for SD.game (training SP etc.): credit if the player exists. Returns the amount awarded.
   function award(state, username, amount, reason) {
     const r = addSp(state, username, amount, reason);
@@ -162,9 +176,11 @@
     p = create(key, displayName || username, opts);
     p.lastDailyDay = dayKey(state);
     state.players[key] = p;
-    emit(SD.EVENTS.PLAYER_JOINED, { username: p.username, displayName: p.displayName, source: opts.source || null });
     addSp(state, key, E().JOIN_SP, 'join');
     if (isCurrent(state)) SD.state.log('player', p.displayName + ' joined the Spirit Derby!', 'good', { username: p.username });
+    // Emitted once the profile is complete (join SP credited), so listeners such as
+    // achievements.js (First Steps) see the finished player.
+    emit(SD.EVENTS.PLAYER_JOINED, { username: p.username, displayName: p.displayName, source: opts.source || null });
     return { player: p, created: true };
   }
 
@@ -402,6 +418,7 @@
     join: join,
     addSp: addSp,
     spendSp: spendSp,
+    refundSp: refundSp,
     award: award,
     claim: claim,
     release: release,

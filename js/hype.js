@@ -42,7 +42,8 @@
   }
 
   // Sync thresholdsHit with the current value; emits hype:threshold for new crossings.
-  function syncThresholds(state, emit) {
+  // src (optional) = { by, reason } of the change that crossed it (carried on the event).
+  function syncThresholds(state, emit, src) {
     const H = state.hype;
     const crossed = [];
     thresholds().forEach(function (th) {
@@ -52,7 +53,12 @@
         crossed.push(th.id);
         if (emit) {
           if (SD.state && SD.state.get() === state) SD.state.log('hype', th.text, 'epic', { threshold: th.id });
-          if (SD.bus) SD.bus.emit(SD.EVENTS.HYPE_THRESHOLD, { id: th.id, value: H.value, threshold: th.value, text: th.text });
+          if (SD.bus) {
+            SD.bus.emit(SD.EVENTS.HYPE_THRESHOLD, {
+              id: th.id, value: H.value, threshold: th.value, text: th.text,
+              by: (src && src.by) || null, reason: (src && src.reason) || null
+            });
+          }
         }
       } else if (H.value < th.value && idx >= 0) {
         H.thresholdsHit.splice(idx, 1);
@@ -84,7 +90,7 @@
       const key = String(opts.by).toLowerCase();
       H.contributions[key] = U.round1((H.contributions[key] || 0) + delta);
     }
-    const crossed = syncThresholds(state, true);
+    const crossed = syncThresholds(state, true, opts);
     if (delta !== 0) emitChanged(state, delta, opts.by, opts.reason);
     return { value: H.value, delta: delta, crossed: crossed };
   }
@@ -92,7 +98,7 @@
   function set(state, value, reason) {
     const before = state.hype.value;
     state.hype.value = U.round1(U.clamp(Number(value) || 0, 0, state.hype.max || SD.CONFIG.HYPE.MAX));
-    syncThresholds(state, true);
+    syncThresholds(state, true, { reason: reason || 'set' });
     const delta = U.round1(state.hype.value - before);
     if (delta !== 0) emitChanged(state, delta, null, reason || 'set');
     return state.hype.value;

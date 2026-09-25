@@ -56,6 +56,7 @@
       '<div class="boards__chips" data-ref="chips" role="group" aria-label="Board">' + chips + '</div>' +
       '<p class="boards__desc" data-ref="desc"></p>' +
       '<ol class="boards__list" data-ref="list" aria-live="polite" aria-label="Leaderboard, best first"></ol>' +
+      '<section class="boards__history" data-ref="history" hidden></section>' +
       '<p class="boards__foot" data-ref="foot">Chat: <b>!lb</b> · <b>!lb wins</b> · <b>!lb xp all</b> · <b>!rank</b></p>';
   }
 
@@ -68,6 +69,7 @@
     scope: 'season',
     lastHTML: '',
     lastDesc: '',
+    lastHistory: null,
 
     init: function (root) {
       const self = this;
@@ -181,6 +183,28 @@
         html += '<li class="boards__more">+' + esc(ranked.length - rows.length) + ' more on this board</li>';
       }
       if (html !== this.lastHTML) { this.refs.list.innerHTML = html; this.lastHTML = html; }
+      this.renderHistory(state);
+    },
+
+    /** M5: past seasons' champions (newest first, last 5) under the board. */
+    renderHistory: function (state) {
+      const box = this.refs.history;
+      if (!box) return;
+      const hist = (state.season && Array.isArray(state.season.history)) ? state.season.history : [];
+      const html = hist.length
+        ? '<h3 class="boards__htitle">Season history</h3><ol class="boards__hlist">' + hist.slice(-5).reverse().map(function (h) {
+          return '<li class="boards__hrow"><span class="boards__hnum num">S' + esc(h.number) + '</span>' +
+            '<span class="boards__hchamp"><span class="emoji" aria-hidden="true">' + esc(h.championEmoji || '🏆') + '</span> ' +
+            '<b>' + esc(h.championName || 'No champion') + '</b>' + (h.championWins ? ' · ' + esc(h.championWins) + ' win' + (h.championWins === 1 ? '' : 's') : '') +
+            (h.championOwner ? ' · 👤 ' + esc(h.championOwner) : '') + '</span>' +
+            (h.mvpUsername ? '<span class="boards__hmvp">MVP ' + esc(h.mvpUsername) + '</span>' : '') + '</li>';
+        }).join('') + '</ol>'
+        : '';
+      if (html !== this.lastHistory) {
+        box.innerHTML = html;
+        box.hidden = !html;
+        this.lastHistory = html;
+      }
     }
   };
 

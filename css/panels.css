@@ -978,3 +978,40 @@ body[data-hype-tier="3"] .hype__fill {
   .int-pill[data-state="connecting"],
   .int-pill[data-state="reconnecting"] { animation: none; }
 }
+
+/* =====================================================================
+   M5: achievement toast, season bump, season history (Boards)
+   ===================================================================== */
+.toast--achievement {
+  border-left-color: var(--gold-bright);
+  background: linear-gradient(90deg, rgba(120, 92, 30, 0.97), rgba(61, 39, 27, 0.97) 60%, rgba(28, 45, 34, 0.97));
+  box-shadow: var(--shadow-2), 0 0 18px rgba(230, 198, 94, 0.35);
+}
+.toast--achievement .toast__text { color: #fff1bf; }
+
+.hdr-season__main--bump { transform-origin: left center; animation: sd-season-bump 2.4s ease-out both; }
+
+.boards__history {
+  flex: none;
+  padding: var(--sp-2) var(--sp-3);
+  border-top: 1px solid var(--line);
+}
+.boards__htitle {
+  margin-bottom: 4px;
+  font-size: var(--fs-min);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+.boards__hlist { display: flex; flex-direction: column; gap: 2px; }
+.boards__hrow {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  min-width: 0;
+  font-size: var(--fs-min);
+}
+.boards__hnum { flex: none; min-width: 32px; color: var(--gold-bright); font-weight: 800; }
+.boards__hchamp { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.boards__hchamp b { color: var(--cream); }
+.boards__hmvp { flex: none; color: var(--text-dim); }

@@ -4,7 +4,9 @@
  *    indented with ↳ in their severity colour, dim system lines (race start/finish, hype);
  *  - an input row: "@Name: !cmd" (or "Name: !cmd") speaks as Name, otherwise as the sender
  *    picked in the <select> (recent senders + Streamer = source 'admin', isMod);
- *  - a "🤖 Demo bots" toggle: six fictional viewers send plausible commands every 2–4 s;
+ *  - a "🤖 Demo bots" toggle: six fictional viewers send plausible commands every 2–4 s
+ *    (M5: they also bet, boost, snack and occasionally sabotage with what they can afford);
+ *  - system lines for race results + bets, achievements, refunds and the season summary (M5);
  *  - in overlay mode (body.sd-overlay) command replies also pop up as toasts under the track.
  * Everything goes through SD.commands.handleChat — the same pipeline Twitch uses in M7.
  * Panel contract: SD.ui.chat = { init(rootEl), render(state), destroy() }.
@@ -72,7 +74,8 @@
         '<button type="submit" class="btn btn--primary chat__send">Send</button>' +
       '</form>' +
       '<p class="chat__hint" data-ref="hint">Try <b>!join</b> · <b>!claim</b> · <b>!train speed</b> · <b>!rest</b> · <b>!cheer moss</b> · ' +
-        '<b>!status</b> · <b>!inspect moss</b> · <b>!lb wins</b> · <b>!rank</b> · <b>!help</b>. Start a line with <b>@Name:</b> to speak as that viewer.</p>';
+        '<b>!odds</b> · <b>!bet moss 50</b> · <b>!boost moss</b> · <b>!snack moss</b> · <b>!hype</b> · ' +
+        '<b>!status</b> · <b>!lb wins</b> · <b>!help</b>. Start a line with <b>@Name:</b> to speak as that viewer.</p>';
   }
 
   const chat = {
@@ -120,6 +123,35 @@
       this.offs.push(dom.on('RACE_FINISHED', function (p) {
         const sum = p && p.record && p.record.summary;
         self.system('🏆 ' + (sum && sum.winnerName ? sum.winnerName + ' wins!' : 'The race is over!') + ' Training is open again.', 'epic');
+        // M5: the race's bets and achievements, after the winner line.
+        const bets = (p && Array.isArray(p.bets)) ? p.bets : [];
+        if (bets.length) {
+          const won = bets.filter(function (b) { return b.won; });
+          const lost = bets.length - won.length;
+          self.system('💰 ' + (won.length
+            ? 'Bets paid: ' + won.slice(0, 4).map(function (b) { return (b.displayName || b.username) + ' +' + b.payout + ' SP'; }).join(', ') +
+              (won.length > 4 ? ' and ' + (won.length - 4) + ' more' : '')
+            : 'No winning bets') + (lost ? ' · ' + lost + ' bet' + (lost === 1 ? '' : 's') + ' lost' : '') + '.', won.length ? 'good' : 'info');
+        }
+        ((p && p.achievements) || []).slice(0, 6).forEach(function (a) {
+          self.system('🏅 ' + (a.displayName || a.username) + ' unlocked ' + a.name + ' (+' + (a.sp || 0) + ' SP)', 'epic');
+        });
+      }));
+      // Achievements from other viewers' actions (a viewer's own command reply already names them;
+      // race achievements are listed after the winner line above).
+      this.offs.push(dom.on('ACHIEVEMENT_UNLOCKED', function (a) {
+        if (!a || a.duringCommand || a.recordId) return;
+        self.system('🏅 ' + (a.displayName || a.username) + ' unlocked ' + a.name + ' (+' + (a.sp || 0) + ' SP)', 'epic');
+      }));
+      this.offs.push(dom.on('BET_RESOLVED', function (p) {
+        if (!p || !p.refunded || !Array.isArray(p.bets) || !p.bets.length) return;
+        self.system('💰 ' + p.bets.length + ' open bet' + (p.bets.length === 1 ? ' was' : 's were') + ' refunded.', 'info');
+      }));
+      this.offs.push(dom.on('SEASON_ENDED', function (p) {
+        const sum = p && p.summary;
+        if (!sum) return;
+        self.system('👑 Season ' + sum.number + ' is over! Champion: ' + (sum.championName || 'nobody') +
+          (sum.mvpUsername ? ' · MVP: ' + sum.mvpUsername : '') + '. A new season begins — !claim your runner again!', 'epic');
       }));
       this.offs.push(dom.on('RACE_ABORTED', function (p) {
         if (p && p.reset) return;
@@ -360,6 +392,7 @@
         }
         opts.push([18, pick(CHATTER)]);
         opts.push([6, '!race']);
+        if (SD.betting) opts.push([3, pick(['!odds', '!bets', '!hype'])]);
         opts.push([4, '!train speed']);                 // shows the race-lock reply now and then
         if (SD.leaderboards) opts.push([3, '!lb wins']);
       } else {
@@ -377,6 +410,7 @@
         opts.push([6, '!status']);
         opts.push([3, '!inspect ' + short(pick(runners))]);
         opts.push([2, '!race']);
+        this.communityLines(s, p, mine, runners, short, cd).forEach(function (o) { opts.push(o); });
         if (SD.leaderboards) {
           opts.push([3, pick(['!lb', '!lb wins', '!lb xp', '!lb hype', '!lb victories', '!lb part', '!top sp'])]);
           opts.push([2, '!rank']);
@@ -384,6 +418,39 @@
         opts.push([8, pick(CHATTER)]);
       }
       return weighted(opts) || pick(CHATTER);
+    },
+
+    // M5: bets, boosts, snacks and the odd sabotage — only what the bot can afford.
+    communityLines: function (s, p, mine, runners, short, cd) {
+      const out = [];
+      if (!SD.betting) return out;
+      const sp = Number(p.spiritPoints) || 0;
+      const E = (SD.CONFIG && SD.CONFIG.ECONOMY) || {};
+      let field = [];
+      try { field = SD.betting.fieldOdds(s).field || []; } catch (e) { field = []; }
+      const hasBet = (s.bets || []).some(function (b) { return b.username === p.username; });
+      if (field.length && sp >= (E.BET_MIN || 10) && cd('bet') === 0) {
+        const pickRunner = mine && field.some(function (r) { return r.id === mine.id; }) && Math.random() < 0.5 ? mine : pick(field);
+        const amt = Math.min(E.BET_MAX || 250, sp, pick([10, 20, 25, 30, 50, 50, 75, 100, 150, 200]));
+        if (amt >= (E.BET_MIN || 10)) out.push([hasBet ? 2 : 9, Math.random() < 0.15 ? '!bet ' + short(pickRunner) + ' all' : '!bet ' + short(pickRunner) + ' ' + amt]);
+      }
+      if (sp >= (E.BOOST_COST || 40) && cd('boost') === 0) {
+        const t = mine && Math.random() < 0.6 ? mine : pick(field.length ? field : runners);
+        out.push([4, '!boost ' + short(t)]);
+      }
+      if (sp >= (E.SNACK_COST || 25) && cd('snack') === 0) {
+        const hungry = runners.filter(function (r) { return r.energy < r.maxEnergy - 5 && !(r.daily && r.daily.snacks >= (E.SNACKS_PER_DAY || 2)); });
+        if (hungry.length) {
+          const t = mine && hungry.indexOf(mine) >= 0 && Math.random() < 0.7 ? mine : pick(hungry);
+          out.push([mine && t === mine && mine.energy < 50 ? 8 : 3, '!snack ' + short(t)]);
+        }
+      }
+      if (sp >= (E.SABOTAGE_COST || 60) && cd('sabotage') === 0) {
+        const rivals = (field.length ? field : runners).filter(function (r) { return !mine || r.id !== mine.id; });
+        if (rivals.length) out.push([2, '!sabotage ' + short(pick(rivals))]);
+      }
+      out.push([2, pick(['!odds', '!bets', '!hype', '!achievements'])]);
+      return out;
     }
   };
 

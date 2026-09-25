@@ -53,7 +53,7 @@
     const salt = opts.seedSalt != null ? (Number(opts.seedSalt) >>> 0) : SD.rng.hash('spirit-derby:' + now);
     const st = {
       schemaVersion: SD.persistence ? SD.persistence.SCHEMA_VERSION : 1,
-      meta: { createdAt: now, updatedAt: now, raceCounter: 0, seedSalt: salt, runnerCounter: 0, actionCounter: 0 },
+      meta: { createdAt: now, updatedAt: now, raceCounter: 0, seedSalt: salt, runnerCounter: 0, actionCounter: 0, betCounter: 0 },
       season: {
         number: 1, day: 1, daysPerSeason: CFG.SEASON.DAYS, racesPerDay: CFG.SEASON.RACES_PER_DAY,
         raceIndexInDay: 0, racesRun: 0, startedAt: now, activeDayEvent: null, history: []
@@ -66,7 +66,7 @@
       currentRace: null,
       raceHistory: [],
       settings: defaultSettings(),
-      achievements: { unlocked: [] },
+      achievements: { unlocked: [], progress: {} }, // progress[username] = counters for count-based achievements (M5)
       log: []
     };
     if (opts.settings && typeof opts.settings === 'object') Object.assign(st.settings, opts.settings);

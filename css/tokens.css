@@ -393,3 +393,11 @@ select.field { padding-right: 4px; }
   .track__fog,
   .hype__fill { animation: none !important; }
 }
+
+/* M5: header "SEASON n" pop when a new season starts */
+@keyframes sd-season-bump {
+  0% { transform: scale(1); color: inherit; text-shadow: none; }
+  18% { transform: scale(1.18); color: var(--gold-bright); text-shadow: 0 0 18px rgba(230, 198, 94, 0.8); }
+  60% { transform: scale(1.04); color: var(--gold-bright); text-shadow: 0 0 10px rgba(230, 198, 94, 0.5); }
+  100% { transform: scale(1); color: inherit; text-shadow: none; }
+}

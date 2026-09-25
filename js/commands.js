@@ -119,6 +119,10 @@
   // Odds the next race would offer for runnerId (same field + inputs as the paddock preview).
   function previewOdds(state, runnerId) {
     try {
+      if (SD.betting && typeof SD.betting.odds === 'function') {
+        const o = SD.betting.odds(state, runnerId); // same numbers the paddock and !bet use (queued cheers included)
+        return o ? o.odds : null;
+      }
       if (!SD.game || typeof SD.game.previewField !== 'function' || !SD.race) return null;
       const field = SD.game.previewField();
       if (!field.some(function (r) { return r.id === runnerId; })) return null;
@@ -344,6 +348,8 @@
         unknown: extra.unknown || undefined, cooldown: extra.cooldown || undefined, locked: extra.locked || undefined
       });
       res.id = reply.id;
+      // A public line a handler asked for (e.g. the !sabotage announcement), right after its reply.
+      if (ok && extra.announce && extra.announce.text) system(clip(extra.announce.text), extra.announce.severity || 'info');
       if (SD.bus) {
         SD.bus.emit(SD.EVENTS.COMMAND_RESULT, {
           id: reply.id, username: username, displayName: displayName, source: source, isMod: isMod,
@@ -398,6 +404,10 @@
 
     // 7. handler (check-then-commit inside one mutate)
     let out;
+    // Achievements unlocked by this command for this viewer are appended to the reply (M5).
+    const achList = state.achievements && Array.isArray(state.achievements.unlocked) ? state.achievements.unlocked : null;
+    const achMark = achList ? achList.length : 0;
+    rt.activeCommand = { username: username, command: def.name };
     try {
       out = SD.state.mutate('cmd:' + def.name, function (st) {
         ctx.state = st;
@@ -423,8 +433,19 @@
         try { SD.state.log('error', '!' + def.name + ' from ' + displayName + ' failed: ' + ((e && e.message) || e), 'warn'); } catch (x) { /* ignore */ }
         out = { ok: false, message: 'Something went wrong with !' + def.name + '. The streamer can check the log.', severity: 'bad' };
       }
+    } finally {
+      rt.activeCommand = null;
     }
     if (Array.isArray(out.effects)) out.effects.forEach(function (x) { if (effects.indexOf(x) < 0) effects.push(x); });
+    if (out.ok && achList && achList.length > achMark && SD.state.get() === state) {
+      const mine = achList.slice(achMark).filter(function (a) { return a.username === username; });
+      if (mine.length) {
+        out.message += DOT + '\u{1F3C5} Achievement' + (mine.length > 1 ? 's' : '') + ': ' +
+          mine.map(function (a) { return a.name + ' (+' + a.sp + ' SP)'; }).join(', ');
+        out.severity = 'epic';
+        mine.forEach(function (a) { effects.push({ type: 'achievement', id: a.id, sp: a.sp }); });
+      }
+    }
 
     // 8. stamp the cooldown (successful commands only)
     if (out.ok && cdLen > 0) stampCooldown(username, def, now);
@@ -434,7 +455,8 @@
     }
     return finish(out.ok, out.message, {
       severity: out.severity || (out.ok ? 'good' : 'bad'),
-      cooldownMs: out.ok ? cdLen : (out.cooldownMs || 0)
+      cooldownMs: out.ok ? cdLen : (out.cooldownMs || 0),
+      announce: out.announce || null
     });
   }
 
@@ -707,52 +729,117 @@
     }
   });
 
-  // !race — viewer-facing race status (read-only).
-  // TODO(M5): mods/streamer (ctx.isMod) get START RACE here: call SD.game.startRace() and reply with its message.
-  register({
-    name: 'race',
-    usage: '!race',
-    description: 'What is happening on the track right now (and who is favourite).',
-    cooldownMs: 0,
-    handler: function (ctx) {
-      const S = ctx.state;
-      const season = S.season;
-      const cr = S.currentRace;
-      if (cr && cr.record) {
-        const rec = cr.record;
-        if (cr.status === 'finished') return { message: 'The race at ' + rec.trackName + ' just finished — results incoming!', severity: 'info' };
-        const fav = rec.entrants.slice().sort(function (a, b) { return a.odds - b.odds; })[0];
-        const word = cr.status === 'paused' ? 'is PAUSED' : (cr.status === 'countdown' ? 'is about to start' : 'is running');
-        return {
-          message: 'Race ' + rec.indexInDay + '/' + season.racesPerDay + ' at ' + rec.trackName + ' (' + rec.distance + ' m) ' + word + ': ' +
-            rec.entrants.map(function (e) { return e.name; }).join(', ') + '. Favourite: ' + fav.name + ' at ' + fmtOdds(fav.odds) + '. !cheer them on!',
-          severity: 'info'
-        };
-      }
-      if (season.raceIndexInDay >= season.racesPerDay) {
-        return { message: "Today's " + season.racesPerDay + ' races are done. A new day dawns soon — keep training!', severity: 'info' };
-      }
-      let line = 'No race running. Next up: Race ' + (season.raceIndexInDay + 1) + '/' + season.racesPerDay + ' · ' + S.settings.distance + ' m';
-      try {
+  // Open bets in one short phrase: "3 bets (210 SP)" or ''.
+  function betsPhrase(state) {
+    if (!SD.betting) return '';
+    const o = SD.betting.open(state);
+    return o.count ? plural(o.count, 'bet') + ' (' + o.total + ' SP)' : '';
+  }
+
+  // Viewer-facing race status line (also what mods get with !race status).
+  function raceStatusLine(S) {
+    const season = S.season;
+    const cr = S.currentRace;
+    if (cr && cr.record) {
+      const rec = cr.record;
+      if (cr.status === 'finished') return 'The race at ' + rec.trackName + ' just finished — results incoming!';
+      const fav = rec.entrants.slice().sort(function (a, b) { return a.odds - b.odds; })[0];
+      const word = cr.status === 'paused' ? 'is PAUSED' : (cr.status === 'countdown' ? 'is about to start' : 'is running');
+      const bets = betsPhrase(S);
+      return 'Race ' + rec.indexInDay + '/' + season.racesPerDay + ' at ' + rec.trackName + ' (' + rec.distance + ' m) ' + word + ': ' +
+        rec.entrants.map(function (e) { return e.name; }).join(', ') + '. Favourite: ' + fav.name + ' at ' + fmtOdds(fav.odds) +
+        (bets ? '. ' + bets + ' riding on it' : '') + '. !cheer them on!';
+    }
+    if (season.raceIndexInDay >= season.racesPerDay && S.settings.autoAdvanceDay !== false) {
+      return "Today's " + season.racesPerDay + ' races are done. A new day dawns soon — keep training!';
+    }
+    let line = 'No race running. Next up: Race ' + Math.min(season.raceIndexInDay + 1, season.racesPerDay) + '/' + season.racesPerDay + ' · ' + S.settings.distance + ' m';
+    try {
+      if (SD.betting) {
+        const fo = SD.betting.fieldOdds(S);
+        if (fo.entrants.length) {
+          line += ' · ' + fo.entrants.map(function (e) { return e.name + ' ' + fmtOdds(e.odds); }).join(', ');
+          if (fo.favourite) line += ' · Favourite: ' + fo.favourite.name;
+        }
+      } else {
         const field = SD.game && SD.game.previewField ? SD.game.previewField() : [];
         if (field.length) {
           const ents = SD.race.buildEntrants(field, { distance: Number(S.settings.distance) || 1200, hypeLevel: S.hype.value, dayEvent: SD.state.dayEvent(S), cheerBonus: {} });
           line += ' · ' + ents.map(function (e) { return e.name + ' ' + fmtOdds(e.odds); }).join(', ');
         }
-      } catch (e) { /* preview is best-effort */ }
-      return { message: line + '. Train now, the gates open when the streamer says so!', severity: 'info' };
+      }
+    } catch (e) { /* preview is best-effort */ }
+    const bets = betsPhrase(S);
+    if (bets) line += ' · Bets: ' + bets;
+    return line + '. Train now, the gates open when the streamer says so!';
+  }
+
+  // !race — viewers: race status / next field / favourite / open bets.
+  //         mods & the streamer: START RACE (optional distance: !race 2000); "!race status" shows the line.
+  register({
+    name: 'race',
+    usage: '!race',
+    description: 'What is happening on the track (next field, favourite, open bets). Mods: !race starts the race (!race 2000 picks the distance, !race status just looks).',
+    cooldownMs: 0,
+    handler: function (ctx, args) {
+      const S = ctx.state;
+      const wantsStatus = args.length && /^(status|info|odds|next|\?)$/i.test(args[0]);
+      if (!ctx.isMod || wantsStatus || S.currentRace) return { message: raceStatusLine(S), severity: 'info' };
+      if (!SD.game || typeof SD.game.startRace !== 'function') throw new CommandError('Races cannot be started right now.');
+      const opts = {};
+      const dist = args.map(function (a) { return parseInt(String(a).replace(/m$/i, ''), 10); })
+        .filter(function (n) { return SD.CONFIG.RACE.DISTANCES.indexOf(n) >= 0; })[0];
+      if (dist) opts.distance = dist;
+      const res = SD.game.startRace(opts);
+      if (!res || !res.ok) return { ok: false, message: (res && res.message) || 'The race could not start.', severity: 'bad' };
+      ctx.effects.push({ type: 'race', recordId: res.record.id });
+      const bets = betsPhrase(ctx.state);
+      return { message: '\u{1F3C1} ' + res.message + (bets ? ' ' + bets + ' locked in.' : '') + ' Cheer with !cheer!', severity: 'epic' };
     }
   });
 
-  // !event — today's day event (read-only).
-  // TODO(M5): mods/streamer trigger a day event here: SD.game.triggerDayEvent(args[0]).
+  // Day event by id, name or unique prefix ("fog" -> Fog of the Hollow).
+  function findDayEvent(query) {
+    const q = String(query || '').trim();
+    if (!q) return { none: true };
+    const exact = SD.events.dayEventById(q);
+    if (exact) return { event: exact };
+    const k = U.nameKey(q);
+    const hits = SD.DATA.DAY_EVENTS.filter(function (e) {
+      return U.nameKey(e.name).indexOf(k) === 0 || e.id.toLowerCase().indexOf(k) === 0 ||
+        e.name.split(/\s+/).some(function (w) { return U.nameKey(w).indexOf(k) === 0 && k.length >= 3; });
+    });
+    if (hits.length === 1) return { event: hits[0] };
+    if (hits.length > 1) return { ambiguous: hits };
+    return { none: true };
+  }
+
+  // !event — viewers: today's day event. Mods: "!event" rolls a random new one, "!event <id|name>"
+  // sets it (e.g. !event harvest), "!event today" just looks.
   register({
     name: 'event',
     usage: '!event',
-    description: "Today's day event and what it changes.",
+    description: "Today's day event and what it changes. Mods: !event rolls a new one, !event <name> picks it.",
     cooldownMs: 0,
-    handler: function (ctx) {
+    handler: function (ctx, args) {
       const S = ctx.state;
+      const look = args.length && /^(today|status|info|now|\?)$/i.test(args[0]);
+      if (ctx.isMod && !look) {
+        let ev = null;
+        if (args.length) {
+          const f = findDayEvent(args.join(' '));
+          if (f.ambiguous) throw new CommandError('Did you mean ' + orList(f.ambiguous.map(function (e) { return e.name; })) + '?', { severity: 'info' });
+          if (!f.event) {
+            throw new CommandError('No day event called "' + args.join(' ').slice(0, 30) + '". Try: ' +
+              SD.DATA.DAY_EVENTS.map(function (e) { return e.name; }).join(', ') + '.', { severity: 'info' });
+          }
+          ev = f.event;
+        }
+        const out = SD.game.triggerDayEvent(ev ? ev.id : null);
+        if (!out) throw new CommandError('Could not change the day event.');
+        ctx.effects.push({ type: 'dayEvent', id: out.id });
+        return { message: '\u{1F342} New day event: ' + out.name + ' — ' + out.desc, severity: 'epic' };
+      }
       const ev = SD.state.dayEvent(S);
       const when = 'Season ' + S.season.number + ', Day ' + S.season.day;
       if (!ev) return { message: when + ': a calm day in the forest. No day event.', severity: 'info' };
@@ -841,10 +928,396 @@
   });
 
   // ---------------------------------------------------------------------------
+  // M5: community commands. Spirit Points are fictional: nothing here involves real money.
+  // Every command that spends SP is locked while a race runs (countdown / running / paused).
+  // ---------------------------------------------------------------------------
+  function EC() { return SD.CONFIG.ECONOMY; }
+  function CH() { return SD.CONFIG.RACE.CHAT; }
+
+  function needBetting() {
+    if (!SD.betting) throw new CommandError('Betting is not available right now.', { severity: 'info' });
+    return SD.betting;
+  }
+
+  // Try a runner query without throwing (null when it does not resolve to exactly one runner).
+  function tryRunner(state, query) {
+    const q = String(query || '').trim();
+    if (!q) return null;
+    const f = SD.state.findRunner(q, state);
+    return f.runner || null;
+  }
+
+  function inNextField(state, runnerId) {
+    if (!SD.betting) return true;
+    return !!SD.betting.fieldOdds(state).byId[runnerId];
+  }
+
+  // Queued chat effects: { type:'boost'|'sabotage'|'cheer', runnerId, by, count, paid? }
+  function queuedCount(state, type, runnerId) {
+    return (Array.isArray(state.raceEffects) ? state.raceEffects : []).reduce(function (a, e) {
+      return a + (e && e.type === type && (runnerId == null || e.runnerId === runnerId) ? Math.max(1, e.count || 1) : 0);
+    }, 0);
+  }
+  function queueEffect(state, type, runnerId, by, paid) {
+    if (!Array.isArray(state.raceEffects)) state.raceEffects = [];
+    let entry = state.raceEffects.filter(function (e) { return e.type === type && e.runnerId === runnerId && e.by === by; })[0];
+    if (entry) {
+      entry.count = (entry.count || 1) + 1;
+      entry.paid = (entry.paid || 0) + (paid || 0);
+    } else {
+      state.raceEffects.push(entry = { type: type, runnerId: runnerId, by: by, count: 1, paid: paid || 0 });
+    }
+    return entry;
+  }
+
+  function spend(ctx, amount, reason, what) {
+    const p = ctx.player || P().get(ctx.state, ctx.username);
+    if (!p || p.spiritPoints < amount) {
+      throw new CommandError((what || 'That') + ' costs ' + amount + ' SP and you have ' + (p ? p.spiritPoints : 0) + '.', { severity: 'info' });
+    }
+    return function commit() {
+      const r = P().spendSp(ctx.state, ctx.username, amount, reason);
+      ctx.effects.push({ type: 'sp', amount: -amount, reason: reason });
+      return r.balance;
+    };
+  }
+
+  // --- !bet -------------------------------------------------------------------
+  const BET_USAGE = '!bet <runner> <amount> (' + SD.CONFIG.ECONOMY.BET_MIN + '–' + SD.CONFIG.ECONOMY.BET_MAX + ' SP, or "all") · !bet cancel';
+  const AMOUNT_RE = /^(?:(\d+)(?:sp)?|all|max|allin|all-in)$/i;
+  function parseAmount(tok) {
+    const m = AMOUNT_RE.exec(String(tok || ''));
+    if (!m) return null;
+    return m[1] != null ? Number(m[1]) : 'all';
+  }
+
+  function betLine(b) {
+    return b.amount + ' SP on ' + b.runnerName + ' at ' + fmtOdds(b.odds) + ' (pays ' + SD.betting.payoutFor(b.amount, b.odds) + ')';
+  }
+
+  register({
+    name: 'bet',
+    usage: BET_USAGE,
+    description: 'Bet fictional Spirit Points on a runner in the next race: pays amount × odds if it wins. One bet each; a new bet replaces (and refunds) your old one. See !odds.',
+    requiresPlayer: true,
+    lockedDuringRace: true,
+    handler: function (ctx, args) {
+      const B = needBetting();
+      const S = ctx.state;
+      if (!args.length) {
+        const mine = B.betOf(S, ctx.username);
+        return { message: mine ? 'Your bet: ' + betLine(mine) + '. Change it with !bet <runner> <amount>, or !bet cancel.' : 'Usage: ' + BET_USAGE + ' — see !odds for the field.', severity: 'info' };
+      }
+      if (args.length === 1 && /^(cancel|refund|undo|none|off)$/i.test(args[0])) {
+        const c = B.cancel(S, ctx.username);
+        if (!c.ok) throw new CommandError(c.message, { severity: 'info' });
+        ctx.effects.push({ type: 'bet', cancelled: true, refunded: c.refunded });
+        return { message: c.message, severity: 'info' };
+      }
+      // Amount first or last; the rest is the runner ("!bet moss 50", "!bet 50 moss runner", "!bet moss all").
+      let amount = null, runner = null;
+      const first = parseAmount(args[0]), last = parseAmount(args[args.length - 1]);
+      if (args.length >= 2 && last != null && tryRunner(S, args.slice(0, -1).join(' '))) {
+        amount = last; runner = tryRunner(S, args.slice(0, -1).join(' '));
+      } else if (args.length >= 2 && first != null && tryRunner(S, args.slice(1).join(' '))) {
+        amount = first; runner = tryRunner(S, args.slice(1).join(' '));
+      } else if (args.length >= 2 && (last != null || first != null)) {
+        runner = resolveRunnerArg(S, last != null ? args.slice(0, -1).join(' ') : args.slice(1).join(' ')); // throws a friendly error
+        amount = last != null ? last : first;
+      } else if (args.length === 1 && first != null) {
+        amount = first;
+        // No runner named: your open bet's runner, else your own runner.
+        const mine = B.betOf(S, ctx.username);
+        const own = P().runnerOf(S, ctx.username);
+        runner = mine ? SD.state.runnerById(mine.runnerId, S) : (own && inNextField(S, own.id) ? own : null);
+        if (!runner) throw new CommandError('Name a runner: !bet <runner> ' + args[0] + ' (see !odds).', { severity: 'info' });
+      } else {
+        throw new CommandError('Usage: ' + BET_USAGE + ' — e.g. !bet moss 50', { severity: 'info' });
+      }
+      const res = B.place(S, ctx.username, runner.id, amount, ctx.now);
+      if (!res.ok) throw new CommandError(res.message, { severity: 'info' });
+      ctx.effects.push(
+        { type: 'bet', runnerId: runner.id, amount: res.bet.amount, odds: res.bet.odds, replaced: res.replaced ? res.replaced.id : null },
+        { type: 'sp', amount: -res.bet.amount + (res.refunded || 0), reason: 'bet' }
+      );
+      if (res.hype) ctx.effects.push({ type: 'hype', delta: res.hype });
+      return { message: '\u{1F4B0} ' + res.message, severity: 'good' };
+    }
+  });
+
+  register({
+    name: 'bets',
+    usage: '!bets',
+    description: 'Open bets on the next race: how many, how much, on whom (and yours).',
+    cooldownMs: 0,
+    handler: function (ctx) {
+      const B = needBetting();
+      const S = ctx.state;
+      const o = B.open(S);
+      const mine = ctx.player ? B.betOf(S, ctx.username) : null;
+      if (!o.count) return { message: 'No open bets yet. Check !odds, then !bet <runner> <amount>.', severity: 'info' };
+      const rows = Object.keys(o.byRunner).map(function (id) { return o.byRunner[id]; })
+        .sort(function (a, b) { return b.total - a.total || (a.name < b.name ? -1 : 1); })
+        .map(function (r) { return r.name + ' ' + r.count + ' (' + r.total + ' SP)'; });
+      const where = S.currentRace ? 'Bets riding on this race' : 'Open bets for the next race';
+      return {
+        message: where + ': ' + plural(o.count, 'bet') + ' · ' + o.total + ' SP' + DOT + rows.slice(0, 6).join(DOT) +
+          (mine ? DOT + 'Yours: ' + betLine(mine) : ''),
+        severity: 'info'
+      };
+    }
+  });
+
+  register({
+    name: 'odds',
+    usage: '!odds',
+    description: 'Odds for every runner in the next race (or the race that is running).',
+    cooldownMs: 0,
+    handler: function (ctx) {
+      const S = ctx.state;
+      const cr = S.currentRace;
+      if (cr && cr.record) {
+        const rec = cr.record;
+        return {
+          message: 'Racing now at ' + rec.trackName + ' (' + rec.distance + ' m, bets locked): ' +
+            rec.entrants.slice().sort(function (a, b) { return a.odds - b.odds; }).map(function (e) { return e.name + ' ' + fmtOdds(e.odds); }).join(DOT),
+          severity: 'info'
+        };
+      }
+      const B = needBetting();
+      const fo = B.fieldOdds(S);
+      if (!fo.entrants.length) return { message: 'No runners are ready for the next race yet.', severity: 'info' };
+      const idx = Math.min(S.season.raceIndexInDay + 1, S.season.racesPerDay);
+      return {
+        message: 'Next race (Race ' + idx + '/' + S.season.racesPerDay + ', ' + fo.distance + ' m): ' +
+          fo.entrants.slice().sort(function (a, b) { return a.odds - b.odds; }).map(function (e) { return e.name + ' ' + fmtOdds(e.odds); }).join(DOT) +
+          DOT + '!bet <runner> <amount>',
+        severity: 'info'
+      };
+    }
+  });
+
+  // --- !boost / !snack / !sabotage ---------------------------------------------
+  register({
+    name: 'boost',
+    usage: '!boost <runner>',
+    description: 'Spend ' + SD.CONFIG.ECONOMY.BOOST_COST + ' SP: the runner gets a +' + Math.round(SD.CONFIG.RACE.CHAT.BOOST * 1000) / 10 +
+      '% burst at a random moment of its next race (max ' + SD.CONFIG.RACE.CHAT.MAX_BOOSTS_PER_RUNNER + ' per runner per race).',
+    requiresPlayer: true,
+    lockedDuringRace: true,
+    handler: function (ctx, args) {
+      const S = ctx.state;
+      const runner = args.length ? resolveRunnerArg(S, args.join(' ')) : myRunnerOrThrow(ctx, 'name one: !boost <runner>');
+      const max = CH().MAX_BOOSTS_PER_RUNNER;
+      const queued = queuedCount(S, 'boost', runner.id);
+      if (queued >= max) {
+        throw new CommandError(runner.name + ' already has ' + max + ' boosts queued for its next race — that is the limit.', { severity: 'info' });
+      }
+      const pay = spend(ctx, EC().BOOST_COST, 'boost', 'A boost');
+      // --- commit ---
+      const balance = pay();
+      queueEffect(S, 'boost', runner.id, ctx.username, EC().BOOST_COST);
+      P().recordAction(S, ctx.username, runner.id, 'boost');
+      const left = max - queued - 1;
+      SD.state.log('chat', ctx.displayName + ' boosted ' + runner.name + ' for its next race.', 'good', { runnerId: runner.id, by: ctx.username });
+      ctx.effects.push({ type: 'boost', runnerId: runner.id, queued: queued + 1 });
+      return {
+        message: '⚡ ' + ctx.displayName + ' boosts ' + runner.name + ' for its next race! ' +
+          (left > 0 ? plural(left, 'more boost') + ' allowed' : 'That was the last boost allowed') +
+          (inNextField(S, runner.id) ? '' : ' (not in the next field yet — the boost waits for its next race)') +
+          DOT + balance + ' SP left',
+        severity: 'good'
+      };
+    }
+  });
+
+  register({
+    name: 'snack',
+    usage: '!snack <runner>',
+    description: 'Spend ' + SD.CONFIG.ECONOMY.SNACK_COST + ' SP: +' + SD.CONFIG.ECONOMY.SNACK_ENERGY + ' energy for a runner (max ' +
+      SD.CONFIG.ECONOMY.SNACKS_PER_DAY + ' snacks per runner per day).',
+    requiresPlayer: true,
+    lockedDuringRace: true,
+    handler: function (ctx, args) {
+      const S = ctx.state;
+      const E = EC();
+      const runner = args.length ? resolveRunnerArg(S, args.join(' ')) : myRunnerOrThrow(ctx, 'name one: !snack <runner>');
+      if (!runner.daily || typeof runner.daily !== 'object') runner.daily = { snacks: 0 };
+      const had = runner.daily.snacks || 0;
+      if (had >= E.SNACKS_PER_DAY) {
+        throw new CommandError(runner.name + ' has had ' + plural(E.SNACKS_PER_DAY, 'snack') + ' today — no more until tomorrow.', { severity: 'info' });
+      }
+      if (runner.energy >= runner.maxEnergy) {
+        throw new CommandError(runner.name + ' is already full of energy (' + Math.floor(runner.energy) + '/' + runner.maxEnergy + ').', { severity: 'info' });
+      }
+      const pay = spend(ctx, E.SNACK_COST, 'snack', 'A snack');
+      // --- commit ---
+      const balance = pay();
+      const before = runner.energy;
+      runner.energy = U.round2(U.clamp(runner.energy + E.SNACK_ENERGY, 0, runner.maxEnergy));
+      runner.daily.snacks = had + 1;
+      runner.lastActionAt = ctx.now;
+      P().recordAction(S, ctx.username, runner.id, 'snack');
+      const gain = Math.round(runner.energy - before);
+      const flavours = SD.DATA.SNACK_FLAVOUR || ['{r} munches a snack.'];
+      const flavour = flavours[(SD.rng.hash(ctx.username + ':' + runner.id) + had) % flavours.length].replace('{r}', runner.name);
+      SD.state.log('snack', ctx.displayName + ' fed ' + runner.name + ' a snack (+' + gain + ' energy).', 'good', { runnerId: runner.id, by: ctx.username });
+      ctx.effects.push({ type: 'snack', runnerId: runner.id, energyGain: gain });
+      const left = E.SNACKS_PER_DAY - runner.daily.snacks;
+      return {
+        message: '\u{1F34E} ' + flavour + ' Energy +' + gain + ' (' + Math.floor(runner.energy) + '/' + runner.maxEnergy + ')' +
+          DOT + (left > 0 ? plural(left, 'snack') + ' left today' : 'no more snacks today') + DOT + balance + ' SP left',
+        severity: 'good'
+      };
+    }
+  });
+
+  register({
+    name: 'sabotage',
+    usage: '!sabotage <runner>',
+    description: 'Spend ' + SD.CONFIG.ECONOMY.SABOTAGE_COST + ' SP: slip a pebble into a rival\'s shoe for its next race (slower for a stretch). Wise runners may kick it back! Not your own runner; ' +
+      Math.round(SD.CONFIG.COOLDOWNS.SABOTAGE_S / 60) + '-minute cooldown.',
+    requiresPlayer: true,
+    lockedDuringRace: true,
+    minArgs: 1,
+    cooldownMs: function () { return (Number(SD.CONFIG.COOLDOWNS.SABOTAGE_S) || 0) * 1000; },
+    handler: function (ctx, args) {
+      const S = ctx.state;
+      const C = CH();
+      const runner = resolveRunnerArg(S, args.join(' '));
+      if (ownerKeyOf(runner) === ctx.username) throw new CommandError("You can't sabotage your own runner! Try !boost " + runner.name.split(' ')[0].toLowerCase() + ' instead.', { severity: 'info' });
+      const onTarget = queuedCount(S, 'sabotage', runner.id);
+      if (onTarget >= C.MAX_SABOTAGE_PER_TARGET) {
+        throw new CommandError(runner.name + ' already has ' + plural(C.MAX_SABOTAGE_PER_TARGET, 'pebble') + ' waiting — leave the poor thing alone.', { severity: 'info' });
+      }
+      if (queuedCount(S, 'sabotage') >= C.MAX_SABOTAGE_PER_RACE) {
+        throw new CommandError('The forest only hides ' + C.MAX_SABOTAGE_PER_RACE + ' pebbles per race and they are all taken. Try after the next race.', { severity: 'info' });
+      }
+      const pay = spend(ctx, EC().SABOTAGE_COST, 'sabotage', 'A sabotage');
+      // --- commit ---
+      const balance = pay();
+      queueEffect(S, 'sabotage', runner.id, ctx.username, EC().SABOTAGE_COST);
+      P().recordAction(S, ctx.username, runner.id, 'sabotage');
+      const pBack = Math.min(C.BACKFIRE_MAX, C.BACKFIRE_BASE + (Number(runner.stats.wisdom) || 0) / C.BACKFIRE_WIS_DIV);
+      SD.state.log('chat', ctx.displayName + ' slipped a pebble into ' + runner.name + "'s shoe.", 'bad', { runnerId: runner.id, by: ctx.username });
+      ctx.effects.push({ type: 'sabotage', runnerId: runner.id, queued: onTarget + 1, backfireChance: U.round2(pBack) });
+      return {
+        message: '\u{1FAA8} Sabotage queued on ' + runner.name + ' for its next race. Whether the pebble sticks or ' + runner.name +
+          ' kicks it back at you (' + Math.round(pBack * 100) + '% with its Wisdom) is decided at the gate!' + DOT + balance + ' SP left',
+        severity: 'good',
+        announce: { text: '\u{1FAA8} ' + ctx.displayName + ' slipped a pebble into ' + runner.name + "'s shoe…", severity: 'bad' }
+      };
+    }
+  });
+
+  // --- !ribbon -------------------------------------------------------------------
+  function ribbonNames() { return Object.keys(SD.DATA.RIBBON_COLORS || {}); }
+  function ribbonHelp() {
+    const names = ribbonNames();
+    return 'Ribbons cost ' + EC().RIBBON_COST + ' SP: ' + names.slice(0, 14).join(', ') + ' … or any #hex (e.g. !ribbon teal, !ribbon #ff66aa). !ribbon off removes it.';
+  }
+
+  register({
+    name: 'ribbon',
+    usage: '!ribbon <colour>',
+    description: 'Spend ' + SD.CONFIG.ECONOMY.RIBBON_COST + ' SP on a coloured ribbon ring for your runner (cosmetic). Named colours or #hex; !ribbon off removes it.',
+    requiresPlayer: true,
+    requiresRunner: true,
+    lockedDuringRace: true,
+    handler: function (ctx, args) {
+      const S = ctx.state;
+      const runner = myRunnerOrThrow(ctx);
+      if (!args.length) return { message: ribbonHelp(), severity: 'info' };
+      const raw = args.join('').toLowerCase();
+      if (/^(off|none|remove|clear)$/.test(raw)) {
+        if (!runner.ribbonColor) throw new CommandError(runner.name + " isn't wearing a ribbon.", { severity: 'info' });
+        runner.ribbonColor = null;
+        return { message: runner.name + ' takes the ribbon off.', severity: 'info' };
+      }
+      const named = (SD.DATA.RIBBON_COLORS || {})[raw];
+      let colour = named || null;
+      const hex = /^#?([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(raw);
+      if (!colour && hex) {
+        let h = hex[1].toLowerCase();
+        if (h.length === 3) h = h.split('').map(function (c) { return c + c; }).join('');
+        colour = '#' + h;
+      }
+      if (!colour) throw new CommandError('Unknown colour "' + args.join(' ').slice(0, 20) + '". ' + ribbonHelp(), { severity: 'info' });
+      if (runner.ribbonColor && runner.ribbonColor.toLowerCase() === colour) {
+        throw new CommandError(runner.name + ' already wears that ribbon.', { severity: 'info' });
+      }
+      const pay = spend(ctx, EC().RIBBON_COST, 'ribbon', 'A ribbon');
+      // --- commit ---
+      const balance = pay();
+      runner.ribbonColor = colour;
+      const label = named ? raw : colour;
+      SD.state.log('ribbon', ctx.displayName + ' tied a ' + label + ' ribbon on ' + runner.name + '.', 'good', { runnerId: runner.id });
+      ctx.effects.push({ type: 'ribbon', runnerId: runner.id, color: colour });
+      return { message: '\u{1F380} ' + runner.name + ' now wears a ' + label + ' ribbon!' + DOT + balance + ' SP left', severity: 'good' };
+    }
+  });
+
+  // --- !hype / !achievements ---------------------------------------------------------
+  const HYPE_EFFECT = [
+    'the forest is calm',
+    'races get a little wilder',
+    'more race events and crits',
+    'FOREST AWAKENED: everyone surges at the final turn and SP payouts ×1.5'
+  ];
+
+  register({
+    name: 'hype',
+    usage: '!hype',
+    description: 'The crowd hype meter and the next threshold.',
+    cooldownMs: 0,
+    handler: function (ctx) {
+      const S = ctx.state;
+      const v = Number(S.hype.value) || 0;
+      const tier = SD.hype.tier(v);
+      const th = SD.DATA.HYPE_THRESHOLDS;
+      const next = SD.hype.nextThreshold(v);
+      const parts = ['\u{1F525} Hype ' + fmtHype(v) + '/' + fmtHype(S.hype.max)];
+      parts.push(tier > 0 ? th[tier - 1].text + ' (' + HYPE_EFFECT[tier] + ')' : 'The forest is calm');
+      if (next) parts.push('next: ' + next.value + ' — ' + next.text + ' (' + fmtHype(Math.ceil(next.value - v)) + ' to go)');
+      parts.push('!cheer, !train and !bet raise it');
+      return { message: parts.join(DOT), severity: tier >= 2 ? 'epic' : 'info' };
+    }
+  });
+
+  register({
+    name: 'achievements',
+    aliases: ['ach', 'badges'],
+    usage: '!achievements [viewer]',
+    description: 'Your achievements (count and the latest ones), or another viewer\'s.',
+    cooldownMs: 0,
+    handler: function (ctx, args) {
+      const A = SD.achievements;
+      if (!A) throw new CommandError('Achievements are not available right now.', { severity: 'info' });
+      const S = ctx.state;
+      let p = ctx.player;
+      if (args.length) {
+        p = P().get(S, args[0]);
+        if (!p) throw new CommandError('No viewer called "' + cleanName(args[0]).slice(0, 25) + '" has joined the derby.', { severity: 'info' });
+      }
+      if (!p) throw new CommandError("You're not in the derby yet — type !join", { severity: 'info' });
+      const total = A.catalog().length;
+      const got = A.listFor(S, p.username);
+      if (!got.length) {
+        return { message: p.displayName + ' has no achievements yet (0/' + total + '). !train, !cheer and !bet to earn some!', severity: 'info' };
+      }
+      const n = (SD.CONFIG.ACHIEVEMENTS && SD.CONFIG.ACHIEVEMENTS.LATEST_N) || 3;
+      const sp = got.reduce(function (a, x) { return a + (x.sp || 0); }, 0);
+      const latest = got.slice(-n).reverse().map(function (x) { return (x.icon ? x.icon + ' ' : '') + x.name; });
+      return {
+        message: '\u{1F3C5} ' + p.displayName + ': ' + got.length + '/' + total + ' achievements (+' + sp + ' SP)' + DOT + 'latest: ' + latest.join(', '),
+        severity: 'info'
+      };
+    }
+  });
+
+  // ---------------------------------------------------------------------------
   // Later-milestone registration points (do not implement here yet)
   // ---------------------------------------------------------------------------
-  // TODO(M5): register !bet <runner> <amount>, !boost <runner>, !snack <runner>, !sabotage <runner>
-  //           (cooldown CONFIG.COOLDOWNS.SABOTAGE_S), !ribbon <colour>; extend !race / !event with mod actions.
   // TODO(M6): register !create <name> (requires settings.allowCreate and no free runner) -> SD.game.spawnRunner + claim.
 
   SD.commands = {

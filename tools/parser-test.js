@@ -560,7 +560,8 @@ section('registry: admin permission, check-then-commit, processCommand');
   eq(captured[0] && captured[0].source, 'twitch', 'chat line keeps source twitch');
   ok(!!player('twitchtom'), 'player created via processCommand');
   const list = SD.commands.list().map(function (d) { return d.name; });
-  eq(list, ['join', 'claim', 'train', 'rest', 'cheer', 'status', 'inspect', 'race', 'event', 'help', 'leaderboard', 'rank'], 'list() in registration order');
+  eq(list, ['join', 'claim', 'train', 'rest', 'cheer', 'status', 'inspect', 'race', 'event', 'help', 'leaderboard', 'rank',
+    'bet', 'bets', 'odds', 'boost', 'snack', 'sabotage', 'ribbon', 'hype', 'achievements'], 'list() in registration order (M5 commands after M3)');
   ok(SD.commands.list().every(function (d) { return typeof d.handler === 'undefined'; }), 'list() hides handlers');
 }
 

@@ -57,7 +57,13 @@
       const idx = Number(season.raceIndexInDay) || 0;       // races completed today (assumed)
       const live = !!state.currentRace;
 
-      if (r.season) r.season.textContent = 'SEASON ' + (season.number || 1) + ' · DAY ' + (season.day || 1);
+      if (r.season) {
+        r.season.textContent = 'SEASON ' + (season.number || 1) + ' · DAY ' + (season.day || 1);
+        // M5: a new season makes the label pop (gold glow + scale) once.
+        const n = Number(season.number) || 1;
+        if (this.lastSeason != null && n !== this.lastSeason) this.bumpSeason();
+        this.lastSeason = n;
+      }
       if (r.race) {
         let html;
         if (!live && idx >= racesPerDay) html = 'RACES <b>' + racesPerDay + '/' + racesPerDay + '</b> · DAY COMPLETE';
@@ -136,6 +142,19 @@
         }
         if (r.hypeNext.innerHTML !== html) r.hypeNext.innerHTML = html;
       }
+    },
+
+    lastSeason: null,
+    bumpTimer: 0,
+
+    bumpSeason: function () {
+      const el = this.refs.season;
+      if (!el) return;
+      el.classList.remove('hdr-season__main--bump');
+      void el.offsetWidth; // restart the animation
+      el.classList.add('hdr-season__main--bump');
+      clearTimeout(this.bumpTimer);
+      this.bumpTimer = setTimeout(function () { el.classList.remove('hdr-season__main--bump'); }, 2600);
     },
 
     nextThreshold: function (value, thresholds) {

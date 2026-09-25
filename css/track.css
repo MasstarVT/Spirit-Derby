@@ -870,3 +870,97 @@
 @media (max-width: 1100px) {
   .results__cols { grid-template-columns: 1fr; }
 }
+
+/* =====================================================================
+   M5: paddock bets + queued chat effects, results bets, season summary modal
+   ===================================================================== */
+.paddock__fx {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  margin-top: 4px;
+}
+.pfx {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-pill);
+  background: rgba(243, 233, 210, 0.06);
+  font-size: var(--fs-min);
+  font-weight: 700;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+.pfx--bet { border-color: rgba(201, 168, 76, 0.6); background: rgba(201, 168, 76, 0.14); color: var(--gold-bright); }
+.pfx--boost { border-color: rgba(159, 214, 122, 0.55); background: rgba(159, 214, 122, 0.12); color: var(--sev-good); }
+.pfx--sab { border-color: rgba(238, 136, 102, 0.6); background: rgba(238, 136, 102, 0.12); color: var(--sev-bad); }
+.pfx--cheer { border-color: rgba(143, 181, 230, 0.55); background: rgba(143, 181, 230, 0.1); color: #b9d3f2; }
+.paddock__runner--fx { border-color: rgba(201, 168, 76, 0.35); }
+
+.results__box .c-dim { color: var(--text-dim); font-size: var(--fs-min); }
+.results__betsum {
+  margin-top: 4px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--line-strong);
+  color: var(--text-dim);
+  font-size: var(--fs-min);
+}
+.results__betsum b { color: var(--gold-bright); }
+.results__box .gain { color: var(--sev-good); font-weight: 700; }
+.results__ach li b,
+.results__bets li b { color: var(--cream); }
+
+/* Season summary modal (ui/season.js) — reuses the results modal head/body/foot */
+.modal--season .modal__dialog { width: min(1180px, 100%); }
+.season__head {
+  background: linear-gradient(90deg, rgba(201, 168, 76, 0.3), rgba(79, 209, 197, 0.08) 55%, rgba(201, 168, 76, 0) 80%);
+}
+.season__head .results__title { color: var(--gold-bright); }
+.season__cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--sp-3);
+}
+.season__card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  padding: var(--sp-3) var(--sp-4);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+}
+.season__card--champ {
+  border-color: rgba(201, 168, 76, 0.6);
+  background: linear-gradient(180deg, rgba(201, 168, 76, 0.16), rgba(201, 168, 76, 0.04));
+  box-shadow: 0 0 24px rgba(201, 168, 76, 0.18);
+}
+.season__label {
+  font-size: var(--fs-min);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+.season__main {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-lg);
+}
+.season__main b { color: var(--cream); }
+.season__card--champ .season__main b { color: var(--gold-bright); }
+.season__sub { color: var(--text-dim); font-size: var(--fs-min); }
+.season__table .c-num b { color: var(--gold-bright); }
+.season__note {
+  color: var(--text-dim);
+  font-size: var(--fs-min);
+  line-height: 1.45;
+}
+.season__note b { color: var(--cream); }

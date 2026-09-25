@@ -16,6 +16,8 @@
  *   parser   tools/parser-test.js (command parser + pipeline)
  *   progression  tools/progression-test.js (XP / level-ups, leaderboards, !leaderboard / !rank)
  *   integration  tools/integration-test.js (M7 Twitch IRC parser / adapter + local bridge, no network)
+ *   community    tools/community-test.js (M5 betting, boost / snack / sabotage / ribbon, mod !race / !event,
+ *                achievements, season summary + rollover)
  */
 'use strict';
 
@@ -28,7 +30,8 @@ const SUITES = [
   { name: 'race', file: 'race-test.js', args: VERBOSE ? ['--verbose'] : [] },
   { name: 'parser', file: 'parser-test.js', args: VERBOSE ? ['--verbose'] : [] },
   { name: 'progression', file: 'progression-test.js', args: VERBOSE ? ['--verbose'] : [] },
-  { name: 'integration', file: 'integration-test.js', args: VERBOSE ? ['--verbose'] : [] }
+  { name: 'integration', file: 'integration-test.js', args: VERBOSE ? ['--verbose'] : [] },
+  { name: 'community', file: 'community-test.js', args: VERBOSE ? ['--verbose'] : [] }
 ];
 
 function lastLines(text, n) {

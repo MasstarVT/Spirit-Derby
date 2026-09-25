@@ -5,6 +5,7 @@
  * UI buttons, the command pipeline and integrations all call these methods.
  *
  * Optional later-milestone modules are called only when present:
+ *   SD.betting.lockForRace(state, record) -> refunded[] (startRace: bets on non-starters refunded)
  *   SD.betting.resolveRace(state, record) -> resolvedBets[]
  *   SD.betting.refundAll(state, reason)   -> refunded[] | count
  *   SD.players.applyRaceResults(state, record) -> payouts[]
@@ -180,6 +181,8 @@
         rosterAvgLevel: rosterAvgLevel
       });
       st.currentRace = { record: record, status: 'countdown', startedAt: SD.clock.now() };
+      // Bets on runners that did not make the field are refunded at the gate; the rest are locked in.
+      if (SD.betting && typeof SD.betting.lockForRace === 'function') SD.betting.lockForRace(st, record);
 
       const fav = record.entrants.slice().sort(function (a, b) { return a.odds - b.odds; })[0];
       const message = 'Race ' + indexInDay + '/' + st.season.racesPerDay + ' at ' + trackName + ' (' + distance + ' m): ' +
