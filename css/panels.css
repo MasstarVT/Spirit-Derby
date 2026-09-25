@@ -1,6 +1,6 @@
 /* =====================================================================
    SPIRIT DERBY — panels: header + hype meter, roster cards, event log,
-   admin drawer, hype banners, toasts.
+   chat (M2), admin drawer, hype banners, toasts.
    ===================================================================== */
 
 /* =====================================================================
@@ -426,6 +426,125 @@ body[data-hype-tier="3"] .hype__fill {
 .log__empty { padding: var(--sp-5); text-align: center; color: var(--text-faint); }
 
 /* =====================================================================
+   CHAT (sidebar, M2): simulated stream chat — feed, input row, demo bots
+   ===================================================================== */
+.chat {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+.chat__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-4) var(--sp-2);
+}
+.chat__title { font-size: var(--fs-min); letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-faint); }
+.chat__sim {
+  margin-left: 6px;
+  padding: 0 8px;
+  border-radius: var(--r-pill);
+  background: rgba(243, 233, 210, 0.08);
+  font-size: var(--fs-min);
+  letter-spacing: 0.04em;
+  text-transform: none;
+}
+.chat__bots { font-family: var(--font-ui); }
+.chat__bots[aria-pressed="true"],
+.chat__bots[aria-pressed="true"]:hover:not(:disabled) {
+  background: rgba(201, 168, 76, 0.2);
+  border-color: var(--gold);
+  color: var(--gold-bright);
+  box-shadow: 0 0 12px rgba(79, 209, 197, 0.35);   /* teal: glow only */
+}
+
+.chat__feed {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 0 var(--sp-3) var(--sp-3);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.chat__row {
+  font-size: var(--fs-min);
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+.chat__row--user { padding: 2px 4px; }
+.chat__name {
+  --chip: var(--gold);
+  display: inline-block;
+  margin-right: 6px;
+  padding: 0 8px;
+  border: 1px solid var(--chip);
+  border-radius: var(--r-pill);
+  background: rgba(0, 0, 0, 0.28);
+  color: var(--chip);
+  font-weight: 700;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+.chat__name--streamer { background: rgba(201, 168, 76, 0.2); }
+.chat__text { color: var(--cream); }
+.chat__row--cmd .chat__text { color: #f7efd9; font-weight: 700; letter-spacing: 0.01em; }
+
+.chat__row--reply {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 4px;
+  margin-left: 18px;
+  padding: 5px 10px 5px 6px;
+  border-left: 3px solid var(--sev-info);
+  border-radius: 0 var(--r-sm) var(--r-sm) 0;
+  background: rgba(243, 233, 210, 0.04);
+}
+.chat__arrow { color: var(--text-faint); font-weight: 700; }
+.chat__to { color: var(--text-faint); font-weight: 700; }
+.chat__row--reply .chat__text { color: var(--text-dim); }
+.chat__row--reply.sev-good { border-left-color: var(--sev-good); }
+.chat__row--reply.sev-good .chat__text { color: #d6f2c4; }
+.chat__row--reply.sev-bad { border-left-color: var(--sev-bad); }
+.chat__row--reply.sev-bad .chat__text { color: #f6c3b1; }
+.chat__row--reply.sev-epic { border-left-color: var(--sev-epic); background: rgba(236, 201, 92, 0.08); }
+.chat__row--reply.sev-epic .chat__text { color: var(--sev-epic); font-weight: 700; }
+.chat__row--reply.sev-epic .chat__to { color: rgba(236, 201, 92, 0.75); }
+
+.chat__row--system {
+  padding: 2px var(--sp-2);
+  color: var(--text-faint);
+  font-style: italic;
+  text-align: center;
+}
+.chat__row--system.sev-epic { color: rgba(236, 201, 92, 0.85); }
+.chat__empty { margin: auto; padding: var(--sp-5); text-align: center; color: var(--text-faint); }
+
+.chat__form {
+  flex: none;
+  display: grid;
+  grid-template-columns: minmax(0, 124px) minmax(0, 1fr) auto;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border-top: 1px solid var(--line);
+  background: var(--surface-2);
+}
+.chat__form .field { min-width: 0; min-height: 40px; font-size: var(--fs-min); }
+.chat__form .btn { min-height: 40px; }
+.chat__hint {
+  flex: none;
+  padding: 0 var(--sp-3) var(--sp-3);
+  background: var(--surface-2);
+  color: var(--text-faint);
+  font-size: var(--fs-min);
+  line-height: 1.3;
+}
+.chat__hint b { color: var(--cream); font-weight: 700; }
+
+/* =====================================================================
    ADMIN DRAWER
    ===================================================================== */
 .admin__head {
@@ -533,6 +652,21 @@ body[data-hype-tier="3"] .hype__fill {
 .adm-kv dd { margin: 0; font-family: var(--font-num); overflow-wrap: anywhere; }
 .adm-ok { color: var(--sev-good); font-weight: 700; }
 .adm-bad { color: var(--sev-bad); font-weight: 700; }
+/* SEND AS inline reply */
+.adm-reply {
+  padding: 6px 10px;
+  border-left: 3px solid var(--sev-info);
+  border-radius: 0 var(--r-sm) var(--r-sm) 0;
+  background: rgba(243, 233, 210, 0.05);
+  font-size: var(--fs-min);
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+.adm-reply:empty { display: none; }
+.adm-reply.sev-good { border-left-color: var(--sev-good); color: #d6f2c4; }
+.adm-reply.sev-bad { border-left-color: var(--sev-bad); color: #f6c3b1; }
+.adm-reply.sev-epic { border-left-color: var(--sev-epic); color: var(--sev-epic); font-weight: 700; }
+.adm-reply.sev-info { color: var(--text-dim); }
 .adm-table-wrap { overflow-x: auto; }
 .adm-table {
   width: 100%;

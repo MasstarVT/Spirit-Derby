@@ -123,8 +123,8 @@
       </nav>
 
       <section class="tabpanel" id="panel-chat" role="tabpanel" aria-labelledby="tab-chat" hidden>
-        <!-- M2: simulated chat feed + input + demo-bot toggle mounts here (#chat) -->
-        <p class="tabpanel__placeholder">Simulated chat arrives in Milestone 2.</p>
+        <!-- M2: simulated chat feed + input + demo-bot toggle (ui/chat.js enables the tab) -->
+        <div class="chat" id="chat"></div>
       </section>
 
       <section class="tabpanel" id="panel-boards" role="tabpanel" aria-labelledby="tab-boards" hidden>
@@ -165,13 +165,13 @@
   <script src="js/events.js"></script>
   <script src="js/race.js"></script>
   <script src="js/hype.js"></script>
-  <!-- M2: <script src="js/players.js"></script> -->
+  <script src="js/players.js"></script>
   <!-- M5: <script src="js/betting.js"></script> -->
   <!-- M5: <script src="js/achievements.js"></script> -->
   <!-- M3: <script src="js/leaderboards.js"></script> -->
   <script src="js/seasons.js"></script>
   <script src="js/game.js"></script>
-  <!-- M2: <script src="js/commands.js"></script> -->
+  <script src="js/commands.js"></script>
 
   <!-- UI (browser only) -->
   <script src="js/ui/dom.js"></script>
@@ -180,7 +180,7 @@
   <script src="js/ui/track.js"></script>
   <script src="js/ui/results.js"></script>
   <script src="js/ui/roster.js"></script>
-  <!-- M2: <script src="js/ui/chat.js"></script> -->
+  <script src="js/ui/chat.js"></script>
   <!-- M3: <script src="js/ui/leaderboards.js"></script> -->
   <script src="js/ui/eventlog.js"></script>
   <script src="js/ui/admin.js"></script>

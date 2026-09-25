@@ -1,6 +1,7 @@
 /* SPIRIT DERBY — ui/admin.js
- * Streamer drawer (⚙ button or backtick): RACE, WORLD, TUNING, DEBUG, SAVE sections
- * (+ placeholders for SEND AS (M2) and TWITCH (M7)). All game changes go through SD.game.*
+ * Streamer drawer (⚙ button or backtick): RACE, WORLD, TUNING, DEBUG, SAVE, SEND AS sections
+ * (+ a placeholder for TWITCH (M7)). SEND AS runs commands through SD.processCommand with
+ * source 'admin' / isMod and shows the reply inline. All game changes go through SD.game.*
  * and SD.persistence.*; settings through SD.game.updateSettings(patch).
  * Destructive actions use a two-click "Confirm?" state (never window.confirm).
  * The DOM is built once in init(); render(state) only syncs values/enabled states and
@@ -122,12 +123,16 @@
           '<p class="adm-note">Stored in this browser (<b>spiritderby.save</b>). Import replaces the current game; a backup copy is kept.</p>' +
         '</div></details>' +
 
-        // ---------------- SEND AS (M2 placeholder)
-        '<!-- M2: SEND AS — streamer/mod command through SD.processCommand -->' +
-        '<details class="adm-sec adm-sec--soon"><summary>💬 Send as <span class="adm-sec__tag">M2</span></summary><div class="adm-sec__body">' +
-          '<p class="adm-note">Send commands as the streamer or a mod through <b>SD.processCommand</b>. Arrives with simulated chat in Milestone 2.</p>' +
-          '<div class="adm-row"><input type="text" class="field" disabled placeholder="!race" style="flex:1" aria-label="Command (coming in M2)">' +
-            '<button type="button" class="btn" disabled>SEND</button></div>' +
+        // ---------------- SEND AS (M2): streamer/mod command through SD.processCommand
+        '<details class="adm-sec"><summary>💬 Send as</summary><div class="adm-sec__body">' +
+          '<div class="adm-field adm-field--2"><label for="adm-sendas">Sender</label>' +
+            '<select id="adm-sendas" class="field" data-ref="sendAs"></select></div>' +
+          '<div class="adm-row"><input type="text" class="field" data-ref="sendText" placeholder="!race" maxlength="300" spellcheck="false" ' +
+              'style="flex:1 1 180px" aria-label="Command to send">' +
+            '<button type="button" class="btn btn--primary" data-act="send" data-ref="btnSend">SEND</button></div>' +
+          '<p class="adm-reply" data-ref="sendReply" aria-live="polite"></p>' +
+          '<p class="adm-note">Runs through <b>SD.processCommand</b> with streamer/mod rights (source <b>admin</b>: no cooldowns, may train any runner). ' +
+            'The sender still needs to have typed <b>!join</b> for player commands.</p>' +
         '</div></details>' +
 
         // ---------------- TWITCH (M7 placeholder)
@@ -149,6 +154,7 @@
     replayOk: null,
     saveTimer: 0,
     eventListKey: '',
+    sendAsKey: '',
     lastKv: null,
     lastTable: '',
 
@@ -164,6 +170,7 @@
       root.addEventListener('input', function (e) { self.onInput(e); });
       root.addEventListener('keydown', function (e) {
         if (e.key === 'Enter' && e.target === self.refs.spawnName) { e.preventDefault(); self.run('spawn'); }
+        if (e.key === 'Enter' && e.target === self.refs.sendText) { e.preventDefault(); self.run('send'); }
       });
 
       const rerender = function () { dom.schedule(self); };
@@ -315,6 +322,7 @@
           if (this.refs.seed) this.refs.seed.value = '';
           break;
         case 'replay': this.replay(); break;
+        case 'send': this.sendAs(); break;
         case 'export': this.exportSave(); break;
         case 'import':
           if (this.refs.file) this.refs.file.click();
@@ -368,6 +376,52 @@
         dom.toast(this.replayText, res.sameHash ? 'good' : 'bad');
       }
       dom.schedule(this);
+    },
+
+    // SEND AS: run a command through the real pipeline with streamer/mod rights.
+    sendAs: function () {
+      const r = this.refs;
+      const out = r.sendReply;
+      const show = function (text, sv) {
+        if (!out) return;
+        out.textContent = text;
+        out.className = 'adm-reply sev-' + (({ info: 1, good: 1, bad: 1, epic: 1 })[sv] ? sv : 'info');
+      };
+      if (typeof SD.processCommand !== 'function') { show('The command pipeline (js/commands.js) is not loaded.', 'bad'); return; }
+      const text = r.sendText ? r.sendText.value.trim() : '';
+      if (!text) { if (r.sendText) r.sendText.focus(); return; }
+      const name = (r.sendAs && r.sendAs.value) || 'Streamer';
+      let res;
+      try {
+        res = SD.processCommand(name, text, { source: 'admin', isMod: true, displayName: name });
+      } catch (e) {
+        console.error('[admin] SEND AS failed', e);
+        res = { ok: false, isCommand: true, message: (e && e.message) || 'Command failed.' };
+      }
+      if (!res) show('↳ No response.', 'bad');
+      else if (!res.isCommand) show(res.ok ? '↳ Sent to chat as ' + name + ' (not a command).' : '↳ ' + res.message, res.ok ? 'info' : 'bad');
+      else show('↳ @' + name + ' ' + res.message, res.severity || (res.ok ? 'good' : 'bad'));
+      if (r.sendText) { r.sendText.value = ''; r.sendText.focus(); }
+    },
+
+    // Sender list: Streamer, Mod, then the most recently active viewers.
+    fillSendAs: function (state) {
+      const sel = this.refs.sendAs;
+      if (!sel) return;
+      const players = Object.keys(state.players || {}).map(function (k) { return state.players[k]; })
+        .sort(function (a, b) { return (b.lastSeen || 0) - (a.lastSeen || 0); })
+        .map(function (p) { return p.displayName || p.username; })
+        .filter(function (n) { return n && n.toLowerCase() !== 'streamer' && n.toLowerCase() !== 'mod'; })
+        .slice(0, 12);
+      const names = ['Streamer', 'Mod'].concat(players);
+      const key = names.join('|');
+      if (key === this.sendAsKey || document.activeElement === sel) return;
+      this.sendAsKey = key;
+      const prev = sel.value || 'Streamer';
+      sel.innerHTML = names.map(function (n) {
+        return opt(n, n === 'Streamer' ? '🎙 Streamer' : (n === 'Mod' ? '🛡 Mod' : n));
+      }).join('');
+      sel.value = names.indexOf(prev) >= 0 ? prev : 'Streamer';
     },
 
     exportSave: function () {
@@ -448,6 +502,9 @@
       });
 
       this.fillEventSelect();
+      this.fillSendAs(state);
+      if (r.btnSend) r.btnSend.disabled = typeof SD.processCommand !== 'function';
+      if (r.sendText) r.sendText.disabled = typeof SD.processCommand !== 'function';
       this.syncSettings(settings);
       this.renderDebug(state, settings);
     },
