@@ -51,6 +51,9 @@
   }
   function fail(message, extra) { return Object.assign({ ok: false, message: message }, extra || {}); }
   function isCurrent(state) { return SD.state && SD.state.get() === state; }
+  // A log line about several bets names their viewers and runners: tagged with them (usernames /
+  // runnerIds) so REMOVE VIEWER, DELETE and RENAME find it (SD.game, review batch 8).
+  function logTags(record, items) { return SD.state.listTags(items, { recordId: record.id }); }
   function emit(name, payload) { if (SD.bus) SD.bus.emit(name, payload); }
   function fmtOdds(x) {
     x = Number(x);
@@ -252,7 +255,7 @@
     if (isCurrent(state)) {
       SD.state.log('bet', p.displayName + ' bet ' + amt + ' SP on ' + runner.name + ' at ' + fmtOdds(ent.odds) +
         (old ? ' (replacing ' + old.amount + ' SP on ' + old.runnerName + ')' : '') + '.', 'info',
-        { username: p.username, runnerId: runner.id, betId: bet.id });
+        Object.assign({ username: p.username, runnerId: runner.id, betId: bet.id }, old ? { runnerIds: [runner.id, old.runnerId] } : {}));
     }
     emit(SD.EVENTS.BET_PLACED, {
       bet: bet, username: p.username, displayName: p.displayName,
@@ -272,7 +275,7 @@
     removeBet(state, b);
     const amt = refundBet(state, b, 'betCancelled');
     const p = P().get(state, b.username);
-    if (isCurrent(state)) SD.state.log('bet', b.displayName + ' cancelled a ' + b.amount + ' SP bet on ' + b.runnerName + '.', 'info', { username: b.username });
+    if (isCurrent(state)) SD.state.log('bet', b.displayName + ' cancelled a ' + b.amount + ' SP bet on ' + b.runnerName + '.', 'info', { username: b.username, runnerId: b.runnerId });
     return { ok: true, message: 'Bet cancelled: ' + amt + ' SP on ' + b.runnerName + ' refunded · ' + (p ? p.spiritPoints : 0) + ' SP', bet: b, refunded: amt };
   }
 
@@ -325,17 +328,17 @@
       if (nonStarters.length) {
         SD.state.log('bet', plural(nonStarters.length, 'bet') + ' refunded: ' + nonStarters.map(function (b) {
           return b.displayName + ' (' + b.runnerName + ' is not in this race)';
-        }).join(', ') + '.', 'info', { recordId: record.id });
+        }).join(', ') + '.', 'info', logTags(record, nonStarters));
       }
       if (oddsOn.length) {
         SD.state.log('bet', plural(oddsOn.length, 'bet') + ' refunded: ' + oddsOn.map(function (b) {
           return b.displayName + ' (' + b.runnerName + ' is odds-on at the gate, ' + fmtOdds(b.gateOdds) + ')';
-        }).join(', ') + '.', 'info', { recordId: record.id });
+        }).join(', ') + '.', 'info', logTags(record, oddsOn));
       }
       if (repriced.length) {
         SD.state.log('bet', 'Odds shortened at the gate: ' + repriced.map(function (b) {
           return b.displayName + "'s " + b.amount + ' SP on ' + b.runnerName + ' now pays ' + fmtOdds(b.odds) + ' (was ' + fmtOdds(b.quoted) + ')';
-        }).join(', ') + '.', 'info', { recordId: record.id });
+        }).join(', ') + '.', 'info', logTags(record, repriced));
       }
     }
     emit(SD.EVENTS.BET_LOCKED, {
@@ -392,7 +395,7 @@
       });
       SD.state.log('bet', (winners.length ? 'Bets paid: ' + named.join(', ') + (winners.length > n ? ' and ' + (winners.length - n) + ' more' : '') : 'No winning bets') +
         (losers.length ? ' · ' + plural(losers.length, 'bet') + ' lost (' + losers.reduce(function (a, x) { return a + x.amount; }, 0) + ' SP)' : '') + '.',
-        winners.length ? 'good' : 'info', { recordId: record.id });
+        winners.length ? 'good' : 'info', logTags(record, winners.slice(0, n)));
     }
     emit(SD.EVENTS.BET_RESOLVED, {
       recordId: record.id, bets: out, winners: winners.length, losers: losers.length,
@@ -419,12 +422,32 @@
   // Refund every open bet. Returns the refunded bets.
   const REASON_TEXT = {
     abort: 'the race was cancelled', newDay: 'a new day began', resetDay: 'the day was reset',
-    seasonEnd: 'the season ended', interrupted: 'the last race was interrupted'
+    seasonEnd: 'the season ended', interrupted: 'the last race was interrupted', runnerRetired: 'the runner left the derby'
   };
   function refundAll(state, reason) {
     const bets = list(state).slice();
     if (!bets.length) { if (state) state.bets = []; return []; }
     state.bets = [];
+    bets.forEach(function (b) { refundBet(state, b, 'betRefund'); });
+    if (isCurrent(state)) {
+      SD.state.log('bet', plural(bets.length, 'open bet') + ' refunded (' + (REASON_TEXT[reason] || reason || 'refund') + ').', 'info');
+    }
+    emit(SD.EVENTS.BET_RESOLVED, {
+      recordId: null, refunded: true, reason: reason || 'refund',
+      bets: bets.map(function (b) {
+        return { id: b.id, username: b.username, displayName: b.displayName, runnerId: b.runnerId, runnerName: b.runnerName,
+          amount: b.amount, odds: b.odds, payout: 0, won: false, refunded: true };
+      })
+    });
+    return bets;
+  }
+
+  // Review batch 8: refund and drop only the open bets pred(bet) picks (a runner retired or deleted by
+  // the streamer). Same ledger, log line and bet:resolved {refunded:true} as refundAll. -> refunded bets
+  function refundWhere(state, pred, reason) {
+    const bets = list(state).filter(function (b) { return b && pred(b); });
+    if (!bets.length) return [];
+    state.bets = list(state).filter(function (b) { return bets.indexOf(b) < 0; });
     bets.forEach(function (b) { refundBet(state, b, 'betRefund'); });
     if (isCurrent(state)) {
       SD.state.log('bet', plural(bets.length, 'open bet') + ' refunded (' + (REASON_TEXT[reason] || reason || 'refund') + ').', 'info');
@@ -454,6 +477,7 @@
     resolveRace: resolve,       // the name SD.game.finishRace calls
     creditBetHype: creditBetHype,
     refundAll: refundAll,
+    refundWhere: refundWhere,
     payoutFor: payoutFor,
     fmtOdds: fmtOdds,
     clearCache: clearCache

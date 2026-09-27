@@ -489,13 +489,14 @@ Test it without a bot. With the relay running and the game's bridge showing **ON
 `YOUR-TOKEN` with the relay's token):
 
 ```powershell
-Invoke-RestMethod -Method Post -Uri 'http://localhost:8765/chat?user=foxfan&mod=0&token=YOUR-TOKEN' -ContentType 'text/plain; charset=utf-8' -Body '!join'
+Invoke-RestMethod -Method Post -Uri 'http://localhost:8765/chat?user=test_viewer&mod=0&token=YOUR-TOKEN' -ContentType 'text/plain; charset=utf-8' -Body '!join'
 ```
 
-`foxfan` joins in the game's chat feed, and the relay prints the reply under `[for chat]`. A `503`
+`test_viewer` joins in the game's chat feed (a real profile in this save: remove it afterwards with
+**🛡 Runners & viewers → REMOVE VIEWER**), and the relay prints the reply under `[for chat]`. A `503`
 answer means the game is not connected to the relay; `403` means the token is missing or wrong. You
 can also test with no relay at all from the browser console:
-`SD.integrations.bridge.receive('{"username":"FoxFan","text":"!join"}')`.
+`SD.integrations.bridge.receive('{"username":"test_viewer","text":"!join"}')`.
 
 ---
 
@@ -549,6 +550,15 @@ Recommended setups:
 - **Browser window + Window Capture:** run the game in a normal browser window, connect chat there,
   press **O** for the overlay layout while live, and capture the window in OBS. Only close Streamer
   Controls before you go live.
+
+**Before going live in a window you tested in:** the demo bots of the Chat tab play in the same game
+under their own `~` profiles (`~foxfan` …, which no Twitch login can be, so a viewer called foxfan
+never gets a bot's SP or runner). They stop by themselves when Twitch chat or the bridge connects,
+on overlay mode, RESET ALL and IMPORT (and cannot be switched on while chat is connected), and when
+they stop their profiles and the runners they made leave the game. Test profiles you made yourself
+(`@test_viewer: !join`, the relay test below) stay: remove them with **🛡 Runners & viewers → REMOVE
+VIEWER**, or start clean with **RESET ALL** (the old game is kept as the backup). Saves from v1.0.0
+may still hold the old bots as plain viewers (`foxfan`, `mothmom` …): remove them the same way.
 - Opening a second copy in the same browser just to look at something is safe now: it opens
   read-only and saves nothing. Adding `?connect=0` is no longer needed for that (a read-only window
   never connects on its own), but it still keeps a window you *take over* in off chat.
@@ -579,13 +589,20 @@ viewer called `streamer`. It can run every mod and read-only command (`!race`, `
 it never earns SP, hype credit or achievements. The roster TRAIN / REST buttons and **ADD HYPE**
 act as the console too: they move runners and the hype meter without crediting anyone. To act for
 a viewer, pick them in SEND AS (listed by display name, sent by login) or type `@login: !command`
-in the Chat tab. A `#streamer` name arriving from Twitch, the bridge or the demo chat is ignored.
+in the Chat tab. A `#streamer` name arriving from Twitch, the bridge or the demo chat is ignored,
+and so is a demo-bot name (`~foxfan` …) arriving from Twitch or the bridge.
+
+**Moderation:** a viewer-made runner with a name that should not be on stream can be renamed,
+retired or deleted, and a viewer removed, in Streamer Controls → **🛡 Runners & viewers** (not while a
+race runs). Bets and paid boosts / sabotages on a retired or deleted runner are refunded, and the old
+name is replaced in the log and in season summaries (the one of the season in progress included),
+so the bridge's race frames and replies stop using it.
 
 | Command | Aliases | Needs | Locked during a race | Cooldown | What it does |
 |---|---|---|---|---|---|
 | `!join` | — | — | no | none | Join the derby (+200 SP the first time; +50 SP daily bonus on your first action each day) |
 | `!claim [runner]` | — | `!join` | yes | 10 s | Claim a free runner (named, or the first free one). One runner per viewer; re-claiming releases the old one |
-| `!create <name>` | — | `!join`, no runner | yes | 10 s | When every runner has an owner (and the streamer allows it): create your own runner (random species, style and ability; stats sum to 200). Names 3–20 letters, digits, spaces or apostrophes, unique |
+| `!create <name>` | — | `!join`, no runner | yes | 10 s | When every runner has an owner (and the streamer allows it): create your own runner (random species, style and ability; stats sum to 200). Names 3–20 letters, digits, spaces or apostrophes, with a letter; unique, no lookalike of another name, no command words (`all`, `max`, `cancel`, numbers, stat names), not a shortening of another runner |
 | `!train <stat>` / `!train <runner> <stat>` | `!t` | `!join` | yes | 10 s | Train your runner (or any runner while *open training* is on). Stats: speed, stamina, power, wisdom, luck (short forms such as `spd`, `sta`, `pow`, `wis`, `luk` work) |
 | `!rest [runner]` | `!r` | `!join` | yes | 10 s + 3 min per runner | Energy +30, fatigue down, hype −5 (less when the meter is under 5; the reply says the real change) |
 | `!cheer [runner]` | `!c` | `!join` | **no** | 30 s | Hype +3 and +2 SP; a named runner gets a tiny pre-race boost (a cheer during a race never makes you its backer) |
@@ -645,7 +662,7 @@ Browser console helpers:
 SD.integrations.twitch.status()        // { state, channel, messages, dropped, lastError, nextRetryAt, … }
 SD.integrations.twitch.recentLines()   // last 30 status lines from Twitch (NOTICE, ROOMSTATE, CAP, …)
 SD.integrations.bridge.status()        // { state, url, messages, malformed, lastBad, sent, lastError, … }
-SD.integrations.bridge.receive('{"username":"FoxFan","text":"!join"}')
+SD.integrations.bridge.receive('{"username":"test_viewer","text":"!join"}')
 ```
 
 ## 11. What is stored

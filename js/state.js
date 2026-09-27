@@ -19,6 +19,7 @@
     cooldowns: U.dict(),        // username -> { cmd: timestampMs }
     activity: U.dict(),         // username -> last read-only command that counted toward stats.commands
     runnerCooldowns: U.dict(),  // runnerId -> { rest: timestampMs }
+    demoRunners: U.dict(),      // review batch 8: runnerId -> true for runners a demo bot created this session
     chatFeed: [],
     connected: { twitch: 'off', bridge: 'off' },
     lastClockAt: null,    // last game.tickClock() timestamp
@@ -121,15 +122,16 @@
   // Review batch 7 (director-state#3): forget every per-game runtime map. The runtime outlives
   // state.set(), and runner ids restart at r01 in every game, so RESET ALL and IMPORT / RESTORE BACKUP
   // clear what belonged to the old game: command cooldowns, read-only activity, runner rest cooldowns,
-  // nervous-cheer counts, recent hype contributors, the running command, the idle-decay accumulator
-  // and the clock baseline. The chat feed and the connection status are about this browser session
-  // and are kept.
+  // nervous-cheer counts, recent hype contributors, the demo bots' runners (review batch 8), the
+  // running command, the idle-decay accumulator and the clock baseline. The chat feed and the
+  // connection status are about this browser session and are kept.
   function resetRuntime() {
     runtime.cooldowns = U.dict();
     runtime.activity = U.dict();
     runtime.runnerCooldowns = U.dict();
     runtime.nervousCheers = U.dict();
     runtime.hypeRecent = U.dict();
+    runtime.demoRunners = U.dict();
     runtime.activeCommand = null;
     runtime.hypeIdleAccumMs = 0;
     runtime.lastClockAt = SD.clock.now();
@@ -194,6 +196,19 @@
     return entry;
   }
 
+  // Review batch 8: the tags of a log line that names several viewers / runners (bets, payouts):
+  // { ...extra, usernames: [login keys], runnerIds: [ids] } from items [{ username, runnerId }], so
+  // SD.game's REMOVE VIEWER / DELETE / RENAME can find every line that names them.
+  function listTags(items, extra) {
+    const users = [], runners = [];
+    (Array.isArray(items) ? items : []).forEach(function (x) {
+      if (!x || typeof x !== 'object') return;
+      if (typeof x.username === 'string' && x.username && users.indexOf(x.username) < 0) users.push(x.username);
+      if (typeof x.runnerId === 'string' && x.runnerId && runners.indexOf(x.runnerId) < 0) runners.push(x.runnerId);
+    });
+    return Object.assign({}, extra || {}, { usernames: users, runnerIds: runners });
+  }
+
   // ---------------------------------------------------------------------------
   // Selectors (all accept an optional explicit state, default = current)
   // ---------------------------------------------------------------------------
@@ -204,7 +219,10 @@
     return null;
   }
 
-  // Case-insensitive runner lookup: id, exact name key, unique prefix, then word prefix.
+  // Case-insensitive runner lookup: id, exact name key, then a prefix of the name or of any word in it.
+  // Review batch 8 (gap3#1): the name-prefix and word-prefix matches are ONE tier. They used to be
+  // tried in turn, so a runner whose name starts with a word of another runner's name ("Comet Kid")
+  // silently took "!bet comet" from Velvet Comet; now such a query is ambiguous ("Did you mean ...?").
   // Returns { runner } | { ambiguous: [runners] } | { none: true }
   function findRunner(query, st) {
     st = st || current;
@@ -225,9 +243,9 @@
       return null;
     }
     return pick(pool.filter(function (r) { return U.nameKey(r.name) === key; })) ||
-      pick(pool.filter(function (r) { return U.nameKey(r.name).indexOf(key) === 0; })) ||
       pick(pool.filter(function (r) {
-        return r.name.toLowerCase().split(/[^a-z0-9]+/).some(function (w) { return w && w.indexOf(key) === 0; });
+        return U.nameKey(r.name).indexOf(key) === 0 ||
+          r.name.toLowerCase().split(/[^a-z0-9]+/).some(function (w) { return w && w.indexOf(key) === 0; });
       })) ||
       { none: true };
   }
@@ -273,6 +291,7 @@
     saveHint: saveHint,
     isMutating: isMutating,
     log: log,
+    listTags: listTags,
     runtime: runtime,
     runnerById: runnerById,
     findRunner: findRunner,

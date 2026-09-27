@@ -429,9 +429,16 @@
   /**
    * Arms a button on first click ("Confirm?"), runs fn on the second click within ms.
    * Returns true when the action ran.
+   * Review batch 8 (ui-admin-chat-dom#1): the confirming click must come at least
+   * CONFIG.UI.CONFIRM_ARM_MS after arming and must not be the 2nd+ click of a multi-click (ev.detail > 1).
+   * A double-click, or a held Enter repeating clicks on the focused button, used to arm AND confirm
+   * RESET ALL in one gesture. An ignored click leaves the button armed.
    */
-  function confirmClick(btn, fn, ms) {
+  function confirmClick(btn, fn, ms, ev) {
     if (btn.dataset.armed === '1') {
+      const armMs = num(cfg('UI.CONFIRM_ARM_MS', 700), 700);
+      const since = Date.now() - (Number(btn.dataset.armedAt) || 0);
+      if (since < armMs || (ev && ev.detail > 1)) return false;
       clearTimeout(Number(btn.dataset.armTimer));
       btn.dataset.armed = '';
       btn.classList.remove('btn--armed');
@@ -441,6 +448,7 @@
     }
     btn.dataset.label = btn.textContent;
     btn.dataset.armed = '1';
+    btn.dataset.armedAt = String(Date.now());
     btn.classList.add('btn--armed');
     btn.textContent = 'Confirm? ' + btn.dataset.label;
     btn.dataset.armTimer = String(setTimeout(function () {

@@ -92,6 +92,10 @@
             ': every race uses the same seed. Clear it in the admin Debug section.">FIXED<span class="hdr-fixedseed__more"> SEED</span></span>';
         }
         html += this.saveWarning();
+        // Review batch 8: demo bots play in this game; say so, on stream too, while they run.
+        if (SD.ui.chat && SD.ui.chat.botsOn) {
+          html += ' · <span class="hdr-demobots" title="The demo bots of the chat panel are playing in this game. Switch them off (Chat tab) before going live.">🤖 DEMO BOTS</span>';
+        }
         if (r.race.innerHTML !== html) r.race.innerHTML = html;
         r.race.classList.toggle('hdr-season__race--live', live);
       }

@@ -1432,6 +1432,17 @@
     return differs;
   }
 
+  // Review batch 8 (ui-admin-chat-dom#1): RESET ALL (SD.game.resetAll) first copies the game it is about
+  // to wipe to spiritderby.backup and reads it back, like an import does, so RESTORE BACKUP can undo a
+  // mistaken reset. A blank game (no race run, no viewer) is not backed up, so it never replaces an
+  // existing backup; a window that is not the writer copies nothing. -> true when a backup was written.
+  function backupCurrent() {
+    if (role !== 'writer' || !stillWriter()) return false;
+    const cur = SD.state && SD.state.get();
+    if (!cur || isBlank(cur)) return false;
+    return writeBackup(JSON.stringify(cur));
+  }
+
   // RESET ALL: forget the stored game. Review batch 6: refused (false) in a read-only window (that is
   // another window's game) and while a save is held (it would be lost without a copy).
   function clear() {
@@ -1496,6 +1507,7 @@
     MIGRATIONS: MIGRATIONS,
     load: load,
     save: save,
+    backupCurrent: backupCurrent,
     scheduleSave: scheduleSave,
     flush: flush,
     setAutoSave: setAutoSave,

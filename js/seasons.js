@@ -156,8 +156,12 @@
       }
       if (odds == null) return;
       if (!upset || odds > upset.odds) {
+        // Review batch 8 (fix round 1): the runner's name now, not the record's copy, so a runner the
+        // streamer renamed or deleted (SD.game) never shows its old name in the summary (on stream) or
+        // in season.history. Only a deleted runner can be missing: "(removed runner)", as in the log.
+        const live = SD.state.runnerById(w.runnerId, state);
         upset = {
-          recordId: rec.id, winnerId: w.runnerId, winnerName: w.name || (rec.summary && rec.summary.winnerName),
+          recordId: rec.id, winnerId: w.runnerId, winnerName: live ? live.name : '(removed runner)',
           winnerEmoji: rec.summary ? rec.summary.winnerEmoji : null, odds: odds,
           upset: odds >= SD.CONFIG.RACE.UPSET_ODDS, trackName: rec.trackName, distance: rec.distance, day: rec.day
         };
@@ -279,7 +283,8 @@
     if (SD.state.get() === state) {
       SD.state.log('season', 'Season ' + sum.number + ' is over! Champion: ' + (sum.championName ? sum.championName +
         ' (' + sum.championWins + ' win' + (sum.championWins === 1 ? '' : 's') + (sum.championOwner ? ', owned by ' + sum.championOwner : '') + ')' : 'nobody') +
-        (sum.mvpUsername ? '. MVP: ' + sum.mvpUsername + ' (' + sum.mvpSpEarned + ' SP earned)' : '') + '.', 'epic');
+        (sum.mvpUsername ? '. MVP: ' + sum.mvpUsername + ' (' + sum.mvpSpEarned + ' SP earned)' : '') + '.', 'epic',
+        SD.state.listTags([{ username: sum.mvpKey, runnerId: sum.championRunnerId }, { username: sum.championOwnerKey }]));
     }
     return sum;
   }

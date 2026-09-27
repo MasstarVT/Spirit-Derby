@@ -373,7 +373,12 @@
       TOAST_MAX: 4,
       TOAST_QUEUE_MAX: 12,
       REPLY_TOASTS_PER_S: 1,
-      REPLY_QUEUE_MAX: 6
+      REPLY_QUEUE_MAX: 6,
+      // Review batch 8: a two-click "Confirm?" button ignores a confirming click that comes sooner than
+      // CONFIRM_ARM_MS after it was armed (a double-click, a held Enter), and one-click drawer actions
+      // (NEXT DAY, SPAWN RUNNER, ADD HYPE, TRIGGER EVENT) ignore a repeat within ACTION_DEBOUNCE_MS.
+      CONFIRM_ARM_MS: 700,
+      ACTION_DEBOUNCE_MS: 1000
     },
 
     // ERROR_S: after a command fails unexpectedly (a bug, not a normal refusal) that viewer's same
@@ -406,7 +411,11 @@
       CREATE_NAME_MAX: 20,
       CREATE_NAME_KEY_MIN: 3,   // ... with at least 3 plain letters / digits (A-Z, 0-9) so chat can type it
       // Words a runner may not be called (they mean something else in !bet / !ribbon / !race ...).
-      RESERVED_NAMES: ['all', 'max', 'allin', 'cancel', 'refund', 'none', 'off', 'status', 'help', 'random', 'me', 'my', 'mine', 'streamer', 'mod']
+      RESERVED_NAMES: ['all', 'max', 'allin', 'cancel', 'refund', 'undo', 'none', 'off', 'status', 'help', 'random', 'me', 'my', 'mine', 'streamer', 'mod'],
+      // Review batch 8: words a runner name may not CONTAIN, because !bet reads them as an amount or a
+      // cancel ("!bet Max Power" went all-in). Digit-only words ("Route 66") and !train's stat names
+      // and aliases (SD.DATA.STAT_ALIASES) are refused as well (SD.runners.commandWordIn).
+      RESERVED_WORDS: ['all', 'max', 'allin', 'cancel', 'refund', 'undo', 'none', 'off']
     }
   };
 })(globalThis.SD = globalThis.SD || {});

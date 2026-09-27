@@ -4,7 +4,12 @@
  * settings.twitch.enabled / settings.bridge.enabled). SEND AS runs commands through SD.processCommand with
  * source 'admin' / isMod and shows the reply inline. All game changes go through SD.game.*
  * and SD.persistence.*; settings through SD.game.updateSettings(patch).
- * Destructive actions use a two-click "Confirm?" state (never window.confirm).
+ * Destructive actions use a two-click "Confirm?" state (never window.confirm). Review batch 8: the
+ * confirming click must come CONFIG.UI.CONFIRM_ARM_MS after arming (a double-click or a held Enter no
+ * longer confirms), one-click actions (NEXT DAY, SPAWN RUNNER, ADD HYPE, TRIGGER EVENT, START) ignore a
+ * repeat within CONFIG.UI.ACTION_DEBOUNCE_MS, and NEXT DAY on the season's last day needs a confirm.
+ * The RUNNERS & VIEWERS section retires, renames or deletes a runner and removes a viewer
+ * (SD.game.retireRunner / renameRunner / deleteRunner / removePlayer).
  * The DOM is built once in init(); render(state) only syncs values/enabled states and
  * never overwrites a control that currently has focus.
  * M6: the seed override is settings.seedOverride (applied while Debug mode is on, so the paddock
@@ -33,6 +38,9 @@
   const STREAMER_NAME = (SD.players && SD.players.STREAMER_NAME) || 'Streamer';
   const BY = STREAMER_KEY;
   const SEND_AS_MAX = 12;
+  const MOD_PLAYERS_MAX = 50;
+  // One-click actions a double-click must not run twice (review batch 8, lifecycle-concurrency#6).
+  const DEBOUNCED = { start: 1, nextday: 1, spawn: 1, hype: 1, trigger: 1 };
 
   function opt(v, label) { return '<option value="' + esc(v) + '">' + esc(label) + '</option>'; }
 
@@ -100,7 +108,26 @@
             '<button type="button" class="btn btn--danger" data-act="resetseason" data-ref="btnResetSeason" data-confirm>RESET SEASON</button>' +
             '<button type="button" class="btn btn--danger" data-act="resetall" data-ref="btnResetAll" data-confirm>RESET ALL</button>' +
           '</div>' +
-          '<p class="adm-note">Resets need a second click to confirm. They are disabled while a race runs.</p>' +
+          '<p class="adm-note">Resets need a second click to confirm (NEXT DAY too when it ends the season). They are disabled while a race runs.</p>' +
+        '</div></details>' +
+
+        // ---------------- RUNNERS & VIEWERS (review batch 8): moderation
+        '<details class="adm-sec"><summary>🛡 Runners &amp; viewers</summary><div class="adm-sec__body">' +
+          '<div class="adm-field adm-field--2"><label for="adm-modrunner">Runner</label>' +
+            '<select id="adm-modrunner" class="field" data-ref="modRunner"></select></div>' +
+          '<div class="adm-row"><input type="text" class="field" data-ref="modName" placeholder="New name" maxlength="20" spellcheck="false" autocomplete="off" style="flex:1 1 150px" aria-label="New runner name">' +
+            '<button type="button" class="btn" data-act="renamerunner" data-ref="btnRename">✎ RENAME</button></div>' +
+          '<div class="adm-row adm-row--2">' +
+            '<button type="button" class="btn btn--danger" data-act="retirerunner" data-ref="btnRetire" data-confirm>RETIRE RUNNER</button>' +
+            '<button type="button" class="btn btn--danger" data-act="deleterunner" data-ref="btnDeleteRunner" data-confirm>DELETE RUNNER</button>' +
+          '</div>' +
+          '<div class="adm-field adm-field--2"><label for="adm-modplayer">Viewer</label>' +
+            '<select id="adm-modplayer" class="field" data-ref="modPlayer"></select></div>' +
+          '<div class="adm-row"><button type="button" class="btn btn--danger" data-act="removeplayer" data-ref="btnRemovePlayer" data-confirm>REMOVE VIEWER</button></div>' +
+          '<p class="adm-note">For names that should not be on stream. <b>Retire</b>: the runner stops racing and leaves chat lookups (its record stays). ' +
+            '<b>Delete</b> (runners made by !create or SPAWN RUNNER; roster runners can only be retired): it is removed from the game and the boards. <b>Rename</b> follows the !create name rules. ' +
+            '<b>Remove viewer</b>: their profile, SP and achievements go and their runner is free again. Open bets and paid boosts on a retired or ' +
+            'deleted runner are refunded; the old name is replaced in the log. All need a second click and wait for the race to finish.</p>' +
         '</div></details>' +
 
         // ---------------- TUNING
@@ -254,6 +281,9 @@
     sendAsValue: '',     // the chosen SEND AS sender (a login, or the '#streamer' console key)
     lastKv: null,
     lastTable: '',
+    lastAct: {},         // act -> Date.now() of its last run (DEBOUNCED actions)
+    modRunnerKey: '',
+    modPlayerKey: '',
 
     init: function (root) {
       const self = this;
@@ -266,14 +296,18 @@
       root.addEventListener('change', function (e) { self.onChange(e); });
       root.addEventListener('input', function (e) { self.onInput(e); });
       root.addEventListener('keydown', function (e) {
+        // Review batch 8: a held Enter / Space repeats clicks on the focused button; only the first counts.
+        if (e.repeat && (e.key === 'Enter' || e.key === ' ') && e.target && e.target.closest && e.target.closest('button')) { e.preventDefault(); return; }
         if (e.key === 'Enter' && e.target === self.refs.spawnName) { e.preventDefault(); self.run('spawn'); }
+        if (e.key === 'Enter' && e.target === self.refs.modName) { e.preventDefault(); self.run('renamerunner'); }
         if (e.key === 'Enter' && e.target === self.refs.seed) { e.preventDefault(); self.commitSeed(); }
         if (e.key === 'Enter' && e.target === self.refs.sendText) { e.preventDefault(); self.run('send'); }
       });
 
       const rerender = function () { dom.schedule(self); };
       ['STATE_LOADED', 'SETTINGS_CHANGED', 'RACE_STARTED', 'RACE_PAUSED', 'RACE_RESUMED', 'RACE_FINISHED',
-        'RACE_ABORTED', 'RACE_COUNTDOWN', 'EVENT_DAY', 'SEASON_DAY_ADVANCED']
+        'RACE_ABORTED', 'RACE_COUNTDOWN', 'EVENT_DAY', 'SEASON_DAY_ADVANCED', 'RUNNER_SPAWNED', 'RUNNER_RETIRED',
+        'RUNNER_RENAMED', 'PLAYER_JOINED', 'PLAYER_REMOVED']
         .forEach(function (k) { self.offs.push(dom.on(k, rerender)); });
       this.offs.push(dom.on('STATE_CHANGED', function () { self.markSaving(); dom.schedule(self); }));
       // M6: persistence emits state:saved after every write -> "SAVED ✓" flash + size / age line.
@@ -348,11 +382,32 @@
       const btn = e.target.closest('button[data-act]');
       if (!btn || btn.disabled || !this.root.contains(btn)) return;
       const act = btn.getAttribute('data-act');
-      if (btn.hasAttribute('data-confirm')) {
-        dom.confirmClick(btn, function () { self.run(act); });
+      // Review batch 8: NEXT DAY on the last day of the season ends it (runners back to level 1, owners
+      // cleared), so it needs the second click too.
+      if (btn.hasAttribute('data-confirm') || (act === 'nextday' && this.nextDayEndsSeason())) {
+        dom.confirmClick(btn, function () { self.run(act); }, undefined, e);
         return;
       }
+      if (DEBOUNCED[act] && !this.debounce(act, e)) return;
       this.run(act);
+    },
+
+    // false when this click repeats `act` too soon: the 2nd+ click of a double-click (e.detail > 1) or
+    // within CONFIG.UI.ACTION_DEBOUNCE_MS of the last run (review batch 8, lifecycle-concurrency#6).
+    debounce: function (act, e) {
+      if (e && e.detail > 1) return false;
+      const gap = Number(dom.cfg('UI.ACTION_DEBOUNCE_MS', 1000));
+      const now = Date.now();
+      const last = this.lastAct[act] || 0;
+      if (gap > 0 && now - last < gap) return false;
+      this.lastAct[act] = now;
+      return true;
+    },
+
+    nextDayEndsSeason: function () {
+      const s = dom.state();
+      const S = s && s.season;
+      return !!(S && Number(S.day) >= Number(S.daysPerSeason));
     },
 
     run: function (act) {
@@ -420,9 +475,37 @@
           if (r.ok) {
             if (SD.playback && SD.playback.stop) SD.playback.stop();
             if (SD.ui.renderAll) SD.ui.renderAll();
-            dom.toast((r.res && r.res.message) || 'Everything reset. A fresh forest awaits.', 'info');
+            dom.toast((r.res && r.res.message) || 'Everything reset. A fresh forest awaits.', 'info', { ms: 8000 });
           }
           break;
+        case 'renamerunner': {
+          const id = this.refs.modRunner && this.refs.modRunner.value;
+          const input = this.refs.modName;
+          const name = input ? input.value.trim() : '';
+          if (!id) { dom.toast('Pick a runner first.', 'bad'); break; }
+          if (!name) { dom.toast('Type the new name first.', 'bad'); if (input) input.focus(); break; }
+          r = this.call('renameRunner', [id, name, { by: BY }]);
+          if (r.ok) { dom.toast((r.res && r.res.message) || 'Renamed.', 'good'); if (input) input.value = ''; }
+          break;
+        }
+        case 'retirerunner':
+        case 'deleterunner': {
+          const id = this.refs.modRunner && this.refs.modRunner.value;
+          if (!id) { dom.toast('Pick a runner first.', 'bad'); break; }
+          r = this.call(act === 'retirerunner' ? 'retireRunner' : 'deleteRunner', [id, { by: BY }]);
+          if (r.ok) {
+            const ref = r.res && r.res.refunded;
+            dom.toast(((r.res && r.res.message) || 'Done.') + (ref && (ref.bets || ref.effects) ? ' Refunded: ' + ref.bets + ' bet(s), ' + ref.effects + ' queued effect(s).' : ''), 'info');
+          }
+          break;
+        }
+        case 'removeplayer': {
+          const key = this.refs.modPlayer && this.refs.modPlayer.value;
+          if (!key) { dom.toast('Pick a viewer first.', 'bad'); break; }
+          r = this.call('removePlayer', [key]);
+          if (r.ok) dom.toast((r.res && r.res.message) || 'Viewer removed.', 'info');
+          break;
+        }
         case 'clearseed':
           if (this.refs.seed) this.refs.seed.value = '';
           if (settings.seedOverride != null) this.call('updateSettings', [{ seedOverride: null }]);
@@ -466,6 +549,7 @@
     onChange: function (e) {
       const t = e.target;
       if (t === this.refs.file) { this.importFile(t.files && t.files[0]); return; }
+      if (t === this.refs.modRunner || t === this.refs.modPlayer) { dom.schedule(this); return; }
       if (t === this.refs.sendAs) { this.sendAsValue = t.value || STREAMER_KEY; return; }
       if (t === this.refs.seed) { this.commitSeed(); return; }
       const key = t.getAttribute('data-set');
@@ -711,7 +795,8 @@
       const status = cr ? cr.status : null;
       const settings = state.settings || {};
 
-      if (r.status) r.status.textContent = status ? 'Race: ' + String(status).toUpperCase() : 'No race running';
+      const bots = !!(SD.ui.chat && SD.ui.chat.botsOn);
+      if (r.status) r.status.textContent = (status ? 'Race: ' + String(status).toUpperCase() : 'No race running') + (bots ? ' · 🤖 DEMO BOTS ON' : '');
       if (r.btnStart) r.btnStart.disabled = !!cr;
       if (r.btnPause) r.btnPause.disabled = !(status === 'running' || status === 'countdown');
       if (r.btnResume) r.btnResume.disabled = status !== 'paused';
@@ -720,6 +805,11 @@
       ['btnNextDay', 'btnResetDay', 'btnResetSeason', 'btnResetAll', 'btnImport', 'btnTrigger'].forEach(function (k) {
         if (r[k]) r[k].disabled = !!cr;
       });
+      if (r.btnNextDay && r.btnNextDay.dataset.armed !== '1') {
+        const label = this.nextDayEndsSeason() ? '☀ NEXT DAY (ends season)' : '☀ NEXT DAY';
+        if (r.btnNextDay.textContent !== label) r.btnNextDay.textContent = label;
+      }
+      this.renderModeration(state);
 
       this.fillEventSelect();
       this.fillSendAs(state);
@@ -729,6 +819,50 @@
       this.renderDebug(state, settings);
       this.renderIntegrations(settings);
       this.renderSave();
+    },
+
+    // RUNNERS & VIEWERS: runner and viewer pickers (rebuilt only when their lists change and they do
+    // not have focus) and which of the buttons apply. Everything waits while a race exists.
+    renderModeration: function (state) {
+      const r = this.refs;
+      if (!r.modRunner || !r.modPlayer) return;
+      const active = document.activeElement;
+      const runners = (state.runners || []).slice().sort(function (a, b) {
+        return (Number(!!a.retired) - Number(!!b.retired)) || (Number(!!b.custom) - Number(!!a.custom)) || String(a.name).localeCompare(String(b.name));
+      });
+      const rOpts = [['', '— pick a runner —']].concat(runners.map(function (x) {
+        return [String(x.id), (x.emoji ? x.emoji + ' ' : '') + x.name + ' (' + x.id + (x.custom ? ', custom' : '') + (x.retired ? ', retired' : '') + ')'];
+      }));
+      const chosenR = r.modRunner.value;
+      const rKey = rOpts.map(function (o) { return o[0] + '=' + o[1]; }).join('|');
+      if (rKey !== this.modRunnerKey && active !== r.modRunner) {
+        this.modRunnerKey = rKey;
+        r.modRunner.innerHTML = rOpts.map(function (o) { return opt(o[0], o[1]); }).join('');
+        r.modRunner.value = rOpts.some(function (o) { return o[0] === chosenR; }) ? chosenR : '';
+      }
+      const players = state.players || {};
+      const keys = Object.keys(players).filter(function (k) { return players[k] && typeof players[k] === 'object'; })
+        .sort(function (a, b) { return ((players[b].lastSeen || 0) - (players[a].lastSeen || 0)) || (a < b ? -1 : (a > b ? 1 : 0)); })
+        .slice(0, MOD_PLAYERS_MAX);
+      const chosenP = r.modPlayer.value;
+      if (chosenP && keys.indexOf(chosenP) < 0 && Object.prototype.hasOwnProperty.call(players, chosenP)) keys.push(chosenP);
+      const pOpts = [['', '— pick a viewer —']].concat(keys.map(function (k) { return [k, senderLabel(players, k)]; }));
+      const pKey = pOpts.map(function (o) { return o[0] + '=' + o[1]; }).join('|');
+      if (pKey !== this.modPlayerKey && active !== r.modPlayer) {
+        this.modPlayerKey = pKey;
+        r.modPlayer.innerHTML = pOpts.map(function (o) { return opt(o[0], o[1]); }).join('');
+        r.modPlayer.value = pOpts.some(function (o) { return o[0] === chosenP; }) ? chosenP : '';
+      }
+      const busy = !!state.currentRace;
+      const sel = runners.filter(function (x) { return String(x.id) === r.modRunner.value; })[0] || null;
+      if (r.btnRename) r.btnRename.disabled = busy || !sel;
+      if (r.modName) r.modName.disabled = busy;
+      if (r.btnRetire) r.btnRetire.disabled = busy || !sel || !!sel.retired;
+      if (r.btnDeleteRunner) {
+        r.btnDeleteRunner.disabled = busy || !sel || !sel.custom;
+        r.btnDeleteRunner.title = sel && !sel.custom ? 'Roster runners can be retired, not deleted.' : '';
+      }
+      if (r.btnRemovePlayer) r.btnRemovePlayer.disabled = busy || !r.modPlayer.value;
     },
 
     syncSettings: function (settings) {

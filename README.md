@@ -23,7 +23,8 @@ Version **1.0.0** · [Architecture](docs/ARCHITECTURE.md) · [Twitch / Mix It Up
 
 - **Play:** double-click `index.html` (Chrome, Edge or Firefox). Everything runs from `file://`, and the game autosaves in the browser.
 - **Or serve it:** `node tools/serve.js` (optional; any static server works), then open <http://localhost:8090> (`node tools/serve.js 3000` picks another port).
-- **Try it alone:** open the **Chat** tab and switch on **🤖 Demo bots**. Six fictional viewers join, train, bet and cheer. Press **`** (backtick) for the streamer controls and hit **▶ START RACE**.
+- **Try it alone:** open the **Chat** tab and switch on **🤖 Demo bots**. Six fictional viewers join, train, bet and cheer (the header shows **🤖 DEMO BOTS** while they play). Press **`** (backtick) for the streamer controls and hit **▶ START RACE**.
+- **Before going live:** switch the demo bots off. Their profiles and the runners they made leave the game when they stop, and they also stop by themselves on RESET ALL, IMPORT, overlay mode and when Twitch chat or the bridge connects (they cannot be switched on while either is connected). For a clean first season, use **RESET ALL** (the old game is kept as the backup; RESTORE BACKUP brings it back).
 - **Go live:** press **O** for overlay mode, or load `index.html?overlay=1` as an OBS browser source (1920×1080). Add `&twitch=yourchannel` to read your chat. Details are in [docs/INTEGRATION.md](docs/INTEGRATION.md).
 - **Run the tests:** `node tools/run-tests.js` (Node 18+, about 40 s).
 
@@ -41,13 +42,13 @@ Version **1.0.0** · [Architecture](docs/ARCHITECTURE.md) · [Twitch / Mix It Up
 
 ## Viewer commands
 
-Every source (simulated chat, SEND AS, Twitch, the bridge) goes through the same pipeline: `SD.processCommand(username, text, { source, isMod, displayName })`. Runner names are case-insensitive and can be shortened (`moss`, `Moss Runner`, `@MossRunner`, the id `r01`); an ambiguous name gets a "Did you mean…?" reply. **Locked** = refused while a race is running (countdown, running or paused).
+Every source (simulated chat, SEND AS, Twitch, the bridge) goes through the same pipeline: `SD.processCommand(username, text, { source, isMod, displayName })`. Runner names are case-insensitive and can be shortened (`moss`, `Moss Runner`, `@MossRunner`, the id `r01`); a shortening that fits two runners gets a "Did you mean…?" reply. If a runner's whole name is typed with no amount (`!bet Max Power`) or no stat (`!train Speed Demon`), the reply asks for it rather than reading a word of the name as one. **Locked** = refused while a race is running (countdown, running or paused).
 
 | Command | Aliases | Cost / effect | Cooldown | Locked | Example reply |
 |---|---|---|---|---|---|
 | `!join` | | +200 SP once; +50 SP daily bonus on your first action each in-game day | none | no | *Welcome to the Spirit Derby, FoxFan! You have 225 Spirit Points. Type !claim to pick a runner… · 🏅 Achievement: First Steps (+25 SP)* |
 | `!claim [runner]` | | Claim a free runner (named or the first free one). One per viewer; claiming another releases yours | 10 s | yes | *FoxFan claimed 🦌 Moss Runner (Late Surger)! Now try !train speed.* |
-| `!create <name>` | | Once every runner has an owner (and **Allow !create** is on): a new runner from a random species, style and ability, stats summing to 200, claimed by you. Names: 3–20 letters, digits, spaces, apostrophes; unique | 10 s | yes | *✨ AcornAndy created 🦉 Pebble Dash, a Hollow Owl Wild Card! SPD 37 STA 37 POW 32 WIS 52 LUK 42 · Ability: Acorn Hoard* |
+| `!create <name>` | | Once every runner has an owner (and **Allow !create** is on): a new runner from a random species, style and ability, stats summing to 200, claimed by you. Names: 3–20 letters, digits, spaces, apostrophes, with a letter; unique, not a lookalike of another name (other alphabets, `1` for `l`, `rn` for `m`), no command words (`all`, `max`, `cancel`, numbers, stat names), and not a shortening of another runner (`Comet` next to Velvet Comet) | 10 s | yes | *✨ AcornAndy created 🦉 Pebble Dash, a Hollow Owl Wild Card! SPD 37 STA 37 POW 32 WIS 52 LUK 42 · Ability: Acorn Hoard* |
 | `!train <stat>` · `!train <runner> <stat>` | `!t` | −12 energy, +stat, +5 SP (+15 on a critical), hype +1 (+10). Stats `speed stamina power wisdom luck` or `spd sta pow wis luk` | 10 s | yes | *Moss Runner practiced explosive starts. · Speed +2 · Energy -12 · Hype +1 · +5 SP* |
 | `!rest [runner]` | `!r` | +30 energy, −25 fatigue, hype −5 (less when the meter is under 5; the reply says what really changed) | 10 s + 3 min per runner | yes | *Moss Runner soaks their hooves in the Moonlit Spring. · Energy +30 · Hype -5 · Feeling Good* |
 | `!cheer [runner]` | `!c` | Hype +3, +2 SP; a named runner gets a tiny pre-race boost (+0.05% per cheer, max 2%); 10 cheers calm a Nervous runner | 30 s | **no** | *The forest hears you! Hype +3 (3/120) · Moss Runner feels the love (1 cheer for the next race) · +2 SP* |
@@ -152,12 +153,13 @@ A day has 3 races and a season has 7 days. With **Auto-advance day** on, the day
 
 ## Streamer guide
 
-**Streamer Controls** (⚙ or **`**) slide over the sidebar. All actions go through `SD.game`, and dangerous ones need a second click.
+**Streamer Controls** (⚙ or **`**) slide over the sidebar. All actions go through `SD.game`, and dangerous ones need a second click. The second click must come a moment later (a double-click or a held key does not confirm), NEXT DAY needs one on the season's last day (it ends the season), and a double-click on NEXT DAY, SPAWN RUNNER, ADD HYPE or TRIGGER EVENT runs it once.
 
 | Section | Controls |
 |---|---|
 | 🏁 Race | **START RACE** · **END RACE** (plays the result out instantly) · **PAUSE / RESUME** · distance · number of runners |
-| 🌲 World | day event picker + **TRIGGER EVENT** · **ADD HYPE +25** · name + **SPAWN RUNNER** · **NEXT DAY** · **RESET DAY** · **RESET SEASON** (summary + rollover) · **RESET ALL** (new game) |
+| 🌲 World | day event picker + **TRIGGER EVENT** · **ADD HYPE +25** · name + **SPAWN RUNNER** · **NEXT DAY** · **RESET DAY** · **RESET SEASON** (summary + rollover) · **RESET ALL** (new game; the old one is kept as the backup) |
+| 🛡 Runners & viewers | for names that should not be on stream: pick a runner, then **RENAME** (same rules as `!create`), **RETIRE RUNNER** (stops racing, leaves chat lookups; its record stays) or **DELETE RUNNER** (created runners only; gone from the game and the boards). Pick a viewer, then **REMOVE VIEWER** (profile, SP and achievements gone, their runner free again). Bets and paid boosts / sabotages on a retired or deleted runner are refunded, and the old name is replaced in the log and in season summaries, the one of the season in progress included (race records keep it). Not while a race is running |
 | 🎛 Tuning | event frequency (none / low / normal / high / chaos) · hype multiplier · playback speed · final-stretch speedup · user cooldown · open training · allow `!create` · auto-advance day |
 | 🐞 Debug | debug mode (hidden events such as wild rolls in the ticker, a HUD on the track with tick / fps / seed / hash / wild rolls, a perf + fatigue table, error toasts) · **seed override** (every race uses it while debug is on; the paddock matches; the header shows **FIXED SEED**, also on stream, and it is never saved, so a reload clears it) · **REPLAY LAST RACE** (re-simulates and compares hashes; races from an older engine are flagged as such) · **COPY LAST RACE JSON** for bug reports |
 | 💾 Save | **EXPORT JSON** / **IMPORT JSON** · `autosave ● 2 s ago · 41 KB` with a *SAVED ✓* flash · counts and storage type · **Save now** |
@@ -205,7 +207,7 @@ SD.debug.lastRaceJSON(true)           // the same as pretty JSON (what COPY LAST
 SD.debug.simulate(12345, 2400)        // simulate the next field with a seed + distance, without changing the game
 SD.debug.replay()                     // re-simulate the last race and compare hashes
 SD.debug.bus.wildcard(true, /bet|race:finished/)   // log bus events; wildcard(false) stops
-SD.processCommand('FoxFan', '!join', { source: 'sim' })
+SD.processCommand('test_viewer', '!join', { source: 'sim' })   // a test profile in THIS save: REMOVE VIEWER takes it out
 ```
 
 ## Twitch and Mix It Up
@@ -236,6 +238,7 @@ Classic `<script>` files on one `globalThis.SD` namespace (no modules, so it run
 | import | `import-test.js` | hardened IMPORT: broken finished races refunded (and good ones applied at once), best-time / runner-id / lane / distance repairs, retired runners' refunds, runtime maps reset on IMPORT and RESET ALL, boot order and the boot recovery buttons |
 | rng | `rng-test.js` | unpredictable race seeds (secure random salt re-drawn at every race start, load and import; a leaked race seed predicts nothing; the race runs on fresh gate entropy, so brute-forcing the paddock's seed predicts no result), no seed salt or seed override in EXPORT JSON, no replayed races after a save rollback, refused trainings draw no randomness, `hashRecord` of a stored race, `rollStats` remainder order |
 | runners | `runners-test.js` | `!create` rules and replies, SPAWN RUNNER, the runner cap, `SD.debug` |
+| hygiene | `hygiene-test.js` | retire / rename / delete a runner and remove a viewer, demo bots on their own `~` profiles and their clean-up (RESET ALL, IMPORT, live chat, after a race), the confirm delay, the RESET ALL backup, NEXT DAY debounce, stale season summaries, `!create` name rules and the `!bet` / `!train` parsers |
 | fuzz | `fuzz-test.js` | 17 seeded viewers (three with display names that are not their login, plus the logins `constructor` and `__proto__`) spamming every command (hostile arguments, spam bursts, mid-race attempts, non-mod mod commands, reloads) over 3 full seasons, with invariants checked after every command and race |
 
 Useful flags:
@@ -275,7 +278,7 @@ docs/                   ARCHITECTURE.md (API contract) · INTEGRATION.md (Twitch
 - Twitch write-back through a bot token (documented in INTEGRATION.md, deliberately not built).
 - Runner art: `avatarUrl` per runner is already supported; a sprite sheet per species would be next.
 - Channel-point redemptions through the bridge (for example a free boost).
-- Team events and relay races; rival pairs with their own banter; retirement and a hall of fame.
+- Team events and relay races; rival pairs with their own banter; a hall of fame for retired runners.
 - A second track layout per distance and weather that lasts a whole day.
 - Localisation: every reply is one string in `js/commands.js` and `js/data.js`.
 

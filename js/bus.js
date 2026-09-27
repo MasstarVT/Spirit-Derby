@@ -20,7 +20,10 @@
     RUNNER_CLAIMED: 'runner:claimed',
     RUNNER_LEVELUP: 'runner:levelup',
     RUNNER_CONDITION: 'runner:condition',
+    RUNNER_RETIRED: 'runner:retired',   // review batch 8: admin RETIRE / DELETE { runnerId, name, deleted, refunded, by }
+    RUNNER_RENAMED: 'runner:renamed',   // review batch 8: admin RENAME { runnerId, from, to }
     PLAYER_JOINED: 'player:joined',
+    PLAYER_REMOVED: 'player:removed',   // review batch 8: admin REMOVE PLAYER / demo purge { username, displayName, demo, released }
     PLAYER_SP: 'player:sp',
     HYPE_CHANGED: 'hype:changed',
     HYPE_THRESHOLD: 'hype:threshold',

@@ -43,6 +43,10 @@
  *                refunds; IMPORT runs boot's post-load routine; runtime maps reset; state.set() depth; boot
  *                order; bootRecovery)
  *   runners     tools/runners-test.js (M6 !create, admin SPAWN RUNNER, MAX_ACTIVE, SD.debug)
+ *   hygiene      tools/hygiene-test.js (review batch 8: retire / rename / delete a runner and remove a viewer,
+ *                demo bots on '~' keys and their clean-up, bots stopped by RESET ALL / IMPORT / live chat,
+ *                confirm arm delay + RESET ALL backup, NEXT DAY debounce, stale season summaries, !create name
+ *                rules (shorthand takeovers, command words, confusables), exact-name !bet / !train parsing)
  *   fuzz         tools/fuzz-test.js (M6 seeded 3-season fuzz: 17 viewers spamming every command, random race
  *                starts / pauses / ends / aborts / reloads, invariants after every command and race)
  */
@@ -67,6 +71,7 @@ const SUITES = [
   { name: 'durability', file: 'durability-test.js', args: VERBOSE ? ['--verbose'] : [] },
   { name: 'import', file: 'import-test.js', args: VERBOSE ? ['--verbose'] : [] },
   { name: 'runners', file: 'runners-test.js', args: VERBOSE ? ['--verbose'] : [] },
+  { name: 'hygiene', file: 'hygiene-test.js', args: VERBOSE ? ['--verbose'] : [] },
   { name: 'fuzz', file: 'fuzz-test.js', args: VERBOSE ? ['--verbose'] : [] }
 ];
 

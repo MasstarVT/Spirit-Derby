@@ -46,6 +46,15 @@
   const STREAMER_NAME = 'Streamer';
   function isReservedKey(key) { return typeof key === 'string' && key.charAt(0) === '#'; }
 
+  // Review batch 8 (gap1#2): the chat panel's demo bots play as '~' + name ('~foxfan'). No Twitch login
+  // can start with '~', so a real viewer called foxfan never inherits a bot's SP, runner or
+  // achievements; SD.commands refuses '~' keys from Twitch and the bridge, and SD.game.purgeDemo()
+  // removes every '~' player (their runners released, bets and queued effects dropped) when the bots
+  // stop and whenever a game is loaded. Unlike '#' keys, demo keys are ordinary players while they run.
+  const DEMO_PREFIX = '~';
+  function isDemoKey(key) { return typeof key === 'string' && key.charAt(0) === DEMO_PREFIX; }
+  function demoKey(name) { return DEMO_PREFIX + keyOf(name).replace(/^~+/, ''); }
+
   // ---------------------------------------------------------------------------
   // Names
   // ---------------------------------------------------------------------------
@@ -304,7 +313,7 @@
     p.runnerId = runner.id;
     if (isCurrent(state)) {
       SD.state.log('claim', p.displayName + ' claimed ' + runner.emoji + ' ' + runner.name + (released ? ' (released ' + released + ')' : '') + '.',
-        'good', { username: p.username, runnerId: runner.id });
+        'good', Object.assign({ username: p.username, runnerId: runner.id }, released ? { runnerIds: [runner.id, old.id] } : {}));
     }
     emit(SD.EVENTS.RUNNER_CLAIMED, {
       runnerId: runner.id, username: p.username, displayName: p.displayName,
@@ -432,7 +441,7 @@
         return x.displayName + ' +' + x.amount + ' SP (' + (x.role === 'owner' ? '' : 'backing ') + x.runnerName + ' ' + U.ordinal(x.place) + ')';
       });
       SD.state.log('sp', 'Race payouts: ' + shown.join(', ') + (paid.length > 6 ? ' and ' + (paid.length - 6) + ' more' : '') + '.',
-        'good', { recordId: record.id });
+        'good', SD.state.listTags(paid.slice(0, 6), { recordId: record.id }));
     }
     return payouts;
   }
@@ -523,11 +532,46 @@
     return removed;
   }
 
+  // Review batch 8: take a player out of the game (admin REMOVE PLAYER, SD.game.purgeDemo). Their runner
+  // is released, their open bets and queued chat effects are dropped (nothing to refund: the SP was
+  // theirs), and their profile, achievements.progress counters, hype.contributions entry and every
+  // achievements.unlocked entry go. Past seasons' archived summaries (season.history) are kept.
+  // Pure state change (run inside a mutation). -> { player, released: [runnerIds], bets, effects } | null
+  function remove(state, username) {
+    const k = keyOf(username);
+    const p = k ? byKey(state, k) : null;
+    if (!p) return null;
+    const released = [];
+    (state.runners || []).forEach(function (r) {
+      if (r && ownerKey(r) === k) { setOwner(r, null); released.push(r.id); }
+    });
+    const bets = Array.isArray(state.bets) ? state.bets.filter(function (b) { return b && b.username === k; }) : [];
+    if (bets.length) state.bets = state.bets.filter(function (b) { return bets.indexOf(b) < 0; });
+    const effects = Array.isArray(state.raceEffects) ? state.raceEffects.filter(function (e) { return e && e.by === k; }) : [];
+    if (effects.length) state.raceEffects = state.raceEffects.filter(function (e) { return effects.indexOf(e) < 0; });
+    delete state.players[k];
+    const A = state.achievements;
+    if (A && typeof A === 'object') {
+      if (A.progress && typeof A.progress === 'object' && U.hasOwn(A.progress, k)) delete A.progress[k];
+      if (Array.isArray(A.unlocked)) {
+        const kept = A.unlocked.filter(function (a) { return !(a && a.username === k); });
+        if (kept.length !== A.unlocked.length) A.unlocked = kept;
+      }
+    }
+    const H = state.hype && state.hype.contributions;
+    if (H && typeof H === 'object' && U.hasOwn(H, k)) delete H[k];
+    return { player: p, released: released, bets: bets.length, effects: effects.length };
+  }
+
   SD.players = {
     STAT_KEYS: STAT_KEYS,
     STREAMER_KEY: STREAMER_KEY,
     STREAMER_NAME: STREAMER_NAME,
+    DEMO_PREFIX: DEMO_PREFIX,
     isReservedKey: isReservedKey,
+    isDemoKey: isDemoKey,
+    demoKey: demoKey,
+    remove: remove,
     cleanName: cleanName,
     keyOf: keyOf,
     dayKey: dayKey,

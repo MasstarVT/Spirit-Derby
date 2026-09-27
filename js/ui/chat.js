@@ -7,7 +7,13 @@
  *    Streamer = the console's reserved key SD.players.STREAMER_KEY, source 'admin', isMod (it runs
  *    mod and read-only commands but never plays). prefs.chat.sender / recent hold logins;
  *  - a "🤖 Demo bots" toggle: six fictional viewers send plausible commands every 2–4 s
- *    (M5: they also bet, boost, snack and occasionally sabotage with what they can afford);
+ *    (M5: they also bet, boost, snack and occasionally sabotage with what they can afford).
+ *    Review batch 8: they play as demo keys ('~foxfan', SD.players.demoKey), which no Twitch login can
+ *    be, and they never leak into live play: they stop on RESET ALL / IMPORT / RESTORE / TAKE OVER
+ *    (state:loaded), when overlay mode is switched on and when a Twitch or bridge connection opens (and
+ *    cannot be switched on while one is live); when they stop, SD.game.purgeDemo() removes their
+ *    profiles and the runners they created (after the race, if one is running). The header shows
+ *    "DEMO BOTS" while they run (body.sd-demo-bots);
  *  - system lines for race results + bets, achievements, refunds and the season summary (M5);
  *  - in overlay mode (body.sd-overlay) command replies also pop up as toasts under the track.
  * Everything goes through SD.commands.handleChat — the same pipeline Twitch uses in M7.
@@ -25,6 +31,22 @@
   const STREAMER = (SD.players && SD.players.STREAMER_KEY) || '#streamer';
   const STREAMER_NAME = (SD.players && SD.players.STREAMER_NAME) || 'Streamer';
   const BOTS = ['FoxFan', 'MothMom', 'AcornAndy', 'WispWatcher', 'BrambleBob', 'LanternLiz'];
+  // A bot's player key: '~' + its name ('~foxfan'), never a Twitch login (review batch 8).
+  function botKey(name) {
+    return SD.players && typeof SD.players.demoKey === 'function' ? SD.players.demoKey(name) : '~' + String(name).toLowerCase();
+  }
+  function isDemoKey(key) { return !!(SD.players && typeof SD.players.isDemoKey === 'function' && SD.players.isDemoKey(key)); }
+  // Is Twitch chat or the bridge live (connected or connecting)? The bots must not play in a live game.
+  function liveChat(onlyOpen) {
+    const I = SD.integrations;
+    if (!I) return false;
+    return ['twitch', 'bridge'].some(function (k) {
+      let st = null;
+      try { st = I[k] && typeof I[k].status === 'function' ? I[k].status() : null; } catch (e) { st = null; }
+      const state = st && st.state;
+      return onlyOpen ? state === 'on' : (state === 'on' || state === 'connecting' || state === 'reconnecting');
+    });
+  }
   const BOT_MIN_MS = 2000;
   const BOT_SPREAD_MS = 2000;
   const NAME_COLORS = ['#e6c65e', '#9fd67a', '#e0875f', '#8fb5e6', '#c69be6', '#7fe0c0', '#f0a3b5', '#d9b38c', '#b5d98f', '#f2c38a'];
@@ -70,7 +92,7 @@
       '<form class="chat__form" data-ref="form" autocomplete="off">' +
         '<select class="field chat__sender" data-ref="sender" aria-label="Send as" title="Send as (or type @login: before the message)"></select>' +
         '<input class="field chat__input" data-ref="input" type="text" maxlength="300" spellcheck="false" ' +
-          'placeholder="!join  or  @FoxFan: !train speed" aria-label="Chat message">' +
+          'placeholder="!join  or  @test_viewer: !train speed" aria-label="Chat message">' +
         '<button type="submit" class="btn btn--primary chat__send">Send</button>' +
       '</form>' +
       '<p class="chat__hint" data-ref="hint">Try <b>!join</b> · <b>!claim</b> · <b>!train speed</b> · <b>!rest</b> · <b>!cheer moss</b> · ' +
@@ -91,6 +113,7 @@
     botsOn: false,
     botTimer: 0,
     botTurn: 0,
+    purgePending: false,     // bot profiles still to remove (a race was running when the bots stopped)
     observer: null,
 
     init: function (root) {
@@ -177,6 +200,7 @@
         if (p && p.reset) return;
         self.system('The race was cancelled. Training is open again.', 'info');
       }));
+      this.bindBots();
       this.offs.push(dom.on('HYPE_THRESHOLD', function (p) { if (p && p.text) self.system('🔥 ' + p.text, 'epic'); }));
 
       // Render whatever the pipeline already recorded this session.
@@ -196,6 +220,9 @@
         this.observer.observe(panel, { attributes: true, attributeFilter: ['hidden'] });
       }
 
+      // Bot profiles left in the save by an earlier session (afterLoad removes them; this catches one
+      // that had to wait for a race).
+      this.purgeDemo();
       const s = dom.state();
       if (s) this.render(s);
     },
@@ -316,19 +343,16 @@
       return Object.prototype.hasOwnProperty.call(this.labels, key) ? this.labels[key] : '';
     },
 
-    // What a typed "@name:" speaks as: always a viewer login (a demo bot's casing is kept for its label).
+    // What a typed "@name:" speaks as: always a viewer login, never a demo bot (their '~' keys cannot be typed).
     resolveTyped: function (name) {
       const key = this.keyOf(name);
-      if (!this.labelSeen(key) && !this.playerOf(key)) {
-        const bot = BOTS.filter(function (n) { return n.toLowerCase() === key; })[0];
-        this.labels[key] = bot || String(name);
-      }
+      if (!this.labelSeen(key) && !this.playerOf(key)) this.labels[key] = String(name);
       return key;
     },
 
     noteSender: function (key, label) {
       key = this.keyOf(key);
-      if (!key || key === STREAMER || (SD.players && SD.players.isReservedKey(key))) return;
+      if (!key || key === STREAMER || (SD.players && SD.players.isReservedKey(key)) || isDemoKey(key)) return;
       if (label) this.labels[key] = String(label);
       this.recent = [key].concat(this.recent.filter(function (k) { return k !== key; })).slice(0, RECENT_MAX);
       this.fillSenders();
@@ -397,9 +421,31 @@
     },
 
     // ---------------------------------------------------------------- demo bots
-    setBots: function (on, silent) {
+    // Review batch 8 (gap1#3): a new game (RESET ALL, IMPORT, RESTORE BACKUP, TAKE OVER) stops the bots,
+    // and so does a live Twitch / bridge connection opening: they used to keep playing in it. A clean-up
+    // that had to wait for a race runs when the race finishes or is cancelled. (Called by init.)
+    bindBots: function () {
+      const self = this;
+      this.offs.push(dom.on('STATE_LOADED', function () {
+        if (self.botsOn) self.setBots(false, false, 'a new game was loaded');
+        else self.purgeDemo();
+      }));
+      this.offs.push(dom.on('INTEGRATION_STATUS', function (p) {
+        if (self.botsOn && p && p.state === 'on') self.setBots(false, false, (p.adapter === 'bridge' ? 'the chat bridge' : 'Twitch chat') + ' is connected');
+      }));
+      ['RACE_FINISHED', 'RACE_ABORTED'].forEach(function (k) {
+        self.offs.push(dom.on(k, function () { if (self.purgePending && !self.botsOn) self.purgeDemo(); }));
+      });
+    },
+
+    // setBots(on, silent, reason): reason says why they stopped (shown in the chat line).
+    setBots: function (on, silent, reason) {
       const self = this;
       on = !!on && !!SD.commands;
+      if (on && !this.botsOn && liveChat(false)) {
+        dom.toast('Demo bots stay off while Twitch chat or the bridge is connected: they would play in your live game.', 'bad');
+        on = false;
+      }
       clearTimeout(this.botTimer);
       this.botTimer = 0;
       const was = this.botsOn;
@@ -415,9 +461,30 @@
         next();
       }
       if (!silent && was !== on) {
-        this.system(on ? '🤖 Demo bots joined the chat: ' + BOTS.join(', ') + '.' : '🤖 Demo bots went quiet.', 'info');
+        this.system(on ? '🤖 Demo bots joined the chat: ' + BOTS.join(', ') + '. They are for trying the game alone: switch them off before going live.'
+          : '🤖 Demo bots went quiet' + (reason ? ' (' + reason + ')' : '') + '.', 'info');
       }
+      if (was && !on) this.purgeDemo();
+      if (typeof document !== 'undefined' && document.body) document.body.classList.toggle('sd-demo-bots', on);
+      if (SD.ui.header) dom.schedule(SD.ui.header);
       this.render();
+    },
+
+    // Remove the bots' profiles and the runners they created (SD.game.purgeDemo). Refused while a race
+    // exists: retried when it finishes or is cancelled. A chat line says what left (nothing when nothing did).
+    purgeDemo: function () {
+      if (this.botsOn || !SD.game || typeof SD.game.purgeDemo !== 'function') return null;
+      let res = null;
+      try { res = SD.game.purgeDemo(); } catch (e) { console.error('[chat] demo clean-up failed', e); return null; }
+      if (!res) return null;
+      if (res.ok === false) { this.purgePending = !!res.pending; return res; }
+      this.purgePending = false;
+      const n = (res.removed || []).length, m = (res.runners || []).length;
+      if (n || m) {
+        this.system('🤖 The demo bots left the derby: ' + n + ' bot profile' + (n === 1 ? '' : 's') + ' removed' +
+          (m ? ', ' + m + ' bot-made runner' + (m === 1 ? '' : 's') + ' deleted' : '') + ', their runners are free again.', 'info');
+      }
+      return res;
     },
 
     botStep: function () {
@@ -427,18 +494,18 @@
       this.botTurn = (this.botTurn + 1 + (Math.random() < 0.3 ? 1 : 0)) % BOTS.length;
       const name = BOTS[this.botTurn];
       const line = this.botLine(s, name);
-      if (line) this.send(name.toLowerCase(), line, name);
+      if (line) this.send(botKey(name), line, name);
     },
 
     // A plausible chat line for a bot given the current state.
     botLine: function (s, name) {
-      const key = name.toLowerCase();
-      const p = s.players && s.players[key];
+      const key = botKey(name);
+      const p = this.playerOf(key);
       if (!p) return Math.random() < 0.85 ? '!join' : pick(CHATTER);
       const runners = (s.runners || []).filter(function (r) { return !r.retired; });
       if (!runners.length) return pick(CHATTER);
       const locked = dom.isRaceLocked(s);
-      const cd = function (cmd) { return SD.commands.cooldownLeft ? SD.commands.cooldownLeft(name, cmd) : 0; };
+      const cd = function (cmd) { return SD.commands.cooldownLeft ? SD.commands.cooldownLeft(key, cmd) : 0; };
       const mine = p.runnerId ? runners.filter(function (r) { return r.id === p.runnerId && r.ownerKey === key; })[0] : null;
       const short = function (r) { return shortName(s, r); };
 

@@ -64,6 +64,12 @@
       this.tickTimer = 0;
     },
 
+    // Review batch 8 (gap1#6): forget the old game's summaries (main.js calls this on state:loaded).
+    reset: function () {
+      this.queue = [];
+      if (this.open) this.close();
+    },
+
     enqueue: function (summary) {
       if (!summary) return;
       this.queue.push(summary);

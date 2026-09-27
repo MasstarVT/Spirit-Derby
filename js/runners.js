@@ -203,39 +203,129 @@
     return out;
   }
 
-  // Validate a viewer-chosen runner name (!create <name>). Returns { ok, name, message }.
+  // Review batch 8 (xss-trust#8): the "confusable skeleton" of a name, used to compare names the way
+  // they LOOK rather than the way chat types them (U.nameKey keeps a-z0-9 only, so 'Vеlvet Comet' with
+  // a Cyrillic е got the key 'vlvetcomet' and passed as a new name that renders exactly like Velvet
+  // Comet). Compatibility forms and accents are folded (NFKD, combining marks dropped), zero-width /
+  // format characters are removed, common Cyrillic and Greek lookalikes become their Latin twin, and
+  // the lookalike digits and letter pairs 0/o, 1/i/l (I and l after lower-casing), rn/m and vv/w are
+  // merged. Only a-z0-9 is kept. Pure; both sides of a comparison go through it.
+  const CONFUSABLES = {
+    // Cyrillic
+    'А': 'A', 'а': 'a', 'В': 'B', 'в': 'b', 'Е': 'E', 'е': 'e', 'Ё': 'E', 'ё': 'e', 'К': 'K', 'к': 'k',
+    'М': 'M', 'м': 'm', 'Н': 'H', 'н': 'h', 'О': 'O', 'о': 'o', 'Р': 'P', 'р': 'p', 'С': 'C', 'с': 'c',
+    'Т': 'T', 'т': 't', 'У': 'Y', 'у': 'y', 'Х': 'X', 'х': 'x', 'Ѕ': 'S', 'ѕ': 's', 'І': 'I', 'і': 'i',
+    'Ї': 'I', 'ї': 'i', 'Ј': 'J', 'ј': 'j', 'Ԁ': 'D', 'ԁ': 'd', 'Ӏ': 'I', 'ӏ': 'l', 'Һ': 'H', 'һ': 'h',
+    'Ԛ': 'Q', 'ԛ': 'q', 'Ԝ': 'W', 'ԝ': 'w', 'Ү': 'Y', 'ү': 'y', 'Ь': 'b', 'ь': 'b', 'Ғ': 'F', 'ʏ': 'y',
+    // Greek
+    'Α': 'A', 'α': 'a', 'Β': 'B', 'β': 'b', 'Ε': 'E', 'ε': 'e', 'Ζ': 'Z', 'Η': 'H', 'η': 'n', 'Ι': 'I',
+    'ι': 'i', 'Κ': 'K', 'κ': 'k', 'Μ': 'M', 'Ν': 'N', 'ν': 'v', 'Ο': 'O', 'ο': 'o', 'Ρ': 'P', 'ρ': 'p',
+    'Τ': 'T', 'τ': 't', 'Υ': 'Y', 'υ': 'u', 'Χ': 'X', 'χ': 'x', 'γ': 'y', 'ω': 'w', 'Ϲ': 'C', 'ϲ': 'c',
+    // Latin lookalikes NFKD leaves alone
+    'ı': 'i', 'ȷ': 'j', 'ɑ': 'a', 'ɡ': 'g', 'ʟ': 'l', 'ɪ': 'I', 'ſ': 's', 'ß': 'ss', 'æ': 'ae', 'Æ': 'AE',
+    'ø': 'o', 'Ø': 'O', 'đ': 'd', 'Đ': 'D', 'ł': 'l', 'Ł': 'L', 'ħ': 'h', 'œ': 'oe', 'Œ': 'OE'
+  };
+  const FOREIGN_LOOKALIKE = /[Ͱ-Ͽἀ-῿Ѐ-ԯⷠ-ⷿꙀ-ꚟ]/u;
+  function nameSkeleton(str) {
+    let s = String(str == null ? '' : str);
+    if (typeof s.normalize === 'function') s = s.normalize('NFKD');
+    s = s.replace(/[\p{M}\p{Cf}​-‏⁠-⁤﻿]/gu, '');
+    s = s.replace(/[^\x00-\x7F]/g, function (c) { return U.own(CONFUSABLES, c) || c; });
+    s = s.toLowerCase().replace(/[^a-z0-9]+/g, '');
+    return s.replace(/[i1]/g, 'l').replace(/0/g, 'o').replace(/rn/g, 'm').replace(/vv/g, 'w');
+  }
+
+  // The words chat can address a runner by (SD.state.findRunner's word-prefix match): lower case, split
+  // on anything that is not a-z0-9, 3+ characters (shorter words are too short to be a shorthand).
+  function lookupWords(name, min) {
+    return String(name || '').toLowerCase().split(/[^a-z0-9]+/).filter(function (w) { return w.length >= (min || 3); });
+  }
+  function prefixEither(a, b) { return !!a && !!b && (a.indexOf(b) === 0 || b.indexOf(a) === 0); }
+
+  // Words a runner name may not contain because a command reads them as something else: !bet's amount
+  // tokens (digits, "100sp", all, max, allin) and cancel words, and !train's stat names / aliases
+  // (SD.DATA.STAT_ALIASES). Review batch 8 (gap3#3): they were only refused as the WHOLE name, so
+  // "Max Power", "Route 66" or "Speed Demon" changed what !bet / !train meant. Returns the word or null.
+  function commandWordIn(name) {
+    const R = SD.CONFIG.RUNNERS || {};
+    const reserved = R.RESERVED_WORDS || [];
+    const stats = SD.DATA && SD.DATA.STAT_ALIASES;
+    const words = String(name || '').split(/\s+/).filter(Boolean);
+    for (let i = 0; i < words.length; i++) {
+      const raw = words[i].toLowerCase();
+      const cands = [raw, U.nameKey(raw)].concat(raw.split(/[^\p{L}\p{N}]+/u).filter(Boolean));
+      for (let j = 0; j < cands.length; j++) {
+        const w = cands[j];
+        if (/^\d+(?:sp)?$/.test(w) || reserved.indexOf(w) >= 0 || (stats && typeof U.own(stats, w) === 'string')) return words[i];
+      }
+    }
+    return null;
+  }
+
+  // Whole names that are a command (or alias): "!inspect help" / "!claim status" must stay readable.
+  function isCommandName(key) {
+    const C = SD.commands;
+    if (!C || typeof C.list !== 'function') return false;
+    return C.list({ all: true }).some(function (d) { return d.name === key || (d.aliases || []).indexOf(key) >= 0; });
+  }
+
+  // Validate a viewer-chosen runner name (!create <name>, admin RENAME). Returns { ok, name, message }.
   // Rules (CONFIG.RUNNERS): 3-20 characters of letters, digits, spaces and apostrophes, at least
-  // 3 plain letters / digits (A-Z, 0-9: runner lookups in chat use them), not a reserved word or a
-  // runner id, and unique: no existing runner (retired ones included) with the same name key, and
-  // not a prefix of another runner's name (or the other way round) so "!train moss" stays clear.
-  // No profanity filter: the streamer's chat moderation applies.
-  function checkName(state, raw) {
+  // 3 plain letters / digits (A-Z, 0-9: runner lookups in chat use them) and at least one letter, not a
+  // reserved word, command name or runner id, and unique: no existing runner (retired ones included)
+  // with the same name key. Review batch 8:
+  //  - no word may be a command word (commandWordIn: amounts, digits-only, cancel / stat words);
+  //  - no mix of Latin with Cyrillic / Greek letters, and no runner whose confusable skeleton
+  //    (nameSkeleton) is the same, so a lookalike copy of a name is refused;
+  //  - "too close" now follows findRunner: the new name (or any of its 3+ letter words) may not be a
+  //    prefix of, or start with, an active runner's name or any of its words, in plain keys or in
+  //    skeletons. "Comet" / "Comet Kid" took over "!bet comet" from Velvet Comet, and "Mossy" made the
+  //    documented "!bet moss" ambiguous.
+  // opts.exclude: a runner id to leave out (renaming a runner may keep its own words).
+  // No profanity filter: the streamer's chat moderation applies (admin RETIRE / RENAME / DELETE).
+  function checkName(state, raw, opts) {
+    opts = opts || {};
     const R = SD.CONFIG.RUNNERS || {};
     const min = R.CREATE_NAME_MIN || 3, max = R.CREATE_NAME_MAX || 20;
     const name = String(raw == null ? '' : raw).replace(/\s+/g, ' ').trim();
     const rules = 'Runner names are ' + min + '–' + max + " characters: letters, digits, spaces and apostrophes (e.g. !create Pebble Dash).";
-    if (!name) return { ok: false, name: name, message: 'Name your runner: !create <name>. ' + rules };
+    const refuse = function (message) { return { ok: false, name: name, message: message }; };
+    if (!name) return refuse('Name your runner: !create <name>. ' + rules);
     if (name.length < min || name.length > max) {
-      return { ok: false, name: name, message: '"' + name.slice(0, max + 5) + (name.length > max + 5 ? '…' : '') + '" is ' + name.length + ' characters long. ' + rules };
+      return refuse('"' + name.slice(0, max + 5) + (name.length > max + 5 ? '…' : '') + '" is ' + name.length + ' characters long. ' + rules);
     }
-    if (!/^[\p{L}\p{N}' ]+$/u.test(name) || !/[\p{L}\p{N}]/u.test(name)) {
-      return { ok: false, name: name, message: 'That name has characters a runner cannot wear. ' + rules };
+    if (!/^[\p{L}\p{N}' ]+$/u.test(name) || !/\p{L}/u.test(name)) {
+      return refuse(/^[\p{N}' ]+$/u.test(name) ? 'A runner name needs at least one letter (numbers alone read as a bet amount). ' + rules
+        : 'That name has characters a runner cannot wear. ' + rules);
     }
     const key = U.nameKey(name);
     if (key.length < (R.CREATE_NAME_KEY_MIN || 3)) {
-      return { ok: false, name: name, message: 'Use at least ' + (R.CREATE_NAME_KEY_MIN || 3) + ' plain letters or digits (A–Z, 0–9) so chat can type the name.' };
+      return refuse('Use at least ' + (R.CREATE_NAME_KEY_MIN || 3) + ' plain letters or digits (A–Z, 0–9) so chat can type the name.');
     }
-    if ((R.RESERVED_NAMES || []).indexOf(key) >= 0 || /^r\d+$/.test(key)) {
-      return { ok: false, name: name, message: '"' + name + '" is a command word. Pick another name.' };
+    if ((R.RESERVED_NAMES || []).indexOf(key) >= 0 || /^r\d+$/.test(key) || isCommandName(key)) {
+      return refuse('"' + name + '" is a command word. Pick another name.');
     }
-    const list = (state && state.runners) || [];
-    const same = list.filter(function (r) { return U.nameKey(r.name) === key; })[0];
-    if (same) return { ok: false, name: name, message: 'There is already a runner called ' + same.name + '. Pick another name.' };
+    const word = commandWordIn(name);
+    if (word) return refuse('"' + word + '" means something else in chat commands (!bet / !train), so a runner name cannot use it. Pick another name.');
+    const folded = typeof name.normalize === 'function' ? name.normalize('NFKD') : name;
+    if (/[A-Za-z]/.test(folded) && FOREIGN_LOOKALIKE.test(folded)) {
+      return refuse('That name mixes letters from different alphabets (e.g. a Cyrillic "е" for "e"), so it could pass for another name. Use one alphabet.');
+    }
+    const skel = nameSkeleton(name);
+    const list = ((state && state.runners) || []).filter(function (r) { return r && r.id !== opts.exclude; });
+    const same = list.filter(function (r) { return U.nameKey(r.name) === key || nameSkeleton(r.name) === skel; })[0];
+    if (same) return refuse('There is already a runner called ' + same.name + (U.nameKey(same.name) === key ? '' : ' (it looks the same)') + '. Pick another name.');
+    const words = lookupWords(name), skelWords = String(name).split(/\s+/).map(nameSkeleton).filter(function (w) { return w.length >= 3; });
     const close = list.filter(function (r) {
-      const k = U.nameKey(r.name);
-      return !r.retired && k && (k.indexOf(key) === 0 || key.indexOf(k) === 0);
+      if (r.retired) return false;
+      const k = U.nameKey(r.name), sk = nameSkeleton(r.name);
+      const rw = lookupWords(r.name), rsw = String(r.name).split(/\s+/).map(nameSkeleton).filter(function (w) { return w.length >= 3; });
+      if (prefixEither(key, k) || prefixEither(skel, sk)) return true;
+      if (rw.some(function (w) { return prefixEither(key, w); }) || rsw.some(function (w) { return prefixEither(skel, w); })) return true;
+      return words.some(function (w) { return prefixEither(w, k) || rw.some(function (x) { return prefixEither(w, x); }); }) ||
+        skelWords.some(function (w) { return prefixEither(w, sk) || rsw.some(function (x) { return prefixEither(w, x); }); });
     })[0];
-    if (close) return { ok: false, name: name, message: '"' + name + '" is too close to ' + close.name + ': chat would mix them up. Pick another name.' };
+    if (close) return refuse('"' + name + '" is too close to ' + close.name + ': chat would mix them up. Pick another name.');
     return { ok: true, name: name, message: '' };
   }
 
@@ -428,6 +518,8 @@
     sanitizeName: sanitizeName,
     uniqueName: uniqueName,
     checkName: checkName,
+    nameSkeleton: nameSkeleton,
+    commandWordIn: commandWordIn,
     addXp: addXp,
     conditionOf: conditionOf,
     conditionBand: conditionBand,

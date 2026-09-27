@@ -38,6 +38,19 @@
   function readPrefs() { return SD.ui.dom && SD.ui.dom.prefs ? SD.ui.dom.prefs.read() : {}; }
   function writePrefs(patch) { if (SD.ui.dom && SD.ui.dom.prefs) SD.ui.dom.prefs.write(patch); }
 
+  // ------------------------------------------------------------------ key-repeat guard
+  // Review batch 8 (fix round 1): a held Enter repeats clicks on the focused button, and one repeat that
+  // lands after CONFIG.UI.CONFIRM_ARM_MS would confirm a two-click button (dom.confirmClick, the save
+  // banner's TAKE OVER / START NEW GAME, the boot overlay's RESTORE BACKUP / START NEW GAME). Repeated
+  // Enter / Space keydowns on an armed button are cancelled page-wide (capture phase, installed before
+  // boot, so the boot overlay has it too). The admin drawer also cancels repeats on all its buttons.
+  function blockArmedRepeat(e) {
+    if (!e.repeat || (e.key !== 'Enter' && e.key !== ' ')) return;
+    const b = e.target && e.target.closest ? e.target.closest('button') : null;
+    if (b && b.getAttribute('data-armed') === '1') e.preventDefault();
+  }
+  if (typeof document !== 'undefined' && document.addEventListener) document.addEventListener('keydown', blockArmedRepeat, true);
+
   // ------------------------------------------------------------------ boot error overlay
   // opts.recover (review batch 7): boot failed after the game was loaded, so the stored save may be
   // what breaks it (the page would fail the same way on every reload). The overlay then offers a way
@@ -74,17 +87,22 @@
         actions.appendChild(b);
         return b;
       };
-      // A second click confirms (OBS docks and browser sources may not show confirm() dialogs).
-      const confirmed = function (b) {
-        if (b.getAttribute('data-armed') === '1') return true;
+      // A second click confirms (OBS docks and browser sources may not show confirm() dialogs). Review
+      // batch 8: not a double-click - the confirming click must come CONFIG.UI.CONFIRM_ARM_MS after arming.
+      const confirmed = function (b, ev) {
+        if (b.getAttribute('data-armed') === '1') {
+          const armMs = Number(SD.CONFIG && SD.CONFIG.UI && SD.CONFIG.UI.CONFIRM_ARM_MS) || 700;
+          return Date.now() - (Number(b.getAttribute('data-armed-at')) || 0) >= armMs && !(ev && ev.detail > 1);
+        }
         b.setAttribute('data-armed', '1');
+        b.setAttribute('data-armed-at', String(Date.now()));
         b.textContent = 'Click again: ' + b.textContent;
         return false;
       };
       const recover = function (action) {
         let force = false;
-        return function () {
-          if (!confirmed(this)) return;
+        return function (ev) {
+          if (!confirmed(this, ev)) return;
           let res;
           try { res = P.bootRecovery(action, { force: force }); } catch (e) { res = { ok: false, error: e.message }; }
           if (res && res.ok) { status.textContent = 'Done. Reloading…'; window.location.reload(); return; }
@@ -114,6 +132,9 @@
     on = !!on;
     document.body.classList.toggle('sd-overlay', on);
     if (on) setAdmin(false, { persist: !(opts && opts.persist === false) });
+    // Review batch 8 (gap1#3): overlay mode hides the chat panel and its bots toggle, so demo bots
+    // running on stream could no longer be seen or stopped. Going on stream stops them.
+    if (on && SD.ui.chat && SD.ui.chat.botsOn && typeof SD.ui.chat.setBots === 'function') SD.ui.chat.setBots(false, false, 'overlay mode is on');
     const btn = document.querySelector('[data-action="overlay"]');
     if (btn) btn.setAttribute('aria-pressed', String(on));
     if (!opts || opts.persist !== false) writePrefs({ overlay: on });
@@ -198,7 +219,12 @@
     } else if (e.key === ' ' || e.code === 'Space') {
       const s = SD.state.get();
       const cr = s && s.currentRace;
-      if (!cr || !SD.game) return;
+      if (!cr || !SD.game) {
+        // Review batch 8: Space is the pause key. With no race it must not confirm an armed reset button
+        // that still has focus ("Confirm? RESET ALL"): confirming takes a click or Enter.
+        if (t && t.getAttribute && t.getAttribute('data-armed') === '1') e.preventDefault();
+        return;
+      }
       e.preventDefault();
       if (cr.status === 'paused' && SD.game.resumeRace) SD.game.resumeRace();
       else if ((cr.status === 'running' || cr.status === 'countdown') && SD.game.pauseRace) SD.game.pauseRace();
@@ -306,7 +332,7 @@
     bar.innerHTML = '<span class="savebar__text" data-ref="text"></span><span class="savebar__actions" data-ref="actions"></span>';
     bar.addEventListener('click', function (e) {
       const b = e.target.closest('button[data-bar]');
-      if (b) barAction(b.getAttribute('data-bar'), b);
+      if (b) barAction(b.getAttribute('data-bar'), b, e);
     });
     document.body.appendChild(bar);
     return bar;
@@ -348,10 +374,14 @@
   // Adopt a game loaded from storage (TAKE OVER), like an import does.
   function adopt(res, source) {
     SD.state.set(res.state);
-    SD.game.init();
+    // Review batch 8 (fix round 1): the order IMPORT uses. A race saved as 'finished' is applied after
+    // state:loaded, whose handler closes the old game's results / season summary: applied first, its
+    // own results modal and season summary were closed / dropped at once.
+    SD.game.init({ deferPending: true });
     if (SD.playback && SD.playback.stop) SD.playback.stop();
     SD.bus.emit(SD.EVENTS.STATE_LOADED, { source: source });
     SD.bus.emit(SD.EVENTS.STATE_CHANGED, { label: source });
+    if (typeof SD.game.applyPending === 'function') SD.game.applyPending();
   }
 
   function takeOver(auto) {
@@ -369,11 +399,11 @@
     autoConnect(bootParams);
   }
 
-  function barAction(act, btn) {
+  function barAction(act, btn, e) {
     const P = SD.persistence;
     const dom = SD.ui.dom;
     if (act === 'takeover') {
-      dom.confirmClick(btn, function () { takeOver(false); });
+      dom.confirmClick(btn, function () { takeOver(false); }, undefined, e);
     } else if (act === 'download') {
       const text = (P.heldText && P.heldText()) || (P.readRescue && P.readRescue());
       if (text) { dom.download('spirit-derby-unreadable-save.json', text); dom.toast('Downloaded spirit-derby-unreadable-save.json', 'good'); }
@@ -391,7 +421,7 @@
         renderSaveBar();
         dom.toast('New game started.' + (r.rescued ? ' The old save is kept in spiritderby.rescue (admin Save: RESCUE COPY).' : ''), 'good', { ms: 8000 });
         autoConnect(bootParams);
-      });
+      }, undefined, e);
     }
   }
 
@@ -520,6 +550,14 @@
       if (seasonOpen) SD.ui.season.close();
     });
     dom.on('STATE_LOADED', renderAll);
+    // Review batch 8 (gap1#6): a new game (RESET ALL, IMPORT, RESTORE BACKUP, TAKE OVER) closes the old
+    // game's results modal and season summary, first dropping the summaries and level-up rings still
+    // queued for it, so the old season's summary never opens over the new game when the results close.
+    dom.on('STATE_LOADED', function () {
+      if (SD.ui.season && typeof SD.ui.season.reset === 'function') SD.ui.season.reset();
+      if (SD.ui.roster && typeof SD.ui.roster.clearPending === 'function') SD.ui.roster.clearPending();
+      if (SD.ui.results && SD.ui.results.isOpen && SD.ui.results.isOpen()) SD.ui.results.close();
+    });
     // M5: gold toast for every achievement (race achievements also appear in the results modal).
     dom.on('ACHIEVEMENT_UNLOCKED', function (a) {
       if (!a) return;

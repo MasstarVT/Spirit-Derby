@@ -108,6 +108,14 @@
     return { ok: false, isCommand: false, command: null, message: 'The name "' + username + '" is reserved for the streamer console.',
       effects: [], cooldownMs: 0, reserved: true };
   }
+  // Review batch 8: '~' keys are the chat panel's demo bots (SD.players.isDemoKey). No Twitch login can
+  // start with '~'; the bridge could send one, so live sources never reach a bot's profile.
+  function isDemo(key) { return !!(P() && typeof P().isDemoKey === 'function' && P().isDemoKey(key)); }
+  function demoRefusal(username) {
+    return { ok: false, isCommand: false, command: null, message: 'The name "' + username + '" belongs to a demo bot and cannot come from live chat.',
+      effects: [], cooldownMs: 0, reserved: true };
+  }
+  function liveSource(source) { return source === 'twitch' || source === 'bridge'; }
   function spMult(state) {
     return SD.events && SD.events.dayModifiers ? (SD.events.dayModifiers(state.season.activeDayEvent).spMult || 1) : 1;
   }
@@ -369,6 +377,7 @@
     const source = SOURCES[msg.source] ? msg.source : 'sim';
     const isMod = !!msg.isMod || source === 'admin';
     if (isReserved(username) && source !== 'admin') return reservedRefusal(username);
+    if (isDemo(username) && liveSource(source)) return demoRefusal(username);
     const parsed = msg.parsed || parse(msg.text);
     if (!parsed) return { ok: false, isCommand: false, command: null, message: '', effects: [], cooldownMs: 0 };
     const state = SD.state.get();
@@ -493,7 +502,7 @@
         out = { ok: false, message: e.message, severity: x.severity || 'bad', cooldownMs: x.cooldownMs || 0, cooldown: !!x.cooldown, locked: !!x.locked };
       } else {
         if (typeof console !== 'undefined') console.error('[SD.commands] !' + def.name + ' failed:', e);
-        try { SD.state.log('error', '!' + def.name + ' from ' + displayName + ' failed: ' + ((e && e.message) || e), 'warn'); } catch (x) { /* ignore */ }
+        try { SD.state.log('error', '!' + def.name + ' from ' + displayName + ' failed: ' + ((e && e.message) || e), 'warn', { username: username }); } catch (x) { /* ignore */ }
         out = { ok: false, message: 'Something went wrong with !' + def.name + '. The streamer can check the log.', severity: 'bad' };
         crashed = true;
       }
@@ -545,6 +554,7 @@
     }
     // Only the local console (source 'admin') may speak as a reserved '#' key such as '#streamer'.
     if (isReserved(username) && source !== 'admin') return reservedRefusal(username);
+    if (isDemo(username) && liveSource(source)) return demoRefusal(username);
     const parsed = parse(text);
     const line = emitChat({
       kind: 'user', username: username, displayName: displayName, text: text, source: source, isMod: isMod,
@@ -689,14 +699,24 @@
       const S = ctx.state;
       const norm = SD.training.normalizeStat;
       let stat = null, query = null;
+      // Review batch 8 (gap3#3): exactly a runner's name with no stat asks for the stat, even when a word of
+      // the name is a stat alias ("Speed Demon", "Big Str" in older saves).
+      const named = exactRunner(S, args.join(' '));
+      if (named && (args.length > 1 || !norm(args[0]))) {
+        throw new CommandError('Which stat? !train ' + shortOf(S, named) + ' <stat> (' + STAT_HELP + ').', { severity: 'info' });
+      }
       if (args.length === 1) {
         stat = norm(args[0]);
         if (!stat) throw new CommandError('Usage: ' + TRAIN_USAGE);
       } else {
         const last = norm(args[args.length - 1]);
         const first = norm(args[0]);
-        if (last) { stat = last; query = args.slice(0, -1).join(' '); }
-        else if (first) { stat = first; query = args.slice(1).join(' '); }
+        if (last) {
+          stat = last; query = args.slice(0, -1).join(' ');
+          // "!train speed Big Str": the last word is a stat too, but the rest names no runner. Fall back
+          // to the stat-first reading when that one does.
+          if (first && !tryRunner(S, query) && tryRunner(S, args.slice(1).join(' '))) { stat = first; query = args.slice(1).join(' '); }
+        } else if (first) { stat = first; query = args.slice(1).join(' '); }
         else throw new CommandError('Unknown stat "' + String(args[args.length - 1]).slice(0, 20) + '". Usage: ' + TRAIN_USAGE);
       }
       const runner = query ? resolveRunnerArg(S, query) : myRunnerOrThrow(ctx, 'train one by name: !train <runner> ' + stat);
@@ -1113,6 +1133,26 @@
     return f.runner || null;
   }
 
+  // Review batch 8 (gap3#3): the runner whose id or WHOLE name is exactly this query (not a prefix or
+  // word match), or null. The !bet / !train parsers try it first, so a name is never split into
+  // "runner + amount / stat" when the viewer typed exactly a runner's name.
+  function exactRunner(state, query) {
+    const q = String(query || '').trim().replace(/^@+/, '');
+    if (!q) return null;
+    const r = tryRunner(state, q);
+    if (!r) return null;
+    return String(r.id).toLowerCase() === q.toLowerCase() || U.nameKey(r.name) === U.nameKey(q) ? r : null;
+  }
+  function amountText(a) { return a === 'all' ? 'all your SP' : a + ' SP'; }
+  // How chat can type a runner: its first word when that finds it (and is not itself an amount, cancel
+  // or stat word), else its full name.
+  function shortOf(state, r) {
+    const first = String(r.name || '').split(/\s+/)[0];
+    if (parseAmount(first) != null || /^(cancel|refund|undo|none|off)$/i.test(first) || SD.training.normalizeStat(first)) return r.name;
+    const f = SD.state.findRunner(first, state);
+    return f.runner && f.runner.id === r.id ? first.toLowerCase() : r.name;
+  }
+
   function inNextField(state, runnerId) {
     if (!SD.betting) return true;
     return !!SD.betting.fieldOdds(state).byId[runnerId];
@@ -1183,6 +1223,14 @@
         const mine = B.betOf(S, ctx.username);
         return { message: mine ? 'Your bet: ' + betLine(mine) + '. Change it with !bet <runner> <amount>, or !bet cancel.' : 'Usage: ' + BET_USAGE + ' — see !odds for the field.', severity: 'info' };
       }
+      // Review batch 8 (gap3#3): exactly a runner's name (or id) and nothing else is a bet with no amount,
+      // even when a word of that name reads as an amount or a cancel word ("Max Power", "Route 66", "Undo"
+      // in a save made before !create refused such names): ask for the amount instead of guessing.
+      const named = exactRunner(S, args.join(' '));
+      if (named) {
+        throw new CommandError('How much? !bet ' + shortOf(S, named) + ' <amount> (' + EC().BET_MIN + '–' + EC().BET_MAX + ' SP, or "all")' +
+          (args.length === 1 && /^(cancel|refund|undo|none|off)$/i.test(args[0]) ? ' · to cancel your bet: !bet cancel' : '') + '.', { severity: 'info' });
+      }
       if (args.length === 1 && /^(cancel|refund|undo|none|off)$/i.test(args[0])) {
         const c = B.cancel(S, ctx.username);
         if (!c.ok) throw new CommandError(c.message, { severity: 'info' });
@@ -1192,10 +1240,23 @@
       // Amount first or last; the rest is the runner ("!bet moss 50", "!bet 50 moss runner", "!bet moss all").
       let amount = null, runner = null;
       const first = parseAmount(args[0]), last = parseAmount(args[args.length - 1]);
-      if (args.length >= 2 && last != null && tryRunner(S, args.slice(0, -1).join(' '))) {
-        amount = last; runner = tryRunner(S, args.slice(0, -1).join(' '));
-      } else if (args.length >= 2 && first != null && tryRunner(S, args.slice(1).join(' '))) {
-        amount = first; runner = tryRunner(S, args.slice(1).join(' '));
+      const lastQ = args.slice(0, -1).join(' '), firstQ = args.slice(1).join(' ');
+      const byLast = args.length >= 2 && last != null ? tryRunner(S, lastQ) : null;
+      const byFirst = args.length >= 2 && first != null ? tryRunner(S, firstQ) : null;
+      if (byLast && byFirst && (byLast !== byFirst || last !== first)) {
+        // Both readings name a runner ("!bet 250 100" with runners called 250 and 100): an exact name
+        // wins over a shorthand; when both (or neither) are exact, ask rather than guess.
+        const exLast = exactRunner(S, lastQ), exFirst = exactRunner(S, firstQ);
+        if (exLast && !exFirst) { amount = last; runner = byLast; }
+        else if (exFirst && !exLast) { amount = first; runner = byFirst; }
+        else {
+          throw new CommandError('That could be ' + amountText(last) + ' on ' + byLast.name + ' or ' + amountText(first) + ' on ' + byFirst.name +
+            '. Use the runner id to be sure, e.g. !bet ' + byLast.id + ' ' + args[args.length - 1] + '.', { severity: 'info' });
+        }
+      } else if (byLast) {
+        amount = last; runner = byLast;
+      } else if (byFirst) {
+        amount = first; runner = byFirst;
       } else if (args.length >= 2 && (last != null || first != null)) {
         runner = resolveRunnerArg(S, last != null ? args.slice(0, -1).join(' ') : args.slice(1).join(' ')); // throws a friendly error
         amount = last != null ? last : first;
@@ -1434,7 +1495,7 @@
       const balance = pay();
       runner.ribbonColor = colour;
       const label = colour === named ? raw : colour;
-      SD.state.log('ribbon', ctx.displayName + ' tied a ' + label + ' ribbon on ' + runner.name + '.', 'good', { runnerId: runner.id });
+      SD.state.log('ribbon', ctx.displayName + ' tied a ' + label + ' ribbon on ' + runner.name + '.', 'good', { runnerId: runner.id, by: ctx.username });
       ctx.effects.push({ type: 'ribbon', runnerId: runner.id, color: colour });
       return { message: '\u{1F380} ' + runner.name + ' now wears a ' + label + ' ribbon!' + DOT + balance + ' SP left', severity: 'good' };
     }

@@ -88,6 +88,10 @@
       this.offs = [];
     },
 
+    // Review batch 8 (gap1#6): level-up rings waiting for the old game's results modal are dropped when
+    // a new game is loaded (the new game's runners reuse the same ids).
+    clearPending: function () { this.pendingRings = {}; },
+
     // ---------------------------------------------------------------- actions
     train: function (id) {
       const card = this.cards[id];

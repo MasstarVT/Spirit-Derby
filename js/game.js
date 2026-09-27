@@ -102,6 +102,10 @@
     }
     let pending = null;
     if (!opts.deferPending) pending = applyPending();
+    // Review batch 8: demo bots never survive a load (they only run in the chat panel of this page), so
+    // '~' demo players in a loaded or imported save are leftovers: removed (after a race, see purgeDemo).
+    let purged = null;
+    try { purged = purgeDemo(); } catch (e) { purged = null; }
     let rolled = false;
     if (!cur().season.activeDayEvent) {
       commit('game:init', function (st) {
@@ -110,7 +114,7 @@
       rolled = true;
     }
     SD.state.runtime.lastClockAt = SD.clock.now();
-    return { ok: true, pending: pending, dayEventRolled: rolled };
+    return { ok: true, pending: pending, dayEventRolled: rolled, demoPurged: purged && purged.ok ? purged.removed.length : 0 };
   }
 
   // Apply a race saved as 'finished' before its results were applied (review batch 7: shared by boot
@@ -119,7 +123,14 @@
   // the race is cancelled like END / abort (bets refunded, paid effects queued again) and logged, so a
   // bad record can never stop the game from booting or leave the drawer locked.
   // -> { ok, applied: true, result } | { ok, applied: false, cancelled?, reason? } (null: nothing pending)
+  // Review batch 8 (fix round 1): once the race is settled, the demo clean-up that afterLoad had to put
+  // off (a race existed: IMPORT / TAKE OVER defer this call until after state:loaded) runs.
   function applyPending() {
+    const res = applyPendingRace();
+    if (res) { try { purgeDemo(); } catch (e) { /* retried on the next load */ } }
+    return res;
+  }
+  function applyPendingRace() {
     const s = cur();
     const cr = s && s.currentRace;
     if (!cr || cr.status !== 'finished') return null;
@@ -333,7 +344,7 @@
       const fav = record.entrants.slice().sort(function (a, b) { return a.odds - b.odds; })[0];
       const message = 'Race ' + indexInDay + '/' + st.season.racesPerDay + ' at ' + trackName + ' (' + distance + ' m): ' +
         record.entrants.map(function (e) { return e.name; }).join(', ') + '. Favourite: ' + fav.name + ' at ' + Number(fav.odds).toFixed(1) + 'x.';
-      SD.state.log('race', message, 'info', { recordId: record.id });
+      SD.state.log('race', message, 'info', SD.state.listTags(record.entrants, { recordId: record.id }));
       emit(SD.EVENTS.RACE_STARTED, { record: record });
       return { ok: true, message: message, record: record, bets: bets };
     });
@@ -460,7 +471,7 @@
       const win = record.results[0];
       SD.state.log('race', summary.winnerName + ' wins at ' + record.trackName + ' (' + record.distance + ' m) in ' +
         win.timeSec.toFixed(1) + 's' + (summary.photoFinish ? ' in a PHOTO FINISH' : '') +
-        (summary.upset ? ', a ' + summary.upsetOdds + 'x upset' : '') + '!', 'epic', { recordId: record.id });
+        (summary.upset ? ', a ' + summary.upsetOdds + 'x upset' : '') + '!', 'epic', { recordId: record.id, winnerId: win.runnerId });
       levelUps.forEach(function (l) {
         SD.state.log('levelup', l.name + ' reached level ' + l.level + '!', 'good', { runnerId: l.runnerId });
       });
@@ -662,12 +673,305 @@
         runner.claimedAt = SD.clock.now();
       }
       st.runners.push(runner);
+      // Review batch 8: a runner a demo bot created is deleted again when the bots are cleaned up.
+      const byKey = opts.by && SD.players ? SD.players.keyOf(opts.by) : '';
+      if (byKey && SD.players.isDemoKey(byKey)) {
+        const rt = SD.state.runtime;
+        if (!rt.demoRunners || typeof rt.demoRunners !== 'object') rt.demoRunners = U.dict();
+        U.setOwn(rt.demoRunners, runner.id, true);
+        // Saved too (fix round 1, gap1#2): after a reload or an import the runtime map is empty, and a
+        // bot-made runner must still leave with the bots. Only bot-made runners carry the flag.
+        runner.demo = true;
+      }
       SD.state.log('runner', 'A new runner joins the derby: ' + runner.emoji + ' ' + runner.name + ', a ' + runner.species + ' (' +
-        SD.runners.styleName(runner.style) + ')' + (opts.by ? ', created by ' + (opts.byName || opts.by) : '') + '.', 'good', { runnerId: runner.id });
+        SD.runners.styleName(runner.style) + ')' + (opts.by ? ', created by ' + (opts.byName || opts.by) : '') + '.', 'good',
+        Object.assign({ runnerId: runner.id }, byKey ? { by: byKey } : {}));
       emit(SD.EVENTS.RUNNER_SPAWNED, { runner: runner, by: opts.by || runner.ownerKey || null });
     });
     return runner;
   }
+
+  // ---------------------------------------------------------------------------
+  // Moderation (review batch 8): admin RETIRE / RENAME / DELETE a runner, REMOVE PLAYER, and the demo
+  // bots' clean-up. A viewer's !create name used to stay on the overlay, in replies and in the bridge's
+  // race frames until RESET ALL. All of these are refused while a race exists (its record, bets and
+  // effects are locked to the field), and they work on ids / login keys, not on name queries.
+  // ---------------------------------------------------------------------------
+  const REMOVED_RUNNER = '(removed runner)';
+  const REMOVED_VIEWER = '(removed viewer)';
+
+  function escapeRe(s) { return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+  // `from` as a whole name in text (not inside a longer word) replaced by `to`. notAtStart: a match at
+  // the very start of the text is left alone (a line about several viewers / runners starts with fixed
+  // words such as "Bets paid:", "Race payouts:" or "Season 3 is over!", never with a name).
+  function swapName(text, from, to, notAtStart) {
+    if (!from || typeof text !== 'string' || text.indexOf(from) < 0) return text;
+    const re = new RegExp((notAtStart ? '([^\\p{L}\\p{N}_])' : '(^|[^\\p{L}\\p{N}_])') + escapeRe(from) + '(?=$|[^\\p{L}\\p{N}_])', 'gu');
+    return text.replace(re, function (m, pre) { return pre + to; });
+  }
+  function tagged(list, x) { return Array.isArray(list) && list.indexOf(x) >= 0; }
+  function recordOf(st, id) {
+    const hist = Array.isArray(st.raceHistory) ? st.raceHistory : [];
+    for (let i = hist.length - 1; i >= 0; i--) if (hist[i] && hist[i].id === id) return hist[i];
+    const cr = st.currentRace && st.currentRace.record;
+    return cr && cr.id === id ? cr : null;
+  }
+  function inRecord(rec, id) {
+    return ['entrants', 'results'].some(function (k) {
+      return Array.isArray(rec[k]) && rec[k].some(function (x) { return x && x.runnerId === id; });
+    });
+  }
+
+  // Review batch 8 (fix round 1): which log lines name a runner. Only lines tagged with it are
+  // rewritten, so a runner called "Season" or "Day" never touches "A new day dawns: Season 2, Day 3".
+  //   'all'    - a line about this runner (runnerId): every whole-word match;
+  //   'inner'  - a line naming several runners (runnerIds: race start, bets, payouts, a claim that
+  //              released it, a season end's champion; before those tags, the bet / sp / race-start
+  //              lines of a race it ran in, found by recordId): not a match at the start of the line;
+  //   'winner' - "<name> wins at <track> ..." (winnerId, or the record's winner): only that name.
+  function runnerMention(st, e, id) {
+    if (e.runnerId === id) return 'all';
+    if (tagged(e.runnerIds, id)) return 'inner';
+    if (e.runnerId != null || Array.isArray(e.runnerIds) || !e.recordId) return null;
+    const rec = recordOf(st, e.recordId);
+    if (e.type === 'race' && (e.winnerId != null ? e.winnerId === id
+      : !!(rec && Array.isArray(rec.results) && rec.results[0] && rec.results[0].runnerId === id))) return 'winner';
+    if (e.winnerId != null) return null;
+    if (e.type === 'bet' || e.type === 'sp' || (e.type === 'race' && /^Race \d/.test(e.text))) {
+      return !rec || inRecord(rec, id) ? 'inner' : null;
+    }
+    return null;
+  }
+
+  // A runner's old name out of the game log and the archived season summaries. Race records keep it:
+  // their results are hashed (REPLAY LAST RACE compares the hash). When another runner's name contains
+  // the old name ("Moss Runner 2"), only log entries about this runner alone (runnerId) are rewritten.
+  function scrubRunnerName(st, runner, from, to) {
+    const shared = st.runners.some(function (r) { return r !== runner && swapName(r.name, from, '\u0000') !== r.name; });
+    (st.log || []).forEach(function (e) {
+      if (!e || typeof e.text !== 'string' || e.text.indexOf(from) < 0) return;
+      const how = runnerMention(st, e, runner.id);
+      if (!how || (shared && how !== 'all')) return;
+      if (how === 'winner') {
+        if (e.text.indexOf(from + ' wins at ') === 0) e.text = to + e.text.slice(from.length);
+      } else e.text = swapName(e.text, from, to, how === 'inner');
+    });
+    ((st.season && st.season.history) || []).forEach(function (h) {
+      if (!h || typeof h !== 'object') return;
+      (Array.isArray(h.runnerTable) ? h.runnerTable : []).forEach(function (row) { if (row && row.runnerId === runner.id) row.name = to; });
+      if (h.championRunnerId === runner.id) h.championName = to;
+      if (h.biggestUpset && h.biggestUpset.winnerId === runner.id) h.biggestUpset.winnerName = to;
+    });
+    (Array.isArray(st.bets) ? st.bets : []).forEach(function (b) { if (b && b.runnerId === runner.id) b.runnerName = to; });
+  }
+
+  function findRunnerById(s, id) {
+    if (id == null) return null;
+    if (typeof id === 'object' && id.id) id = id.id;
+    for (let i = 0; i < s.runners.length; i++) if (String(s.runners[i].id) === String(id)) return s.runners[i];
+    return null;
+  }
+
+  // Everything that points at a runner that is leaving the derby: open bets on it refunded, queued
+  // boosts / sabotages on it refunded to whoever paid (cheers dropped), its owner released, every
+  // player's runnerId / backing on it cleared, its runtime rest cooldown and nervous-cheer count dropped.
+  // Runs inside a mutation. -> { bets: refunded bets, effects: refunded paid effects, owner: login | null }
+  function detachRunner(st, runner) {
+    const id = runner.id;
+    const bets = SD.betting && typeof SD.betting.refundWhere === 'function'
+      ? SD.betting.refundWhere(st, function (b) { return b.runnerId === id; }, 'runnerRetired').length : 0;
+    let effects = 0;
+    const keep = [];
+    (Array.isArray(st.raceEffects) ? st.raceEffects : []).forEach(function (e) {
+      if (!e || e.runnerId !== id) { keep.push(e); return; }
+      if (e.paid > 0 && e.by && SD.players && SD.players.refundSp(st, e.by, e.paid, 'effectRefund').ok) effects++;
+    });
+    st.raceEffects = keep;
+    const owner = SD.players ? SD.players.ownerKey(runner) : runner.ownerKey || null;
+    runner.owner = null;
+    runner.ownerKey = null;
+    runner.claimedAt = null;
+    Object.keys(st.players || {}).forEach(function (k) {
+      const p = U.own(st.players, k);
+      if (!p || typeof p !== 'object') return;
+      if (p.runnerId === id) p.runnerId = null;
+      if (p.backing && p.backing.runnerId === id) p.backing = { runnerId: null, actions: 0 };
+    });
+    const rt = SD.state.runtime;
+    ['runnerCooldowns', 'nervousCheers', 'demoRunners'].forEach(function (m) {
+      if (rt[m] && U.hasOwn(rt[m], id)) delete rt[m][id];
+    });
+    return { bets: bets, effects: effects, owner: owner };
+  }
+
+  function raceGuard(s, what) {
+    if (!s) return fail('The game has not been initialised yet.');
+    if (s.currentRace) return fail('Finish the current race before you ' + what + '.');
+    return null;
+  }
+
+  // RETIRE: the runner leaves the paddock, the field, the season boards and chat lookups for good. It
+  // stays in race records, the all-time boards and past season summaries, and its name stays taken.
+  // -> { ok, message, runner, refunded: { bets, effects } }
+  function retireRunner(id, opts) {
+    opts = opts || {};
+    const s = cur();
+    const refused = raceGuard(s, 'retire a runner');
+    if (refused) return refused;
+    const runner = findRunnerById(s, id);
+    if (!runner) return fail('No runner with id "' + id + '".');
+    if (runner.retired) return fail(runner.name + ' is already retired.');
+    let info;
+    commit('runner:retire', function (st, emit) {
+      info = detachRunner(st, runner);
+      runner.retired = true;
+      // A created runner is named by id only: its name may be the reason it was retired.
+      SD.state.log('runner', (runner.custom ? 'The streamer retired a created runner (' + runner.id + ')' : runner.emoji + ' ' + runner.name + ' was retired by the streamer') +
+        (info.bets || info.effects ? ' (' + plural(info.bets, 'bet') + ' and ' + plural(info.effects, 'queued effect') + ' refunded).' : '.'), 'info', { runnerId: runner.id });
+      emit(SD.EVENTS.RUNNER_RETIRED, { runnerId: runner.id, name: runner.name, deleted: false, refunded: info, by: opts.by || null });
+      if (info.owner) emit(SD.EVENTS.RUNNER_CLAIMED, { runnerId: runner.id, username: null, displayName: null, releasedRunnerId: runner.id, releasedBy: info.owner });
+    });
+    saveNow();
+    return { ok: true, message: runner.name + ' was retired.', runner: runner, refunded: { bets: info.bets, effects: info.effects } };
+  }
+
+  // DELETE (runners made by !create or SPAWN RUNNER only; roster runners can be retired): like RETIRE,
+  // then the runner is removed from the game, so it leaves the all-time boards too and its name is free
+  // again. Its name becomes "(removed runner)" in the log and in past season summaries; race records
+  // keep their own (hashed) copy. -> { ok, message, runnerId, refunded }
+  function deleteRunner(id, opts) {
+    opts = opts || {};
+    const s = cur();
+    const refused = raceGuard(s, 'delete a runner');
+    if (refused) return refused;
+    const runner = findRunnerById(s, id);
+    if (!runner) return fail('No runner with id "' + id + '".');
+    if (!runner.custom) return fail(runner.name + ' is one of the original roster runners: retire it instead.');
+    let info;
+    const name = runner.name;
+    commit('runner:delete', function (st, emit) {
+      info = detachRunner(st, runner);
+      scrubRunnerName(st, runner, name, REMOVED_RUNNER);
+      st.runners = st.runners.filter(function (r) { return r !== runner; });
+      SD.state.log('runner', 'A runner was deleted by the streamer' +
+        (info.bets || info.effects ? ' (' + plural(info.bets, 'bet') + ' and ' + plural(info.effects, 'queued effect') + ' refunded).' : '.'), 'info');
+      emit(SD.EVENTS.RUNNER_RETIRED, { runnerId: runner.id, name: REMOVED_RUNNER, deleted: true, refunded: info, by: opts.by || null });
+      if (info.owner) emit(SD.EVENTS.RUNNER_CLAIMED, { runnerId: runner.id, username: null, displayName: null, releasedRunnerId: runner.id, releasedBy: info.owner });
+    });
+    saveNow();
+    return { ok: true, message: name + ' was deleted.', runnerId: runner.id, refunded: { bets: info.bets, effects: info.effects } };
+  }
+
+  // RENAME: the new name must pass the !create rules (SD.runners.checkName, ignoring the runner itself).
+  // The old name is replaced in the log, open bets and past season summaries (not in race records).
+  // -> { ok, message, runner, from, to }
+  function renameRunner(id, name, opts) {
+    opts = opts || {};
+    const s = cur();
+    const refused = raceGuard(s, 'rename a runner');
+    if (refused) return refused;
+    const runner = findRunnerById(s, id);
+    if (!runner) return fail('No runner with id "' + id + '".');
+    const check = SD.runners.checkName(s, name, { exclude: runner.id });
+    if (!check.ok) return fail(check.message.replace(/!create <name>/g, 'a new name'), { invalidName: true });
+    const from = runner.name, to = check.name;
+    if (from === to) return fail(runner.name + ' already has that name.');
+    commit('runner:rename', function (st, emit) {
+      scrubRunnerName(st, runner, from, to);
+      runner.name = to;
+      SD.state.log('runner', 'The streamer renamed a runner to ' + runner.emoji + ' ' + to + '.', 'info', { runnerId: runner.id });
+      emit(SD.EVENTS.RUNNER_RENAMED, { runnerId: runner.id, from: from, to: to, by: opts.by || null });
+    });
+    saveNow();
+    return { ok: true, message: 'Renamed to ' + to + '.', runner: runner, from: from, to: to };
+  }
+
+  // A removed viewer's name out of the log lines that name them: lines about them (username / by),
+  // lines naming several viewers (usernames: bets, payouts, a season end's MVP / champion owner; not a
+  // match at the start of the line) and, in lines logged before those tags existed, the runner-created
+  // line (", created by <name>.") and the bet / payout lines of a race (bet / sp with a recordId).
+  function scrubViewerName(st, key, name) {
+    const created = ', created by ' + name + '.';
+    (st.log || []).forEach(function (e) {
+      if (!e || typeof e.text !== 'string' || e.text.indexOf(name) < 0) return;
+      if (e.username === key || e.by === key) e.text = swapName(e.text, name, REMOVED_VIEWER);
+      else if (tagged(e.usernames, key)) e.text = swapName(e.text, name, REMOVED_VIEWER, true);
+      else if (Array.isArray(e.usernames) || e.by != null || e.username != null) return;
+      else if (e.type === 'runner' && e.text.indexOf(created) >= 0) e.text = e.text.split(created).join(', created by ' + REMOVED_VIEWER + '.');
+      else if (e.recordId && (e.type === 'bet' || e.type === 'sp')) e.text = swapName(e.text, name, REMOVED_VIEWER, true);
+    });
+  }
+
+  function removeOne(st, key, opts, emit) {
+    const res = SD.players.remove(st, key);
+    if (!res) return null;
+    const rt = SD.state.runtime;
+    ['cooldowns', 'activity', 'hypeRecent'].forEach(function (m) { if (rt[m] && U.hasOwn(rt[m], key)) delete rt[m][key]; });
+    if (opts.scrub && res.player.displayName) scrubViewerName(st, key, res.player.displayName);
+    emit(SD.EVENTS.PLAYER_REMOVED, { username: key, displayName: opts.scrub ? REMOVED_VIEWER : res.player.displayName, demo: !!opts.demo, released: res.released });
+    res.released.forEach(function (rid) {
+      emit(SD.EVENTS.RUNNER_CLAIMED, { runnerId: rid, username: null, displayName: null, releasedRunnerId: rid, releasedBy: key });
+    });
+    return res;
+  }
+
+  // REMOVE PLAYER: the viewer's profile leaves the save (SD.players.remove: runner released, open bets and
+  // queued effects dropped, achievements / hype credit gone); their name becomes "(removed viewer)" in
+  // log lines about them. Past season summaries keep it. If they !join again they start afresh.
+  // -> { ok, message, username, released }
+  function removePlayer(username) {
+    const s = cur();
+    const refused = raceGuard(s, 'remove a viewer');
+    if (refused) return refused;
+    const key = SD.players ? SD.players.keyOf(username) : '';
+    const p = key && SD.players.get(s, key);
+    if (!p) return fail('No viewer called "' + String(username == null ? '' : username).slice(0, 30) + '" has joined.');
+    let res;
+    const shown = p.displayName || key;
+    commit('player:remove', function (st, emit) {
+      res = removeOne(st, key, { scrub: true }, emit);
+      SD.state.log('player', 'The streamer removed a viewer from the derby' + (res.released.length ? ' (their runner is free again).' : '.'), 'info');
+    });
+    saveNow();
+    return { ok: true, message: shown + ' was removed from the derby.', username: key, released: res.released };
+  }
+
+  // The demo bots' clean-up (review batch 8, gap1#2/#3): every '~' player (SD.players.isDemoKey) is
+  // removed and the runners the bots created (runtime.demoRunners this session; runner.demo, which is
+  // saved, after a reload or an import) are deleted unless a real viewer owns them now. Called when the bots stop and by afterLoad (the bots never survive a reload,
+  // so a '~' player in a loaded save is a leftover). Refused while a race exists: the chat panel
+  // calls it again when the race ends. -> { ok, removed: [keys], runners: [ids], pending? }
+  function purgeDemo() {
+    const s = cur();
+    if (!s) return fail('The game has not been initialised yet.');
+    const keys = Object.keys(s.players || {}).filter(function (k) { return SD.players && SD.players.isDemoKey(k); });
+    const made = SD.state.runtime.demoRunners || {};
+    const botMade = function (r) { return r.custom && (U.hasOwn(made, r.id) || r.demo === true); };
+    const realOwner = function (r) { return !!(r.ownerKey && !SD.players.isDemoKey(r.ownerKey)); };
+    const runners = s.runners.filter(function (r) { return botMade(r) && !realOwner(r); });
+    // A bot-made runner a real viewer owns now stays in the game for good: it loses the bot mark.
+    const adopted = s.runners.filter(function (r) { return r.demo === true && realOwner(r); });
+    if (!keys.length && !runners.length && !adopted.length) return { ok: true, removed: [], runners: [] };
+    if (s.currentRace && (keys.length || runners.length)) return fail('The demo bots are cleaned up after the current race.', { pending: true });
+    const removed = [], deleted = [];
+    commit('demo:purge', function (st, emit) {
+      adopted.forEach(function (r) { delete r.demo; });
+      if (!keys.length && !runners.length) return;
+      keys.sort().forEach(function (k) { if (removeOne(st, k, { demo: true }, emit)) removed.push(k); });
+      runners.forEach(function (r) {
+        detachRunner(st, r);
+        st.runners = st.runners.filter(function (x) { return x !== r; });
+        deleted.push(r.id);
+        emit(SD.EVENTS.RUNNER_RETIRED, { runnerId: r.id, name: r.name, deleted: true, refunded: null, demo: true });
+      });
+      SD.state.log('system', 'The demo bots left: ' + plural(removed.length, 'bot profile') + ' removed' +
+        (deleted.length ? ' and ' + plural(deleted.length, 'bot-made runner') + ' deleted' : '') + '. Their runners are free again.', 'info');
+    });
+    saveNow();
+    return { ok: true, removed: removed, runners: deleted };
+  }
+
+  function plural(n, w) { return n + ' ' + w + (n === 1 ? '' : 's'); }
 
   // A season rollover's events. Season Champion is awarded here, inside the commit and before
   // season:ended goes out, so the summary (and its season.history entry) already count it when the
@@ -728,10 +1032,13 @@
     return { ok: true, message: 'Season ' + summary.number + ' archived. Season ' + started.season + ' begins!', summary: summary };
   }
 
-  // Wipe everything and start a brand-new game.
+  // Wipe everything and start a brand-new game. Review batch 8 (ui-admin-chat-dom#1): the game being
+  // wiped is first copied to spiritderby.backup (SD.persistence.backupCurrent, unless it is blank), so a
+  // mistaken RESET ALL can be undone with RESTORE BACKUP. -> { ok, message, backedUp }
   function resetAll() {
     const s = cur();
     if (s && s.currentRace) SD.bus.emit(SD.EVENTS.RACE_ABORTED, { recordId: s.currentRace.record.id, refunded: 0, reset: true });
+    const backedUp = !!(SD.persistence && typeof SD.persistence.backupCurrent === 'function' && SD.persistence.backupCurrent());
     if (SD.persistence) SD.persistence.clear();
     SD.state.set(SD.state.create());
     // Review batch 7 (director-state#3): every per-game runtime map is cleared (nervous cheers, rest
@@ -741,7 +1048,10 @@
     saveNow();
     SD.bus.emit(SD.EVENTS.STATE_LOADED, { source: 'reset' });
     SD.bus.emit(SD.EVENTS.STATE_CHANGED, { label: 'resetAll' });
-    return { ok: true, message: 'Everything was reset. Welcome to a brand new Spirit Derby!' };
+    return {
+      ok: true, backedUp: backedUp,
+      message: 'Everything was reset. Welcome to a brand new Spirit Derby!' + (backedUp ? ' (The old game was kept as the backup: RESTORE BACKUP brings it back.)' : '')
+    };
   }
 
   // ---------------------------------------------------------------------------
@@ -868,6 +1178,11 @@
     triggerDayEvent: triggerDayEvent,
     addHype: addHype,
     spawnRunner: spawnRunner,
+    retireRunner: retireRunner,
+    deleteRunner: deleteRunner,
+    renameRunner: renameRunner,
+    removePlayer: removePlayer,
+    purgeDemo: purgeDemo,
     nextDay: nextDay,
     resetDay: resetDay,
     resetSeason: resetSeason,
