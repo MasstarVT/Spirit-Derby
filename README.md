@@ -203,7 +203,7 @@ SD.processCommand('FoxFan', '!join', { source: 'sim' })
 
 ## Twitch and Mix It Up
 
-Both are optional and off by default. **Read-only Twitch chat** connects anonymously (no token, no login) and feeds `!commands` into the game. The **local WebSocket bridge** lets Mix It Up, Streamer.bot or your own script send chat in and post the game's replies back to Twitch. Mods are recognised from Twitch badges. Setup, frame formats, OBS and troubleshooting: **[docs/INTEGRATION.md](docs/INTEGRATION.md)**.
+Both are optional and off by default. **Read-only Twitch chat** connects anonymously (no token, no login) and feeds `!commands` into the game. The **local WebSocket bridge** lets Mix It Up, Streamer.bot or your own script send chat in and post the game's replies back to Twitch. Mods are recognised from Twitch badges (or the bridge's `isMod`). **Never let your bot build the bridge's JSON by pasting a chat message into a text template:** a viewer who types a `"` could then act as a mod or as another viewer. Use the example relay's `POST /chat` endpoint (it takes the raw message) or a real JSON serializer, as shown in the guide. The example relay only accepts clients that present its token (so other web pages in your browser cannot use it); the game hides that token wherever it shows the bridge URL. Importing a save never changes this PC's Twitch channel, bridge URL or auto-connect settings. Setup, frame formats, OBS and troubleshooting: **[docs/INTEGRATION.md](docs/INTEGRATION.md)**.
 
 ## Architecture
 

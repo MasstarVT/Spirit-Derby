@@ -377,6 +377,70 @@ section('E. Backup key');
 })();
 
 // =============================================================================
+section('E2. Import keeps this PC\'s Twitch / bridge settings (review batch 1, integrations#7)');
+// =============================================================================
+(function () {
+  fakeStorage.clear();
+  const local = SD.state.create({ seedSalt: 41 });
+  local.settings.twitch = { channel: 'myownchannel', enabled: true };
+  local.settings.bridge = { url: 'ws://localhost:9001', enabled: false };
+  boot(local);
+  const foreign = SD.state.create({ seedSalt: 42 });
+  foreign.settings.twitch = { channel: 'someoneelse', enabled: true };
+  foreign.settings.bridge = { url: 'wss://relay.attacker.example/x', enabled: true };
+  foreign.settings.playbackSpeed = 2;
+  const imp = P.importJSON(JSON.stringify(foreign));
+  ok(imp.ok, 'import ok');
+  const s = SD.state.get().settings;
+  eq([s.twitch, s.bridge], [{ channel: 'myownchannel', enabled: true }, { url: 'ws://localhost:9001', enabled: false }],
+    "the file's Twitch channel, bridge URL and auto-connect flags are ignored; this PC's are kept");
+  eq(s.playbackSpeed, 2, 'every other setting still comes from the file');
+  eq(imp.ignoredConnection, true, 'importJSON reports that the connection settings were ignored');
+  const saved = JSON.parse(fakeStorage.getItem(KEY)).settings;
+  eq([saved.twitch.channel, saved.bridge.url, saved.bridge.enabled], ['myownchannel', 'ws://localhost:9001', false],
+    'the saved game (next boot / auto-connect) keeps the local values');
+
+  // same connection settings in the file (e.g. re-importing your own export) → nothing to report
+  const own = P.importJSON(P.exportJSON());
+  eq([own.ok, own.ignoredConnection], [true, false], 're-importing your own export reports nothing ignored');
+
+  // no current game → the defaults (auto-connect off), never the file's values
+  SD.state.set(null);
+  const imp2 = P.importJSON(JSON.stringify(foreign));
+  const s2 = SD.state.get().settings;
+  eq([imp2.ok, s2.twitch.enabled, s2.twitch.channel, s2.bridge.enabled, s2.bridge.url],
+    [true, false, '', false, 'ws://localhost:8765'], 'with no current game the defaults are used (auto-connect off)');
+
+  // the M1 fixture (M1 settings, no twitch / bridge keys) still imports with the local values
+  boot(local);
+  const imp3 = P.importJSON(fixtureText);
+  eq([imp3.ok, SD.state.get().settings.twitch.channel, SD.state.get().schemaVersion], [true, 'myownchannel', 2], 'the M1 fixture imports and keeps the local connection settings');
+  eq(imp3.ignoredConnection, false, 'the M1 fixture carries no connection settings → nothing reported as ignored (fix round 1)');
+
+  // a fresh install's export (default connection values) into a configured install → nothing ignored
+  boot(local);
+  const imp4 = P.importJSON(JSON.stringify(SD.state.create({ seedSalt: 43 })));
+  eq([imp4.ok, imp4.ignoredConnection, SD.state.get().settings.twitch.channel], [true, false, 'myownchannel'],
+    "a file with only the default connection values reports nothing ignored");
+  // only the risky part differs (auto-connect on) → reported
+  const onlyFlag = SD.state.create({ seedSalt: 44 });
+  onlyFlag.settings.bridge = { url: 'ws://localhost:9001', enabled: true };
+  eq(P.importJSON(JSON.stringify(onlyFlag)).ignoredConnection, true, "a file that would switch this PC's auto-connect on is reported");
+
+  // EXPORT JSON hides a relay token in the bridge URL; re-importing it keeps the real local URL
+  const withToken = SD.state.create({ seedSalt: 45 });
+  withToken.settings.bridge = { url: 'ws://localhost:8765/?token=s3cret', enabled: true };
+  boot(withToken);
+  const exported = P.exportJSON();
+  ok(exported.indexOf('s3cret') < 0, 'EXPORT JSON does not contain the relay token');
+  eq(JSON.parse(exported).settings.bridge, { url: 'ws://localhost:8765/?token=…', enabled: true }, 'the exported bridge URL shows ?token=…');
+  eq(SD.state.get().settings.bridge.url, 'ws://localhost:8765/?token=s3cret', 'exporting does not change the live settings');
+  const back = P.importJSON(exported);
+  eq([back.ok, back.ignoredConnection, SD.state.get().settings.bridge.url], [true, false, 'ws://localhost:8765/?token=s3cret'],
+    're-importing your own export keeps the real URL and reports nothing ignored');
+})();
+
+// =============================================================================
 section('F. Race history trimming');
 // =============================================================================
 (function () {

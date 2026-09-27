@@ -6,17 +6,27 @@
  *   SD.integrations.bridge.connect(url?)   → { ok, message }   (url defaults to settings.bridge.url)
  *   SD.integrations.bridge.disconnect()    → { ok, message }
  *   SD.integrations.bridge.status()        → { adapter:'bridge', state, url, since, messages, dropped,
- *                                              malformed, ignored, sent, lastError, attempt, nextRetryAt }
+ *                                              droppedCommands, malformed, ignored, sent, lastError,
+ *                                              lastBad, attempt, nextRetryAt, enabled }
  *   SD.integrations.bridge.receive(json)   → { ok, handled, malformed, dropped, ignored, results }
  *   SD.integrations.bridge.send(obj)       → true | false (no-op while closed)
  *
  * INBOUND frames (text, JSON): one chat message or an array of them (a batch):
  *   { "username": "FoxFan", "text": "!train speed", "isMod": false, "displayName": "FoxFan" }
  *   → SD.processCommand(username, text, { source:'bridge', isMod, displayName })
- *   Lenient aliases: user/userName for username, message for text, isBroadcaster/mod for isMod
- *   (true, 1, "1", "true", "yes"). { "type":"ping" } is answered with { "type":"pong" }; other
- *   "type"s are ignored. Malformed JSON / missing fields are counted (status().malformed) and
- *   ignored, never thrown. Same flood guard as Twitch: at most 20 messages per second.
+ *   Strict keys (review batch 1): an item may only carry the keys in KEY_GROUPS (+ "type"). Each
+ *   field has one canonical key and the v1.0 aliases (user/userName, message, isBroadcaster/mod,
+ *   display_name); when several keys of one field are present they must agree, isMod values must
+ *   be real booleans (true/false, 1/0, "true"/"false", "yes"/"no", "on"/"off"), and a JSON text
+ *   frame with a duplicated key is rejected as a whole. These shapes are what a hand-built JSON
+ *   template produces when a viewer types a '"' — see docs/INTEGRATION.md section 6. A displayName
+ *   that is not the username in other letter case is replaced by the username. Rejected
+ *   frames are counted as malformed with the reason in status().lastBad. Binary frames are
+ *   decoded as UTF-8 text (sock.binaryType = 'arraybuffer'); a Blob is malformed, never ignored.
+ *   { "type":"ping" } is answered with { "type":"pong" }; other "type"s are ignored. Malformed
+ *   frames are counted and ignored, never thrown. Flood guard (same as Twitch): at most RATE.MAX
+ *   (20) commands AND separately RATE.CHAT_MAX (20) plain-chat lines per second reach the game,
+ *   so chatter can never use up the command budget.
  *
  * OUTBOUND frames (so the bot can speak in Twitch chat):
  *   on open        { type:'hello', app:'spirit-derby', version, protocol:1 }
@@ -35,7 +45,12 @@
  * Emits SD.EVENTS.INTEGRATION_STATUS { adapter:'bridge', ...status() } and mirrors the state
  * into SD.state.runtime.connected.bridge.
  *
- * Trust: the bridge decides isMod. Only point this at a relay you run yourself.
+ * Shown URLs: every URL / error text shown to people (system lines, connect() messages, lastError)
+ * goes through SD.util.redactSecrets, so a relay token in the URL (?token=…) never appears on
+ * stream; status().url keeps the real URL (the admin redacts it for display).
+ *
+ * Trust: the bridge decides isMod. Only point this at a relay you run yourself, and never let the
+ * bot build frames by pasting chat text into a JSON template (use a serializer).
  */
 (function (SD) {
   'use strict';
@@ -44,15 +59,31 @@
   const DEFAULT_URL = 'ws://localhost:8765';
   const PROTOCOL = 1;
   const BACKOFF = { BASE_MS: 1000, CAP_MS: 60000, JITTER: 0.2 };
-  const RATE = { MAX: 20, WINDOW_MS: 1000 };
+  // MAX commands per window; CHAT_MAX plain-chat lines per window (separate budgets).
+  const RATE = { MAX: 20, CHAT_MAX: 20, WINDOW_MS: 1000 };
   const STABLE_MS = 15000;
   const MAX_FRAME_CHARS = 65536;
   const MAX_BATCH = 100;
   const MEDALS = ['🥇', '🥈', '🥉'];
+  // The only keys a chat item may carry: field → [canonical key, ...accepted aliases].
+  const KEY_GROUPS = {
+    username: ['username', 'user', 'userName'],
+    text: ['text', 'message'],
+    isMod: ['isMod', 'isBroadcaster', 'mod'],
+    displayName: ['displayName', 'display_name']
+  };
+  const KNOWN_KEYS = Object.create(null);   // no inherited keys ("constructor", "toString" …)
+  KNOWN_KEYS.type = true;
+  Object.keys(KEY_GROUPS).forEach(function (f) { KEY_GROUPS[f].forEach(function (k) { KNOWN_KEYS[k] = true; }); });
 
   function now() { return SD.clock && SD.clock.now ? SD.clock.now() : Date.now(); }
   function evName(key, fallback) { return (SD.EVENTS && SD.EVENTS[key]) || fallback; }
   function errMsg(e) { return String((e && e.message) || e || 'unknown error'); }
+  // A URL / error text as shown to people (chat feed, toasts, admin, lastError): a relay token in
+  // the URL (ws://localhost:8765/?token=…) is hidden, so it never shows up on stream.
+  function shown(text) {
+    return SD.util && typeof SD.util.redactSecrets === 'function' ? SD.util.redactSecrets(text) : String(text);
+  }
 
   // ---------------------------------------------------------------- pure helpers
   // attempt 0,1,2… → 1 s, 2 s, 4 s … capped at 60 s, ±JITTER. random() = 0.5 gives the exact base.
@@ -86,16 +117,111 @@
     return s;
   }
 
-  function truthy(v) {
-    return v === true || v === 1 || v === '1' || (typeof v === 'string' && /^(true|yes|on)$/i.test(v.trim()));
-  }
-  function pickStr() {
-    for (let i = 0; i < arguments.length; i++) {
-      const v = arguments[i];
-      if (typeof v === 'string' && v.trim()) return v.trim().slice(0, 60);
-      if (typeof v === 'number' && isFinite(v)) return String(v);
+  // A mod flag → true | false, or null when it is not a real boolean ("", "maybe", {}, …).
+  function parseBool(v) {
+    if (v === true || v === 1) return true;
+    if (v === false || v === 0) return false;
+    if (typeof v === 'string') {
+      const s = v.trim().toLowerCase();
+      if (s === 'true' || s === '1' || s === 'yes' || s === 'on') return true;
+      if (s === 'false' || s === '0' || s === 'no' || s === 'off') return false;
     }
-    return '';
+    return null;
+  }
+  // A name value → trimmed string (max 60 chars), or null when it is not a non-empty string/number.
+  function nameStr(v) {
+    if (typeof v === 'string' && v.trim()) return v.trim().slice(0, 60);
+    if (typeof v === 'number' && isFinite(v)) return String(v);
+    return null;
+  }
+
+  // First key that appears twice in the same object of a JSON text, or null. JSON.parse silently
+  // keeps the LAST copy, which is exactly what a template injection relies on
+  // ({"username":"mallory","text":"!race","isMod":true,"isMod":false} → last wins), so a frame
+  // with a duplicated key is refused as a whole. Assumes `text` already parsed as JSON.
+  function duplicateKey(text) {
+    const s = String(text);
+    const stack = [];
+    for (let i = 0; i < s.length; i++) {
+      const c = s.charAt(i);
+      if (c === '"') {
+        let j = i + 1;
+        while (j < s.length && s.charAt(j) !== '"') j += s.charAt(j) === '\\' ? 2 : 1;
+        const top = stack[stack.length - 1];
+        if (top && top.keys && top.expectKey) {
+          let key;
+          try { key = JSON.parse(s.slice(i, j + 1)); } catch (e) { key = s.slice(i + 1, j); }
+          if (top.keys.has(key)) return key;
+          top.keys.add(key);
+          top.expectKey = false;
+        }
+        i = j;
+      } else if (c === '{') {
+        stack.push({ keys: new Set(), expectKey: true });
+      } else if (c === '[') {
+        stack.push({ keys: null, expectKey: false });
+      } else if (c === '}' || c === ']') {
+        stack.pop();
+      } else if (c === ',') {
+        const top = stack[stack.length - 1];
+        if (top && top.keys) top.expectKey = true;
+      }
+    }
+    return null;
+  }
+
+  // One chat item → { username, text, isMod, displayName } or { error } (strict keys, see header).
+  function readChatItem(item) {
+    const own = function (k) { return Object.prototype.hasOwnProperty.call(item, k) && item[k] !== undefined && item[k] !== null; };
+    const unknown = Object.keys(item).filter(function (k) { return !KNOWN_KEYS[k]; });
+    if (unknown.length) {
+      return { error: 'unknown key "' + String(unknown[0]).slice(0, 30) + '" (a chat item may only carry username, text, isMod, displayName)' };
+    }
+    // field → the agreed value of every key present for it, or an error.
+    function field(name, read, same) {
+      let val = null;
+      let first = null;
+      const keys = KEY_GROUPS[name];
+      for (let i = 0; i < keys.length; i++) {
+        const k = keys[i];
+        if (!own(k)) continue;
+        const v = read(item[k]);
+        if (v === null) return { error: 'invalid "' + k + '" value' };
+        if (first === null) { first = k; val = v; continue; }
+        if (!same(val, v)) return { error: 'conflicting "' + first + '" and "' + k + '" (send one "' + keys[0] + '")' };
+      }
+      return { value: val };
+    }
+    const strictEq = function (a, b) { return a === b; };
+    const u = field('username', nameStr, function (a, b) { return a.toLowerCase() === b.toLowerCase(); });
+    if (u.error) return u;
+    const t = field('text', function (v) { return typeof v === 'string' ? v : null; }, strictEq);
+    if (t.error) return t;
+    const m = field('isMod', parseBool, strictEq);
+    if (m.error) return m;
+    const d = field('displayName', nameStr, strictEq);
+    if (d.error) return d;
+    if (!u.value || t.value === null || !t.value.trim()) return { error: 'missing "username" or "text"' };
+    // A display name is only the username in other letter case ("FoxFan" for foxfan), as
+    // players.touch() already requires: otherwise a viewer could pick any name to show ("TheStreamer")
+    // on the overlay, in the bot's replies and on runner owner labels. Anything else falls back to
+    // the username.
+    const display = d.value && d.value.toLowerCase() === u.value.toLowerCase() ? d.value : u.value;
+    return { username: u.value, text: t.value, isMod: m.value === true, displayName: display };
+  }
+
+  function isBinary(x) {
+    return typeof ArrayBuffer !== 'undefined' && !!x && typeof x === 'object' &&
+      (x instanceof ArrayBuffer || (typeof ArrayBuffer.isView === 'function' && ArrayBuffer.isView(x)));
+  }
+  function isPlainData(x) {
+    return Array.isArray(x) || Object.prototype.toString.call(x) === '[object Object]';
+  }
+  function isCommandText(text) {
+    if (SD.commands && typeof SD.commands.parse === 'function') {
+      try { return !!SD.commands.parse(text); } catch (e) { /* fall through */ }
+    }
+    return /^\s*!/.test(String(text));
   }
 
   // command:result payload (+ the reply chat line's flags) → outbound reply frame.
@@ -146,11 +272,12 @@
 
   // ---------------------------------------------------------------- state
   const st = {
-    state: 'off', url: '', since: now(), messages: 0, dropped: 0, malformed: 0, ignored: 0, sent: 0,
+    state: 'off', url: '', since: now(), messages: 0, dropped: 0, droppedCommands: 0, malformed: 0, ignored: 0, sent: 0,
     lastError: null, lastBad: null, attempt: 0, nextRetryAt: null
   };
   const options = { replySources: { bridge: true, twitch: true }, replyUnknown: false };
-  const limiter = createRateLimiter(RATE.MAX, RATE.WINDOW_MS);
+  const limiter = createRateLimiter(RATE.MAX, RATE.WINDOW_MS);          // commands
+  const chatLimiter = createRateLimiter(RATE.CHAT_MAX, RATE.WINDOW_MS); // plain chat
   let enabled = false;
   let ws = null;
   let retryTimer = 0;
@@ -163,7 +290,7 @@
   function status() {
     return {
       adapter: ADAPTER, state: st.state, url: st.url, since: st.since, messages: st.messages, dropped: st.dropped,
-      malformed: st.malformed, ignored: st.ignored, sent: st.sent, lastError: st.lastError, lastBad: st.lastBad,
+      droppedCommands: st.droppedCommands, malformed: st.malformed, ignored: st.ignored, sent: st.sent, lastError: st.lastError, lastBad: st.lastBad,
       attempt: st.attempt, nextRetryAt: st.nextRetryAt, enabled: enabled
     };
   }
@@ -240,16 +367,25 @@
     }
     ensureListeners();
     if (enabled && st.url === u && ws) {
-      return { ok: true, message: (st.state === 'on' ? 'Already connected to' : 'Already connecting to') + ' the bridge at ' + u + '.' };
+      return { ok: true, message: (st.state === 'on' ? 'Already connected to' : 'Already connecting to') + ' the bridge at ' + shown(u) + '.' };
     }
     teardown();
     enabled = true;
     outage = false;
     everOpened = false;
-    if (st.url !== u) { st.messages = 0; st.dropped = 0; st.malformed = 0; st.ignored = 0; st.sent = 0; limiter.reset(); }
+    if (st.url !== u) resetCounters();
     Object.assign(st, { url: u, attempt: 0, nextRetryAt: null, lastError: null });
     open(true);
-    return { ok: true, message: 'Connecting to the bridge at ' + u + (opts.auto ? ' (auto-connect)' : '') + '…' };
+    // open() may already have failed fatally (the WebSocket constructor threw: a bad URL, or
+    // ws:// to another host from an https:// page). Report that instead of "Connecting…".
+    if (!enabled) return { ok: false, message: st.lastError || 'Could not open the bridge connection.' };
+    return { ok: true, message: 'Connecting to the bridge at ' + shown(u) + (opts.auto ? ' (auto-connect)' : '') + '…' };
+  }
+
+  function resetCounters() {
+    st.messages = 0; st.dropped = 0; st.droppedCommands = 0; st.malformed = 0; st.ignored = 0; st.sent = 0; st.lastBad = null;
+    limiter.reset();
+    chatLimiter.reset();
   }
 
   function open(fresh) {
@@ -262,10 +398,12 @@
       sock = new WebSocket(st.url);
     } catch (e) {
       // SyntaxError (bad URL) or SecurityError (e.g. ws:// from an https:// page): retrying cannot help.
-      fatal('Could not open ' + st.url + ': ' + errMsg(e));
+      fatal('Could not open ' + shown(st.url) + ': ' + shown(errMsg(e)));
       return;
     }
     ws = sock;
+    // Binary frames arrive as ArrayBuffers (decoded as UTF-8 in receive()), never as Blobs.
+    try { sock.binaryType = 'arraybuffer'; } catch (e) { /* ignore */ }
     let opened = false;
     sock.onopen = function () {
       if (sock !== ws) return;
@@ -277,7 +415,7 @@
       st.nextRetryAt = null;
       setState('on', { lastError: null });
       send({ type: 'hello', app: 'spirit-derby', version: SD.VERSION || null, protocol: PROTOCOL });
-      systemLine('🔌 ' + (again ? 'Reconnected' : 'Connected') + ' to the chat bridge (' + st.url + ').', 'good');
+      systemLine('🔌 ' + (again ? 'Reconnected' : 'Connected') + ' to the chat bridge (' + shown(st.url) + ').', 'good');
     };
     sock.onmessage = function (ev) { if (sock === ws) receive(ev ? ev.data : null); };
     sock.onerror = function () { /* a close event always follows; handled there */ };
@@ -285,7 +423,7 @@
       if (sock !== ws) return;
       ws = null;
       const code = ev && ev.code ? ' (code ' + ev.code + ')' : '';
-      onSocketGone(opened ? 'The bridge connection closed' + code + '.' : 'No bridge is answering at ' + st.url + code + '.');
+      onSocketGone(opened ? 'The bridge connection closed' + code + '.' : 'No bridge is answering at ' + shown(st.url) + code + '.');
     };
   }
 
@@ -316,7 +454,7 @@
       outage = true;
       systemLine(next === 'reconnecting'
         ? '🔌 Lost the chat bridge — reconnecting…'
-        : '🔌 No chat bridge at ' + st.url + ' yet — retrying quietly in the background.', 'bad');
+        : '🔌 No chat bridge at ' + shown(st.url) + ' yet — retrying quietly in the background.', 'bad');
     }
     setState(next);
   }
@@ -345,13 +483,28 @@
   function receive(input) {
     const res = { ok: true, handled: 0, malformed: 0, dropped: 0, ignored: 0, results: [] };
     let data;
+    if (isBinary(input)) {
+      // A relay that forwards Buffers sends binary frames: decode them as UTF-8 text.
+      if (input.byteLength > MAX_FRAME_CHARS * 4) return bad(res, 'frame larger than ' + MAX_FRAME_CHARS + ' characters');
+      try {
+        input = new TextDecoder('utf-8', { fatal: true }).decode(input);
+      } catch (e) {
+        return bad(res, 'binary frame that is not UTF-8 text (make the relay send text frames)');
+      }
+    }
     if (typeof input === 'string') {
       if (input.length > MAX_FRAME_CHARS) return bad(res, 'frame larger than ' + MAX_FRAME_CHARS + ' characters');
       try { data = JSON.parse(input); } catch (e) { return bad(res, 'not valid JSON'); }
-    } else if (input && typeof input === 'object') {
+      const dup = duplicateKey(input);
+      if (dup !== null) {
+        return bad(res, 'duplicate key "' + String(dup).slice(0, 30) + '" (build frames with a JSON serializer, never by pasting chat text into a template)');
+      }
+    } else if (input && typeof input === 'object' && isPlainData(input)) {
       data = input;                         // already-parsed object (handy from the console)
+    } else if (input && typeof input === 'object') {
+      return bad(res, 'binary (' + Object.prototype.toString.call(input).slice(8, -1) + ') frame (make the relay send text frames)');
     } else {
-      return bad(res, 'empty or binary frame');
+      return bad(res, 'empty frame');
     }
     const items = Array.isArray(data) ? data : [data];
     items.forEach(function (item, i) {
@@ -379,16 +532,24 @@
     }
     const type = item.type == null ? 'chat' : String(item.type).toLowerCase();
     if (type === 'ping') { send({ type: 'pong', ts: now() }); res.ignored++; st.ignored++; return; }
+    // Other types (another game's reply / race echo, a relay's hello …) are not for us.
     if (type !== 'chat' && type !== 'message') { res.ignored++; st.ignored++; return; }
-    const username = pickStr(item.username, item.user, item.userName, item.displayName);
-    const text = typeof item.text === 'string' ? item.text : (typeof item.message === 'string' ? item.message : '');
-    if (!username || !text.trim()) {
-      res.malformed++; st.malformed++; st.lastBad = 'missing "username" or "text"';
+    const msg = readChatItem(item);
+    if (msg.error) {
+      res.malformed++; st.malformed++; st.lastBad = msg.error;
       return;
     }
-    if (!limiter.allow(now())) { res.dropped++; st.dropped++; return; }
-    const isMod = truthy(item.isMod) || truthy(item.isBroadcaster) || truthy(item.mod);
-    const displayName = pickStr(item.displayName, item.display_name) || username;
+    const username = msg.username;
+    const text = msg.text;
+    const isMod = msg.isMod;
+    const displayName = msg.displayName;
+    // Separate budgets: plain chat can never use up the command budget (and vice versa).
+    const isCmd = isCommandText(text);
+    if (!(isCmd ? limiter : chatLimiter).allow(now())) {
+      res.dropped++; st.dropped++;
+      if (isCmd) st.droppedCommands++;
+      return;
+    }
     st.messages++;
     res.handled++;
     if (typeof SD.processCommand !== 'function') {
@@ -439,12 +600,14 @@
     send: send,
     configure: configure,
     isConnected: isOpen,
-    resetStats: function () {
-      st.messages = 0; st.dropped = 0; st.malformed = 0; st.ignored = 0; st.sent = 0; st.lastBad = null; limiter.reset();
-    },
+    resetStats: resetCounters,
+    KEY_GROUPS: KEY_GROUPS,
     // pure helpers
     replyFrame: replyFrame,
     raceFrame: raceFrame,
+    readChatItem: readChatItem,
+    duplicateKey: duplicateKey,
+    parseBool: parseBool,
     normalizeUrl: normalizeUrl,
     backoffDelay: backoffDelay,
     createRateLimiter: createRateLimiter

@@ -522,9 +522,20 @@
     return { state: st, fromStorage: true, migratedFrom: v.version < SCHEMA_VERSION ? v.version : null, rosterAdded: rosterAdded };
   }
 
+  // The bridge URL is exported with any relay token hidden (?token=…): an import never applies it
+  // (see keepLocalConnections), and a shared export must not leak the streamer's relay token.
   function exportJSON() {
     const st = SD.state && SD.state.get();
-    return st ? JSON.stringify(st) : '';
+    if (!st) return '';
+    const br = isObj(st.settings) && isObj(st.settings.bridge) ? st.settings.bridge : null;
+    if (br && typeof br.url === 'string') {
+      const url = SD.util.redactSecrets(br.url);
+      if (url !== br.url) {
+        const settings = Object.assign({}, st.settings, { bridge: Object.assign({}, br, { url: url }) });
+        return JSON.stringify(Object.assign({}, st, { settings: settings }));
+      }
+    }
+    return JSON.stringify(st);
   }
 
   // Suggested download name, e.g. spirit-derby-s1-d3.json
@@ -551,10 +562,11 @@
       return { ok: false, error: 'Could not upgrade that save: ' + e.message };
     }
     // Keep a copy of what we are about to overwrite.
+    const cur = SD.state.get();
     try {
-      const cur = SD.state.get();
       if (cur) writeRaw(BACKUP_KEY, JSON.stringify(cur));
     } catch (e) { /* ignore */ }
+    const ignoredConnection = keepLocalConnections(st, cur, parsed);
     recoverInterruptedRace(st);
     pushLog(st, 'system', 'Save imported.', 'info');
     SD.state.set(st);
@@ -564,7 +576,37 @@
       SD.bus.emit(SD.EVENTS.STATE_LOADED, { source: 'import', migratedFrom: migratedFrom });
       SD.bus.emit(SD.EVENTS.STATE_CHANGED, { label: 'import' });
     }
-    return { ok: true, migratedFrom: migratedFrom };
+    return { ok: true, migratedFrom: migratedFrom, ignoredConnection: ignoredConnection };
+  }
+
+  // settings.twitch / settings.bridge are per-install: an imported file never brings its own
+  // Twitch channel, bridge URL or auto-connect flags (a shared save could otherwise make this PC
+  // connect to someone else's relay, which is trusted with isMod, on the next load). This PC's
+  // current values are kept (the defaults - off - when there is no current game).
+  // Returns true only when the FILE itself (raw, before migration fills in defaults) carried a
+  // connection value that differs from the kept one and is not just the default: an M1 file with
+  // no twitch / bridge keys, a fresh install's export (default values) or your own export (token
+  // hidden by exportJSON) reports nothing ignored.
+  function keepLocalConnections(st, cur, raw) {
+    const defaults = SD.state.create({ roster: false }).settings;
+    const local = cur && isObj(cur.settings) ? cur.settings : defaults;
+    const theirs = isObj(raw) && isObj(raw.settings) ? raw.settings : {};
+    const same = function (a, b) {
+      return typeof a === 'string' && typeof b === 'string' ? SD.util.redactSecrets(a) === SD.util.redactSecrets(b) : a === b;
+    };
+    let differs = false;
+    ['twitch', 'bridge'].forEach(function (k) {
+      const keep = SD.util.deepClone(isObj(local[k]) ? local[k] : defaults[k]);
+      if (isObj(theirs[k])) {
+        Object.keys(defaults[k]).forEach(function (f) {
+          const v = theirs[k][f];
+          if (v === undefined || same(v, keep[f]) || same(v, defaults[k][f])) return;
+          differs = true;
+        });
+      }
+      st.settings[k] = keep;
+    });
+    return differs;
   }
 
   function clear() {

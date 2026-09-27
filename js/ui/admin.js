@@ -575,7 +575,8 @@
         if (res && res.ok) {
           if (SD.playback && SD.playback.stop) SD.playback.stop();
           if (SD.ui.renderAll) SD.ui.renderAll();
-          dom.toast('Save imported — welcome back to the forest.', 'good');
+          dom.toast('Save imported — welcome back to the forest.' + (res.ignoredConnection
+            ? " This PC's Twitch and bridge settings were kept; the file's were ignored." : ''), 'good');
         } else {
           dom.toast('Import failed: ' + ((res && (res.error || res.message)) || 'not a Spirit Derby save'), 'bad');
         }
@@ -767,14 +768,19 @@
     if (states.indexOf('error') >= 0) return 'error';
     return 'off';
   }
+  // Retry hint for error / reconnecting states. A retry attempt in flight has no nextRetryAt but
+  // the adapter is still enabled; only a stopped (fatal) adapter is "not retrying".
   function retryText(s) {
-    if (!s || !s.nextRetryAt) return '';
+    if (!s) return '';
+    if (!s.nextRetryAt) return s.enabled ? ' Retrying now…' : ' Not retrying — press CONNECT to try again.';
     const secs = Math.max(0, Math.round((s.nextRetryAt - Date.now()) / 1000));
     return ' Retry #' + (s.attempt || 1) + (secs ? ' in ~' + secs + ' s.' : ' now.');
   }
   function plural(n, w) { n = Number(n) || 0; return fmt.int(n) + ' ' + w + (n === 1 ? '' : 's'); }
 
   Object.assign(admin, {
+    retryText: retryText,           // exposed for tools/integration-test.js
+
     initIntegrations: function () {
       const self = this;
       const r = this.refs;
@@ -871,18 +877,20 @@
         pill.title = s ? plural(s.messages, 'message') + ' received' + (s.dropped ? ', ' + fmt.int(s.dropped) + ' dropped' : '') : '';
 
         let detail;
-        const where = s ? (k === 'tw' ? '#' + s.channel : s.url) : '';
+        // A relay token in the bridge URL (?token=…) is hidden here: the drawer may be on stream.
+        const where = s ? (k === 'tw' ? '#' + s.channel : SD.util.redactSecrets(s.url)) : '';
         if (!mod) detail = 'js/integrations/' + d[1] + '.js is not loaded.';
         else if (state === 'on') {
           detail = where + ' · ' + plural(s.messages, 'message') +
-            (s.dropped ? ' · ' + fmt.int(s.dropped) + ' dropped (flood guard)' : '') +
-            (k === 'br' && s.malformed ? ' · ' + fmt.int(s.malformed) + ' malformed' : '') +
+            (s.dropped ? ' · ' + fmt.int(s.dropped) + ' dropped (flood guard' +
+              (s.droppedCommands ? ', ' + plural(s.droppedCommands, 'command') : '') + ')' : '') +
+            (k === 'br' && s.malformed ? ' · ' + fmt.int(s.malformed) + ' malformed' + (s.lastBad ? ' (last: ' + s.lastBad + ')' : '') : '') +
             (k === 'br' ? ' · ' + plural(s.sent, 'frame') + ' sent' : '') +
             ' · since ' + fmt.hhmm(s.since);
         } else if (state === 'connecting') detail = 'Connecting to ' + where + '…';
         else if (state === 'reconnecting') detail = 'Connection to ' + where + ' lost — reconnecting.' + retryText(s);
         else if (state === 'error') {
-          detail = (s.lastError || 'Connection failed.') + (s.nextRetryAt ? retryText(s) : ' Not retrying — press CONNECT to try again.');
+          detail = (s.lastError || 'Connection failed.') + retryText(s);
         } else {
           detail = k === 'tw' ? 'Off. Reads chat as an anonymous guest; nothing is ever posted to Twitch.'
             : 'Off. Start your local relay (docs/INTEGRATION.md), then CONNECT.';

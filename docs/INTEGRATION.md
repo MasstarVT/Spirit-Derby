@@ -41,7 +41,9 @@ change things are locked while a race runs.
 1. Open `index.html` (double-click it, or use OBS; see section 7).
 2. Press **`** (backtick) or click **⚙** to open **Streamer Controls**, then expand **📡 Twitch & bridge**.
 3. Type your channel name into **Twitch chat**. This is your login name, the part after `twitch.tv/`,
-   not your display name. `#fox`, `@fox` and `https://twitch.tv/fox` all work. Press **CONNECT**.
+   not your display name. `#fox`, `@fox` and `https://twitch.tv/fox` all work, and so do the chat
+   popout / OBS dock URL (`https://www.twitch.tv/popout/fox/chat?popout=`), Mod View
+   (`twitch.tv/moderator/fox`) and embed URLs. Press **CONNECT**.
 4. The pill changes from `CONNECTING…` to `ON · 0` and the dot in the header turns green. The Chat
    tab shows `📡 Connected to Twitch chat #fox (read-only).`, followed by every chat line as it arrives.
 5. Tick **Auto-connect on load** to reconnect automatically each time the page opens.
@@ -56,8 +58,10 @@ What happens under the hood:
   `broadcaster/1` badge. You count as a mod in your own chat.
 - **Player identity** is the viewer's login (lowercase). The feed shows their display name, so a
   viewer with a localized display name still keeps a single profile.
-- **Flood guard:** at most 20 chat lines per second reach the game. During a raid the rest are
-  dropped and counted, and the admin section shows `N dropped (flood guard)`. This keeps the page responsive.
+- **Flood guard:** at most 20 commands per second, and separately at most 20 plain chat lines per
+  second, reach the game. The two budgets are independent, so a busy chat can never crowd out the
+  `!commands`. During a raid the rest are dropped and counted, and the admin section shows
+  `N dropped (flood guard, M commands)`. This keeps the page responsive.
 - **Reconnects:** if the connection drops, the game retries after 1 s, then 2 s, 4 s, and so on,
   up to once a minute. It keeps retrying until you press DISCONNECT. When Twitch sends a
   maintenance `RECONNECT`, the game reconnects immediately. If a suspended or nonexistent channel
@@ -150,7 +154,26 @@ screenshot of the developer tools or any script on the page. The comment block a
 
 The page is a WebSocket **client**. It connects to a relay you run on your own PC, by default
 `ws://localhost:8765`. Your bot talks to the same relay. In the admin section, enter the relay URL
-under **Chat bridge**, press **CONNECT**, and tick **Auto-connect on load** if you want that.
+under **Chat bridge** (with the example relay below that is `ws://localhost:8765/?token=<the relay's
+token>`), press **CONNECT**, and tick **Auto-connect on load** if you want that.
+
+> **⚠ Security: the bridge is trusted completely.** Whatever sends frames to the game decides the
+> viewer's name and whether they are a mod. Two rules keep viewers from abusing that:
+>
+> 1. **Never build a frame by pasting chat text into JSON.** A template such as
+>    `{"username":"$user","text":"$message","isMod":false}` lets a viewer who types a `"` add keys of
+>    their own: they can then start races as a "mod", bet or spend another viewer's Spirit Points,
+>    or steal their runner. **Anyone who can put a `"` into a templated frame is effectively a
+>    mod.** Use the relay's `POST /chat` endpoint, which takes the raw message and builds the JSON
+>    itself, or a real JSON serializer (see the Mix It Up and Streamer.bot recipes below).
+> 2. **Only frames that come from the game may be posted in chat.** The example relay below
+>    enforces this: bot frames go to the game only, and only the game's `reply` / `race` frames reach
+>    your bot's chat action.
+> 3. **Lock the relay with a token.** Any web page open in your browser can try to reach a relay on
+>    `localhost`. The example relay refuses every client that does not present its token.
+>
+> The game also refuses frames that look tampered with (duplicate keys, unknown keys, or
+> disagreeing aliases; see below), but that is a safety net, not a replacement for the rules above.
 
 ### Frames the game accepts (bot → game)
 
@@ -169,13 +192,26 @@ A batch (array) of messages:
 ]
 ```
 
-- `username` and `text` are required. `displayName` and `isMod` are optional. Aliases are accepted:
-  `user` / `userName` for `username`, `message` for `text`, and `isBroadcaster` or `mod` for `isMod`
-  (`true`, `1`, `"1"`, `"true"` and `"yes"` all count).
+- `username` and `text` are required. `displayName` and `isMod` are optional. **Send `isMod: true`
+  for mods and for the broadcaster.** `displayName` is only used when it is the username in other
+  letter case (`FoxFan` for `foxfan`); anything else, including a localized display name, is
+  replaced by the username, so a viewer can never choose the name the game shows for them. `isMod` accepts `true` / `false`, `1` / `0`, `"true"` /
+  `"false"`, `"yes"` / `"no"` and `"on"` / `"off"`; any other value is refused.
+- A chat message may carry **only** these keys (plus `"type": "chat"`). The older aliases still work:
+  `user` / `userName` for `username`, `message` for `text`, `isBroadcaster` / `mod` for `isMod` and
+  `display_name` for `displayName`. If a message carries more than one key for the same field,
+  they must agree (`"isMod": false` with `"isBroadcaster": true` is refused; send one `isMod`).
+- These frames are **refused as malformed**, because they are what a hand-built template produces
+  when a viewer types a `"`: a key that appears twice anywhere in the frame, an unknown key,
+  disagreeing aliases, or an `isMod` that is not a boolean. The admin section then shows
+  `N malformed (last: <reason>)`, and `SD.integrations.bridge.status().lastBad` has the reason.
 - `{ "type": "ping" }` is answered with `{ "type": "pong", "ts": … }`. Frames with any other `type`
   are ignored.
+- Send **text** WebSocket frames. Binary frames are decoded as UTF-8 text; anything else binary is
+  counted as malformed.
 - Malformed JSON and messages without `username` or `text` are counted as malformed and skipped;
-  they never crash the game. The same 20-messages-per-second flood guard applies.
+  they never crash the game. The same flood guard as Twitch applies (20 commands and 20 plain chat
+  lines per second).
 - **The bridge decides who is a mod.** Only point the game at a relay you control.
 
 ### Frames the game sends (game → bot)
@@ -196,7 +232,8 @@ After each command from the bridge **or from read-only Twitch chat**:
 ```
 
 - `chat` is ready to post as-is. Refusals are included with `ok: false` and carry `cooldown: true`
-  (on cooldown) or `locked: true` (a race is running), so your bot can skip them if it likes.
+  (on cooldown, including a runner's 3-minute `!rest` cooldown) or `locked: true` (a race is
+  running, including a mod's `!event <name>` mid-race), so your bot can skip them if it likes.
 - Replies to **unknown** commands (such as `!discord`, meant for another bot) are **not** sent by
   default. For debugging you can enable them from the browser console with
   `SD.integrations.bridge.configure({ replyUnknown: true })`.
@@ -206,8 +243,8 @@ When a race finishes:
 
 ```json
 { "type": "race", "winner": "Velvet Comet",
-  "results": [ { "place": 1, "name": "Velvet Comet", "owner": "FoxFan", "runnerId": "r003", "timeSec": 71.42 },
-               { "place": 2, "name": "Moss Runner", "owner": null, "runnerId": "r001", "timeSec": 71.9 } ],
+  "results": [ { "place": 1, "name": "Velvet Comet", "owner": "FoxFan", "runnerId": "r03", "timeSec": 71.42 },
+               { "place": 2, "name": "Moss Runner", "owner": null, "runnerId": "r01", "timeSec": 71.9 } ],
   "recordId": "…", "track": "Hollow Glade", "distance": 1200, "photoFinish": false, "upset": false,
   "message": "🏆 Velvet Comet wins (Hollow Glade, 1200 m)! 🥇 Velvet Comet (FoxFan) · 🥈 Moss Runner · 🥉 …" }
 ```
@@ -225,26 +262,63 @@ If both inputs carry the same messages, every command runs twice.
 
 ### Mix It Up
 
-Mix It Up (MIU) can run an action whenever a chat message or command arrives. What you need is an
-action that passes `{ "username", "text", "isMod" }` to the relay:
+Mix It Up (MIU) can run an action whenever a chat message or command arrives. **Do not type the
+JSON frame into an MIU action by hand:** MIU's special identifiers are inserted as raw text, so a
+viewer's `"` would break out of the JSON (see the security note at the top of this section).
+Use the example relay's serialising endpoint instead:
 
-- if your MIU version has an action that **sends a WebSocket message**, point it at the relay; or
-- use its **Web Request** action to `POST` the JSON to the relay's HTTP endpoint (the example relay
-  below accepts `POST http://localhost:8765/chat`); or
-- use its **External Program** action to run a small script that does the same.
+- Add a **Web Request** action that sends a `POST` to
+  `http://localhost:8765/chat?user=<the user's login name>&mod=<1 for mods and the broadcaster, else 0>&token=<the relay's token>`
+  with the **chat message as the raw request body** (content type `text/plain`). The relay turns
+  that into `{ "username", "text", "isMod" }` with a real JSON serializer, so nothing a viewer types
+  can change the user or the mod flag. The relay only accepts a login name (letters, digits and `_`)
+  in `user=` and refuses a request that repeats `user=` or `mod=`.
+- If your MIU version cannot send a raw body, do not fall back to a JSON template or to putting the
+  message in the URL. Use Streamer.bot or a small script with a real serializer instead.
+- **Do not use the External Program / Run Program action with the chat message on the command
+  line** (`node send.js "$message"`, a `.bat` / `.cmd` file, `cmd /c …`, `powershell -Command …`).
+  A viewer's `"`, `&`, `|`, `%…%` or `$(…)` could then add arguments or even **run commands on your
+  PC**. If a script is unavoidable, it must read the message from standard input or a file and build
+  the JSON with a serializer (for example `JSON.stringify` in Node).
 
-Map MIU's user name, message text and mod/role special identifiers into the JSON fields. **Check the
-Mix It Up documentation for the exact action names and special identifiers in your version.**
-These change between releases, and this guide does not assume them. To post the game's replies,
-have the relay forward the `chat` field of `reply`/`race` frames to something that can speak in
-chat, for example MIU's local developer API if you have it enabled (see the MIU docs for its chat
-endpoint).
+**Check the Mix It Up documentation for the exact action names and special identifiers in your
+version.** These change between releases, and this guide does not assume them. To post the game's
+replies, have the relay forward the `chat` field of the **game's** `reply`/`race` frames to something
+that can speak in chat, for example MIU's local developer API if you have it enabled (see the MIU
+docs for its chat endpoint). The example relay marks the spot with `[for chat]`.
 
 ### Streamer.bot
 
-Streamer.bot can act as a WebSocket client or run C# actions. Connect it to the relay, send the
-JSON above on chat messages, and post `chat` from incoming `reply` frames. Check the Streamer.bot
-docs for the exact triggers and sub-actions.
+Streamer.bot can act as a WebSocket client and run C# actions. Connect a **WebSocket client** to
+the relay (`ws://localhost:8765/?token=<the relay's token>`), and on chat messages run a C# action that builds the frame with a JSON serializer, never
+with a text template:
+
+```csharp
+using System;
+using Newtonsoft.Json;
+
+public class CPHInline
+{
+    public bool Execute()
+    {
+        // Argument names differ between Streamer.bot versions and triggers: check its docs.
+        CPH.TryGetArg("userName", out string login);        // the login name (player key)
+        CPH.TryGetArg("user", out string display);          // the display name
+        CPH.TryGetArg("message", out string text);
+        CPH.TryGetArg("isModerator", out bool isModerator);
+        CPH.TryGetArg("isBroadcaster", out bool isBroadcaster);
+        string frame = JsonConvert.SerializeObject(new {
+            username = login, displayName = display, text = text, isMod = isModerator || isBroadcaster
+        });
+        CPH.WebsocketSend(frame, 0);                        // 0 = the index of the relay connection
+        return true;
+    }
+}
+```
+
+Post `chat` from incoming `reply` / `race` frames. With the example relay, only the game's frames
+ever reach the bot. Check the Streamer.bot docs for the exact triggers, argument names and
+sub-actions.
 
 ### Optional: a minimal relay using the `ws` package
 
@@ -252,52 +326,171 @@ docs for the exact triggers and sub-actions.
 > want a relay and do not have one. It needs [Node.js](https://nodejs.org) and the `ws` package,
 > which you install yourself in a separate folder: `npm install ws`.
 
+What it does to keep chat viewers and other web pages out:
+
+- It listens on `127.0.0.1` only, so other machines cannot reach it.
+- **Every client must present the relay's token.** On its first start the relay makes a random
+  token, saves it in `relay-token.txt` next to `relay.js` and prints the URLs to use. (To pick your
+  own, `set RELAY_TOKEN=a-long-random-word`, or in PowerShell `$env:RELAY_TOKEN='…'`, before
+  `node relay.js`.) Put it in the game's bridge URL (`ws://localhost:8765/?token=…`) and in your
+  bot's URLs, or have the bot send it as an `X-Relay-Token` header. The token is what keeps other
+  web pages out: a page in a sandboxed frame has the Origin `null`, exactly like the game opened from
+  disk, so without a token any page open in your browser could connect, send commands as a "mod", or
+  pretend to be the game and make your bot post its text in chat.
+- It refuses WebSocket connections and `POST`s from web pages on other sites (Origin check). Bots
+  and scripts send no `Origin` header; the game sends `null` (from `file://`) or `http://localhost…`.
+- `POST /chat?user=<login>&mod=0|1&token=…` takes the **raw** chat message as a `text/plain` body
+  and builds the JSON with `JSON.stringify`, so no chat text is ever inside a JSON template.
+- It remembers which socket is the game: a **browser** connection (bots send no `Origin`, so a bot,
+  or a viewer's text inside a bot's frame, can never become the game) whose first frame is
+  `{ "type": "hello", "app": "spirit-derby" }`, and only while no other game is connected. A second
+  game is refused (close code 1008) until the first one disconnects. Bot frames go **only to the
+  game**, never to other bots, and only the game's `reply` / `race` frames are passed to bots and
+  printed for chat.
+- The token is a password for your relay: keep it off stream. The game hides it (`?token=…`) in the
+  chat feed, toasts, the admin status line and EXPORT JSON, but the **bridge URL box** in Streamer
+  Controls shows it as typed, and the relay window prints it at start-up.
+
 ```js
 // relay.js: a Spirit Derby chat relay (optional helper).  Run: node relay.js
-// The game connects to ws://localhost:8765. Bots connect to the same URL, or POST JSON to
-// http://localhost:8765/chat. Every frame is passed on to every other connected client.
+//
+//   Token: every client must present the relay's token (?token=… or an X-Relay-Token header). The
+//         relay makes one on first start and keeps it in relay-token.txt (or set RELAY_TOKEN).
+//   Game: connects to ws://localhost:8765/?token=<token> and says {"type":"hello","app":"spirit-derby"}
+//         first. Only THAT socket's frames go to the bots and only its reply/race frames are printed
+//         under [for chat]. Only a browser can be the game, and only one game at a time.
+//   Bots: EITHER post the RAW chat message (text/plain, no JSON) to
+//           http://localhost:8765/chat?user=<login>&mod=0|1&token=<token>   (the relay builds the JSON)
+//         OR connect to ws://localhost:8765/?token=<token> and send frames built with a JSON serializer.
+//         Bot frames go to the game only: never to other bots, never to chat.
+//   Safety: listens on 127.0.0.1 only; refuses web pages from other sites (Origin check).
+const fs = require('fs');
+const path = require('path');
+const crypto = require('crypto');
 const http = require('http');
 const { WebSocketServer } = require('ws');
 
 const PORT = 8765;
-const server = http.createServer((req, res) => {
-  if (req.method === 'POST' && req.url === '/chat') {
-    let body = '';
-    req.on('data', (chunk) => { body += chunk; if (body.length > 65536) req.destroy(); });
-    req.on('end', () => { broadcast(body, null); res.writeHead(204); res.end(); });
-    return;
-  }
-  res.writeHead(404);
-  res.end();
-});
-const wss = new WebSocketServer({ server });
+const MAX_BODY = 2000;
+const TOKEN = process.env.RELAY_TOKEN || loadOrMakeToken();
 
-function broadcast(text, from) {
-  for (const client of wss.clients) if (client !== from && client.readyState === 1) client.send(text);
+// The token is what keeps other web pages out: a page in a sandboxed frame has the Origin "null",
+// exactly like the game opened from disk, so the Origin check alone cannot tell them apart.
+function loadOrMakeToken() {
+  const file = path.join(__dirname, 'relay-token.txt');
+  try {
+    const saved = fs.readFileSync(file, 'utf8').trim();
+    if (saved) return saved;
+  } catch (e) { /* first start */ }
+  const fresh = crypto.randomBytes(16).toString('hex');
+  fs.writeFileSync(file, fresh + '\n');
+  return fresh;
 }
 
-wss.on('connection', (socket) => {
-  socket.on('message', (data) => {
-    const text = data.toString();
-    broadcast(text, socket);                    // game <-> bots
-    try {
-      const f = JSON.parse(text);
-      if (f.type === 'reply' || f.type === 'race') console.log('[for chat]', f.chat || f.message);
-    } catch (e) { /* not JSON: ignore */ }
+// Browsers always send Origin; bots and scripts send none. Allow only the game's own origins:
+// file:// pages ("null") and http://localhost / 127.0.0.1 (tools/serve.js).
+function originOk(origin) {
+  if (origin === undefined) return true;
+  return origin === 'null' || origin === 'file://' ||
+    /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i.test(origin);
+}
+function requestUrl(req) {
+  try { return new URL(req.url, 'http://localhost'); } catch (e) { return null; }   // a garbled request
+}
+function tokenOk(req, url) {
+  return (url.searchParams.get('token') || req.headers['x-relay-token']) === TOKEN;
+}
+
+let game = null;                               // the browser socket that said hello as spirit-derby
+function gameLive() { return !!game && game.readyState === 1; }
+function toGame(text) {
+  if (!gameLive()) return false;
+  game.send(text);                             // a string, so always a TEXT frame
+  return true;
+}
+
+const server = http.createServer((req, res) => {
+  const url = requestUrl(req);
+  if (!url) { res.writeHead(400); res.end(); return; }
+  if (req.method !== 'POST' || url.pathname !== '/chat') { res.writeHead(404); res.end(); return; }
+  // A POST from a web page always carries an Origin header (even "null"); bots send none.
+  if (req.headers.origin !== undefined || !tokenOk(req, url)) { res.writeHead(403); res.end(); return; }
+  const users = url.searchParams.getAll('user');
+  const mods = url.searchParams.getAll('mod');
+  if (users.length !== 1 || mods.length > 1 || !/^[A-Za-z0-9_]{1,25}$/.test(users[0])) {
+    res.writeHead(400); res.end('Use exactly one ?user=<login> and at most one &mod=0|1.'); return;
+  }
+  let body = '';
+  req.setEncoding('utf8');
+  req.on('data', (chunk) => {
+    body += chunk;
+    if (body.length > MAX_BODY) { res.writeHead(413); res.end(); req.destroy(); }
+  });
+  req.on('end', () => {
+    if (res.writableEnded) return;
+    // JSON.stringify escapes the message, so whatever the viewer typed stays inside "text".
+    const frame = JSON.stringify({ username: users[0], text: body, isMod: /^(1|true|yes)$/i.test(mods[0] || '') });
+    res.writeHead(toGame(frame) ? 204 : 503);
+    res.end();
   });
 });
 
-server.listen(PORT, '127.0.0.1', () => console.log('Spirit Derby relay on ws://localhost:' + PORT));
+const wss = new WebSocketServer({
+  server,
+  maxPayload: 65536,
+  verifyClient: (info) => {
+    const url = requestUrl(info.req);
+    const why = !url ? 'garbled request' : !originOk(info.origin) ? 'web page from another site'
+      : !tokenOk(info.req, url) ? 'missing or wrong token' : '';
+    if (why) console.log('Refused a connection (' + why + ').');
+    return !why;
+  }
+});
+
+wss.on('connection', (socket, req) => {
+  const browser = req.headers.origin !== undefined;   // the game is a web page; bots send no Origin
+  let first = true;
+  socket.on('message', (data) => {
+    const text = data.toString();
+    let f = null;
+    try { f = JSON.parse(text); } catch (e) { /* not JSON */ }
+    if (first && browser && f && f.type === 'hello' && f.app === 'spirit-derby') {
+      if (gameLive()) {                              // never let a second "game" take over
+        console.log('Refused a second game connection (one game at a time).');
+        socket.close(1008, 'Another game is already connected');
+        return;
+      }
+      game = socket;
+    }
+    first = false;
+    if (socket === game) {
+      for (const c of wss.clients) if (c !== game && c.readyState === 1) c.send(text);   // game -> bots
+      // Only frames from the game may be posted in chat. Replace this line with your bot's chat call.
+      if (f && (f.type === 'reply' || f.type === 'race')) console.log('[for chat]', f.chat || f.message);
+    } else {
+      toGame(text);                              // bot -> game only
+    }
+  });
+  socket.on('close', () => { if (socket === game) game = null; });
+});
+
+server.listen(PORT, '127.0.0.1', () => {
+  console.log('Spirit Derby relay is running. Keep the token private (it is in relay-token.txt).');
+  console.log('  Game bridge URL: ws://localhost:' + PORT + '/?token=' + encodeURIComponent(TOKEN));
+  console.log('  Bot POST URL:    http://localhost:' + PORT + '/chat?user=<login>&mod=0|1&token=' + encodeURIComponent(TOKEN));
+});
 ```
 
-Test it without a bot. With the relay running and the game's bridge showing **ON**, run:
+Test it without a bot. With the relay running and the game's bridge showing **ON**, run (replace
+`YOUR-TOKEN` with the relay's token):
 
 ```powershell
-Invoke-RestMethod -Method Post -Uri http://localhost:8765/chat -ContentType 'application/json' -Body '{"username":"FoxFan","text":"!join"}'
+Invoke-RestMethod -Method Post -Uri 'http://localhost:8765/chat?user=foxfan&mod=0&token=YOUR-TOKEN' -ContentType 'text/plain; charset=utf-8' -Body '!join'
 ```
 
-FoxFan joins in the game's chat feed, and the relay prints the reply under `[for chat]`.
-You can also test with no relay at all from the browser console:
+`foxfan` joins in the game's chat feed, and the relay prints the reply under `[for chat]`. A `503`
+answer means the game is not connected to the relay; `403` means the token is missing or wrong. You
+can also test with no relay at all from the browser console:
 `SD.integrations.bridge.receive('{"username":"FoxFan","text":"!join"}')`.
 
 ---
@@ -327,7 +520,8 @@ do **not** share a live game:
   command runs twice.
 - **OBS and your normal browser** have separate storage. OBS's built-in browser has its own
   profile, so they do not even see each other's saves. To move a game between them, use
-  **Streamer Controls → Save → EXPORT JSON / IMPORT JSON**.
+  **Streamer Controls → Save → EXPORT JSON / IMPORT JSON**. The import keeps the receiving
+  side's own Twitch and bridge settings, so set up the connection once in each place.
 
 Recommended setups:
 
@@ -356,7 +550,7 @@ open training off. Mod status comes from Twitch badges and tags, or from the bri
 | `!status` | `!stats` | `!join` | no | none | Your SP, rank and runner at a glance |
 | `!inspect <runner>` | `!i` | — | no | none | Full runner card: style, ability, owner, stats, condition, mood, record, odds |
 | `!race` | — | — | no | none | Viewers: what is happening on the track, the next field, favourite and open bets. **Mods / streamer:** starts the race (`!race 2000` picks the distance, `!race status` only looks) |
-| `!event` | — | — | no | none | Viewers: today's day event. **Mods / streamer:** `!event` rolls a new random day event, `!event <name>` sets one (`!event harvest`), `!event today` only looks |
+| `!event` | — | — | mods: yes (looking with `!event today` still works) | none | Viewers: today's day event. **Mods / streamer:** `!event` rolls a new random day event, `!event <name>` sets one (`!event harvest`), `!event today` only looks |
 | `!leaderboard [board] [all]` | `!lb`, `!top` | — | no | none | Top 3 on a board: `wins`, `xp`, `sp`, `part`, `victories`, `hype`; add `all` for all-time |
 | `!rank [viewer]` | — | `!join` (for yourself) | no | none | Your rank on the SP, victories and hype boards |
 | `!help [command]` | `!h`, `!commands` | — | no | none | Command list, or help for one command |
@@ -387,20 +581,22 @@ open training off. Mod status comes from Twitch badges and tags, or from the bri
 | Twitch pill stuck on `CONNECTING…` or `ERROR` | Check the channel is the **login name** (the part after `twitch.tv/`). Check that your internet, firewall or antivirus allows `wss://irc-ws.chat.twitch.tv` on port 443. Hover the header dot for the reason. |
 | `Twitch chat stopped: This channel does not exist or has been suspended.` | Wrong channel name. Fix it and press CONNECT; this error does not retry by itself. |
 | Connects, then drops again after reloading many times | Twitch limits how often one IP can log in and join channels, including anonymous `justinfan` guests. Stop reloading; the adapter backs off (up to once a minute) and gets back in. Keep one connected instance per PC. |
-| Lines arrive, but some raid messages are missing | That is the flood guard (20 lines per second). The admin section shows the dropped count. |
+| Lines arrive, but some raid messages are missing | That is the flood guard (20 commands and 20 plain chat lines per second, counted separately). The admin section shows the dropped count and how many of them were commands. |
+| Bridge shows `N malformed (last: …)` and commands from the bot do nothing | The bot's frames are refused; the reason is after `last:`. `duplicate key`, `unknown key` or `conflicting …` means the bot builds its JSON from a text template, which is unsafe (section 6): switch to the relay's `POST /chat` endpoint or a JSON serializer. `invalid "isMod" value` means `isMod` is not `true` / `false`. `not valid JSON` often means a viewer typed a `"` or `\` into a templated frame. |
 | Viewers say the game ignores them | Are they typing in **your** channel? Are they on cooldown? Is a race running (training is locked until the results)? The Chat tab shows every reply. |
 | Nobody sees the replies on stream | Replies are toasts, and they only show in **overlay mode** (`?overlay=1` or **O**). To reply in Twitch chat, use the bridge (sections 5 and 6). |
-| Bridge pill shows `ERROR · No bridge is answering at ws://localhost:8765` | The relay isn't running, or it uses another port. Start it; the game retries by itself. The browser console prints one `WebSocket connection … failed` line per attempt; that is the browser, not the game, and the backoff limits it to about once a minute. If `localhost` fails, try `ws://127.0.0.1:8765`. |
+| Bridge pill shows `ERROR · No bridge is answering at ws://localhost:8765` | The relay isn't running, or it uses another port. Start it; the game retries by itself. If the relay **is** running, look at its window: `Refused a connection (missing or wrong token)` means the bridge URL needs `?token=<the relay's token>` (the game shows it as `?token=…`); `(web page from another site)` means the game is not opened from disk or `localhost` (see the hosting row below). The browser console prints one `WebSocket connection … failed` line per attempt; that is the browser, not the game, and the backoff limits it to about once a minute. If `localhost` fails, try `ws://127.0.0.1:8765`. |
 | Every command happens twice | Two instances are connected, or chat arrives through both Twitch and the bridge. See sections 6 and 8. |
-| Bridge refuses to connect when the game is hosted on a website | Mixed content. Opening `index.html` from disk (`file://`) can open both `wss://` (Twitch) and `ws://localhost` (the bridge), and so can a page on `http://localhost` (`node tools/serve.js`). A page on `https://` must use `wss://` for any other host. Browsers usually still allow `ws://localhost` / `ws://127.0.0.1`, but not all do, so run the game from disk or localhost, or give the relay TLS. |
-| Auto-connect stopped working | **RESET ALL** and **IMPORT JSON** replace the settings, including the auto-connect boxes. Tick them again. |
+| Bridge refuses to connect when the game is hosted on a website, or opened through a LAN address | The example relay only accepts the game from disk (`file://`) or from `http://localhost` / `127.0.0.1` (`node tools/serve.js`); any other page is refused with `403` / `Refused a connection (web page from another site)`, TLS or not. Run the game from disk or localhost. If you really host it elsewhere, add that exact origin (for example `https://derby.example.com`) to `originOk` in `relay.js` and keep the token. A page on `https://` must also use `wss://` for any host other than `localhost` (mixed content), so the relay then needs TLS as well. |
+| Bridge keeps flipping between ON and `RECONNECTING…` (header tooltip: `The bridge connection closed (code 1008).`) | The example relay already has a game connected (another tab, window or OBS source) and allows one game at a time. Close the other copy's bridge (or use `?connect=0` there, section 8). |
+| Auto-connect stopped working | **RESET ALL** replaces the settings, including the auto-connect boxes. Tick them again. (**IMPORT JSON** keeps this PC's Twitch channel, bridge URL and auto-connect boxes.) |
 
 Browser console helpers:
 
 ```js
 SD.integrations.twitch.status()        // { state, channel, messages, dropped, lastError, nextRetryAt, … }
 SD.integrations.twitch.recentLines()   // last 30 status lines from Twitch (NOTICE, ROOMSTATE, CAP, …)
-SD.integrations.bridge.status()        // { state, url, messages, malformed, sent, lastError, … }
+SD.integrations.bridge.status()        // { state, url, messages, malformed, lastBad, sent, lastError, … }
 SD.integrations.bridge.receive('{"username":"FoxFan","text":"!join"}')
 ```
 
@@ -412,5 +608,12 @@ SD.integrations.bridge.receive('{"username":"FoxFan","text":"!join"}')
 | `settings.bridge = { url, enabled }` | the relay URL and **Auto-connect on load** |
 | `SD.state.runtime.connected = { twitch, bridge }` | live connection state (not saved) |
 
-The settings are saved with the game (`spiritderby.save`) and included in EXPORT JSON. The game
-**never stores or asks for a token or password**.
+The settings are saved with the game (`spiritderby.save`) and included in EXPORT JSON, but **IMPORT
+JSON never applies them**: an imported save keeps this PC's Twitch channel, bridge URL and
+auto-connect boxes (a shared save could otherwise make your game connect to someone else's relay),
+and the import message says so when the file's values differed. The game **never stores or asks
+for a Twitch token or password**; the only secret it may hold is a relay token you put in the bridge
+URL yourself. That token is saved with the game on this PC, but it is shown as `?token=…` in the chat
+feed, toasts, the admin status line and the header tooltip, and EXPORT JSON writes it as
+`?token=…` too. The **bridge URL box** in Streamer Controls shows it as typed, so close the controls
+(or keep that window off stream) while you are live.

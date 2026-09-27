@@ -62,6 +62,14 @@
     return m > 0 ? m + 'm ' + (s < 10 ? '0' : '') + s + 's' : s + 's';
   }
   function capitalize(s) { s = String(s || ''); return s.charAt(0).toUpperCase() + s.slice(1); }
+  // Hides secrets in a URL (or in any text that contains one) before it is shown or exported: the
+  // value of a token / key / secret / password / auth query parameter and a URL's user:password@
+  // part become "…".  "ws://localhost:8765/?token=abc" -> "ws://localhost:8765/?token=…"
+  const SECRET_PARAM_RE = /([?&;](?:token|access_token|auth|key|secret|pass|password)=)[^&#\s'"<>]+/gi;
+  const URL_USERINFO_RE = /(\b[a-z][a-z0-9+.-]*:\/\/[^\s\/?#@:]*:)[^\s\/?#@]+@/gi;
+  function redactSecrets(text) {
+    return String(text == null ? '' : text).replace(SECRET_PARAM_RE, '$1…').replace(URL_USERINFO_RE, '$1…@');
+  }
 
   SD.util = {
     clamp: clamp,
@@ -73,6 +81,7 @@
     signed: signed,
     ordinal: ordinal,
     fmtDuration: fmtDuration,
-    capitalize: capitalize
+    capitalize: capitalize,
+    redactSecrets: redactSecrets
   };
 })(globalThis.SD = globalThis.SD || {});

@@ -11,7 +11,9 @@
  *
  * Handlers use check-then-commit: validate everything first and `throw new CommandError(msg)`
  * BEFORE any write to reject without mutating. A handler returns a string (ok reply) or
- * { ok?, message, severity?, effects? }.
+ * { ok?, message, severity?, effects?, cooldown?, locked? }. A refusal that is really a cooldown
+ * or a race lock sets `cooldown: true` / `locked: true` (in the result or the CommandError extra)
+ * so the reply line, the result and the bridge's reply frame carry the same flag as the gates'.
  *
  * Commands never touch state.currentRace: mutating commands are refused while a race is
  * locked (countdown / running / paused), and SD.game.startRace refuses a second race.
@@ -427,7 +429,7 @@
     } catch (e) {
       if (e instanceof CommandError) {
         const x = e.extra || {};
-        out = { ok: false, message: e.message, severity: x.severity || 'bad', cooldownMs: x.cooldownMs || 0 };
+        out = { ok: false, message: e.message, severity: x.severity || 'bad', cooldownMs: x.cooldownMs || 0, cooldown: !!x.cooldown, locked: !!x.locked };
       } else {
         if (typeof console !== 'undefined') console.error('[SD.commands] !' + def.name + ' failed:', e);
         try { SD.state.log('error', '!' + def.name + ' from ' + displayName + ' failed: ' + ((e && e.message) || e), 'warn'); } catch (x) { /* ignore */ }
@@ -456,6 +458,10 @@
     return finish(out.ok, out.message, {
       severity: out.severity || (out.ok ? 'good' : 'bad'),
       cooldownMs: out.ok ? cdLen : (out.cooldownMs || 0),
+      // A handler's own refusal can be a cooldown (!rest's per-runner rest) or a race lock (a mod's
+      // !event mid-race): CommandError extras / handler results carry the same flags as the gates.
+      cooldown: !out.ok && !!out.cooldown,
+      locked: !out.ok && !!out.locked,
       announce: out.announce || null
     });
   }
@@ -661,9 +667,11 @@
       const runner = args.length ? resolveRunnerArg(S, args.join(' ')) : myRunnerOrThrow(ctx, 'name one: !rest <runner>');
       assertMayHandle(ctx, runner, 'rest');
       const left = SD.training.restCooldownLeft(runner, ctx.now);
-      if (left > 0) throw new CommandError(runner.name + ' is still resting — try again in ' + U.fmtDuration(left) + '.', { cooldownMs: left, severity: 'info' });
+      if (left > 0) throw new CommandError(runner.name + ' is still resting — try again in ' + U.fmtDuration(left) + '.', { cooldownMs: left, cooldown: true, severity: 'info' });
       const res = SD.game.restRunner(runner.id, ctx.username);
-      if (!res || !res.ok) return { ok: false, message: (res && res.message) || 'Resting did not happen.', cooldownMs: res && res.cooldownMs };
+      if (!res || !res.ok) {
+        return { ok: false, message: (res && res.message) || 'Resting did not happen.', cooldownMs: res && res.cooldownMs, cooldown: !!(res && res.cooldownMs > 0) };
+      }
       P().recordAction(S, ctx.username, runner.id, 'rest');
       ctx.effects.push({ type: 'rest', runnerId: runner.id, energyGain: res.energyGain }, { type: 'hype', delta: res.hype || 0 });
       return String(res.message).split('\n').join(DOT);
@@ -891,7 +899,7 @@
       if (ctx.isMod && !look) {
         // M6: a mod's day-event change waits for the results, like every other mutating command.
         if (SD.state.isRaceLocked(S)) {
-          throw new CommandError('Hold on — a race is running! Change the day event after the results (!event today just looks).', { severity: 'info' });
+          throw new CommandError('Hold on — a race is running! Change the day event after the results (!event today just looks).', { locked: true, severity: 'info' });
         }
         let ev = null;
         if (args.length) {

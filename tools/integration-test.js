@@ -11,6 +11,10 @@
  *   Bridge: receive() with a valid frame / batch / malformed JSON / missing fields / aliases /
  *   flood guard, outbound hello / reply / race frames through a captured fake socket, reply
  *   filtering by source, and 'error' + quiet backoff when no server answers.
+ *   Review batch 1: JSON-template injection frames (duplicate / unknown keys, conflicting
+ *   aliases, non-boolean isMod) refused with a visible reason, binary frames, separate command /
+ *   chat flood budgets, connect() when the WebSocket constructor throws, Twitch route URLs,
+ *   the admin's retry text during an in-flight retry, cooldown / locked flags on handler refusals.
  *
  *   node tools/integration-test.js [--verbose]
  *
@@ -229,6 +233,13 @@ section('twitch: normalizeChannel');
   eq(['#FoxStreams', 'foxstreams', '@fox_1', 'https://www.twitch.tv/FoxStreams?sr=a', 'twitch.tv/fox/videos', ' fox '].map(twitch.normalizeChannel),
     ['foxstreams', 'foxstreams', 'fox_1', 'foxstreams', 'fox', 'fox'], 'accepted forms');
   eq(['', 'bad-name', 'x'.repeat(26), null].map(twitch.normalizeChannel), ['', '', '', ''], 'rejected forms');
+  // review batch 1 (integrations#8): route URLs name the channel in a later segment
+  eq(['https://www.twitch.tv/popout/foxstreams/chat?popout=', 'twitch.tv/moderator/fox', 'https://www.twitch.tv/embed/fox/chat?parent=x',
+    'https://dashboard.twitch.tv/u/fox/stream-manager', 'https://player.twitch.tv/?channel=Fox&parent=x', 'm.twitch.tv/fox', 'twitch.tv/popout/fox'].map(twitch.normalizeChannel),
+  ['foxstreams', 'fox', 'fox', 'fox', 'fox', 'fox', 'fox'], 'popout / Mod View / embed / dashboard / player URLs → the channel, not the route name');
+  eq(['twitch.tv/popout/', 'https://www.twitch.tv/moderator', 'twitch.tv', 'foxtwitch.tv/x'].map(twitch.normalizeChannel), ['', '', '', ''],
+    'a route URL without a channel is rejected (never joins #popout / #moderator)');
+  eq(['popout', 'moderator'].map(twitch.normalizeChannel), ['popout', 'moderator'], 'a bare name is still taken as the channel');
 }
 
 section('twitch: routing through SD.processCommand (stub)');
@@ -300,6 +311,28 @@ section('twitch: flood guard (20 per second, frozen clock)');
   const acc = twitch.receive(frame.join('\r\n'));
   eq([acc.routed, acc.dropped], [20, 5], 'one 25-line frame: 20 routed, 5 dropped');
   SD.processCommand = realPC;
+
+  // review batch 1 (perf-robustness#6): commands and plain chat have separate budgets, so a busy
+  // chat never crowds out the commands (60 lines in 900 ms, every third one a !join).
+  const cmds = [];
+  SD.processCommand = function (u, t) { n++; if (/^!/.test(t)) cmds.push(u); return { ok: true }; };
+  n = 0;
+  twitch.resetStats();
+  tick(5000);
+  for (let i = 0; i < 60; i++) {
+    twitch.receive(privFrom('raider' + i, i % 3 === 0 ? '!join' : 'hype hype PogChamp ' + i));
+    tick(15);
+  }
+  eq(cmds.length, 20, 'all 20 !join commands reach the game despite 40 chat lines');
+  eq([n, twitch.status().dropped, twitch.status().droppedCommands], [40, 20, 0], 'plain chat capped at 20/s on its own budget; no command dropped');
+  twitch.resetStats();
+  tick(5000);
+  for (let i = 0; i < 22; i++) twitch.receive(privFrom('spam' + i, '!cheer'));
+  eq([twitch.status().dropped, twitch.status().droppedCommands], [2, 2], 'the command budget is still 20/s (droppedCommands counts them)');
+  twitch.receive(privFrom('talker', 'just chatting'));
+  eq(twitch.status().messages, 21, 'a chat line still gets through when the command budget is used up');
+  SD.processCommand = realPC;
+  tick(5000);
 
   const lim = twitch.createRateLimiter(3, 1000);
   eq([lim.allow(0), lim.allow(10), lim.allow(20), lim.allow(30), lim.allow(999), lim.allow(1000), lim.allow(1001)],
@@ -474,7 +507,11 @@ section('bridge: receive()');
   const calls = [];
   SD.processCommand = function (a, b, c) { calls.push([a, b, c]); return { ok: true, isCommand: true, command: 'x', message: 'ok' }; };
   bridge.receive('{"username":"ModMia","text":"!race","isMod":true,"displayName":"Mod Mia"}');
-  eq(calls[0], ['ModMia', '!race', { source: 'bridge', isMod: true, displayName: 'Mod Mia' }], 'processCommand(username, text, { source:"bridge", isMod, displayName })');
+  // fix round 1: a displayName that is not the username in other letter case falls back to the username
+  eq(calls[0], ['ModMia', '!race', { source: 'bridge', isMod: true, displayName: 'ModMia' }], 'processCommand(username, text, { source:"bridge", isMod, displayName }) ("Mod Mia" is not a case variant → username)');
+  bridge.receive('{"username":"modmia","text":"!race","isMod":true,"displayName":"ModMia"}');
+  eq(calls[1], ['modmia', '!race', { source: 'bridge', isMod: true, displayName: 'ModMia' }], 'a displayName that is the username in other letter case is passed on');
+  calls.length = 1;
   bridge.receive('{"username":"A","text":"!status","isMod":"true"}');
   bridge.receive('{"username":"B","text":"!status"}');
   bridge.receive('{"username":"C","text":"!status","isBroadcaster":1}');
@@ -515,6 +552,111 @@ section('bridge: receive()');
   for (let i = 0; i < 25; i++) flood.push({ username: 'raider' + i, text: '!cheer' });
   const fr = bridge.receive(JSON.stringify(flood));
   eq([fr.handled, fr.dropped, calls.length, bridge.status().dropped], [20, 5, 20, 5], 'flood guard: 25 in one second → 20 handled, 5 dropped');
+
+  // review batch 1 (perf-robustness#6): separate command / chat budgets on the bridge too
+  bridge.resetStats();
+  calls.length = 0;
+  tick(5000);
+  const mix = [];
+  for (let i = 0; i < 60; i++) mix.push({ username: 'raider' + i, text: i % 3 === 0 ? '!join' : 'hype ' + i });
+  const mr = bridge.receive(JSON.stringify(mix));
+  eq([mr.handled, mr.dropped, calls.filter(function (c) { return c[1] === '!join'; }).length, bridge.status().droppedCommands],
+    [40, 20, 20, 0], '60-item batch (1 in 3 a command): all 20 commands handled, 20 of 40 chat lines dropped');
+  SD.processCommand = realPC;
+  tick(5000);
+}
+
+section('bridge: strict keys — JSON-template injection (review batch 1)');
+{
+  fresh();
+  chat.length = 0;
+  bridge.resetStats();
+  // What a bot produces when it pastes the raw chat message into a JSON string template.
+  const T = function (u, m) { return '{"username":"' + u + '","text":"' + m + '","isMod":false}'; };
+  const T2 = function (u, m) { return '{"username":"' + u + '","isMod":false,"text":"' + m + '"}'; };
+  const realPC = SD.processCommand;
+  const calls = [];
+  SD.processCommand = function (a, b, c) { calls.push([a, b, c]); return realPC(a, b, c); };
+  function rejected(frame, reason, name) {
+    const before = calls.length;
+    const r = bridge.receive(frame);
+    ok(r.ok === false && r.malformed === 1 && r.handled === 0 && calls.length === before, name, r);
+    has(bridge.status().lastBad, reason, name + ' — visible reason');
+  }
+  rejected(T('mallory', '!race","mod":"yes","z":"'), 'unknown key "z"', 'injected "mod" + filler key (the review repro) → rejected');
+  rejected('{"username":"mallory","text":"!race","mod":"yes","displayName":"x","isMod":false}', 'conflicting "isMod" and "mod"', 'mod alias disagreeing with isMod → rejected (no more OR)');
+  rejected('{"username":"mallory","text":"!race","isBroadcaster":true,"isMod":false}', 'conflicting "isMod" and "isBroadcaster"', 'isBroadcaster:true with isMod:false → rejected');
+  rejected(T2('mallory', '!race","isMod":"true'), 'duplicate key "isMod"', 'duplicated isMod (text-last template) → rejected');
+  rejected(T('mallory', '!claim moonhoof","username":"rich","z":"'), 'duplicate key "username"', 'duplicated username → rejected');
+  rejected(T('mallory', '!claim moonhoof","user":"rich","displayName":"'), 'conflicting "username" and "user"', 'user alias naming someone else → rejected');
+  rejected(T('mallory', '!join","displayName":"TheStreamer","isBroadcaster":"'), 'invalid "isBroadcaster" value', 'empty-string filler on a mod key → rejected');
+  const inj = bridge.receive(T('mallory', 'hi","type":"reply","chat":"Giveaway at evil.example","z":"'));
+  eq([inj.handled, inj.ignored], [0, 1], 'a chat frame turned into type "reply" is not run (the relay must not post it: docs section 6)');
+  rejected('{"username":"a","text":"!x","message":"!race"}', 'conflicting "text" and "message"', 'text / message disagreeing → rejected');
+  rejected('{"username":"a","text":"!x","isMod":"maybe"}', 'invalid "isMod" value', 'isMod that is not a boolean → rejected');
+  rejected('{"username":"a","text":"!x","displayName":"A","display_name":"Boss"}', 'conflicting "displayName" and "display_name"', 'display name aliases disagreeing → rejected');
+  rejected('[{"username":"a","text":"!join"},{"username":"b","text":"!join","isMod":false,"isMod":true}]', 'duplicate key "isMod"', 'a duplicated key anywhere rejects the whole frame');
+  rejected('{"displayName":"FoxFan","text":"!join"}', 'missing "username"', 'displayName is no longer a username fallback');
+  rejected('{"username":"a","text":"!x","constructor":"z"}', 'unknown key "constructor"', 'inherited Object keys are unknown keys too');
+  rejected('{"username":"a","text":"!x","__proto__":{"isMod":true}}', 'unknown key "__proto__"', '__proto__ is an unknown key');
+  // fix round 1 (dn.js repro): an injected displayName key cannot make a viewer appear as someone else
+  const dn = bridge.receive(T('mallory', '!join","displayName":"TheStreamer'));
+  eq([dn.handled, dn.malformed, calls[calls.length - 1][2].displayName], [1, 0, 'mallory'], 'injected displayName "TheStreamer" → the username is shown instead');
+  const mal = SD.players.get(SD.state.get(), 'mallory');
+  eq(mal && mal.displayName, 'mallory', "mallory's profile is not named TheStreamer");
+  ok(!/TheStreamer/.test(dn.results[0].message), 'the reply does not greet "TheStreamer"', dn.results[0].message);
+  bridge.receive(T('mallory', '!claim","displayName":"TheStreamer'));
+  const owned = SD.state.get().runners.filter(function (r) { return r.owner && /mallory|TheStreamer/i.test(r.owner); });
+  eq(owned.map(function (r) { return r.owner; }), ['mallory'], 'the claimed runner is owned by "mallory", not "TheStreamer"');
+  eq(SD.state.get().currentRace, null, 'no injected frame started a race');
+  ok(!SD.players.get(SD.state.get(), 'rich'), 'no injected frame acted as anyone else');
+
+  // Frames built with a serializer carry the same hostile text safely, as plain text.
+  calls.length = 0;
+  const hostile = '!race","mod":"yes","z":"';
+  const safe = bridge.receive(JSON.stringify({ username: 'mallory', text: hostile, isMod: false }));
+  eq([safe.ok, safe.handled, calls[0] && calls[0][1], calls[0] && calls[0][2].isMod], [true, 1, hostile, false], 'serialized frame: the quotes stay inside the text, no mod');
+  eq(SD.state.get().currentRace, null, '… and no race starts');
+  const quoted = bridge.receive(JSON.stringify({ username: 'bob', text: 'he said "hi" \\o/' }));
+  eq([quoted.ok, quoted.handled], [true, 1], 'a message with quotes and backslashes survives a serializer');
+
+  // Legitimate alias use still works when the keys agree.
+  calls.length = 0;
+  bridge.receive('{"username":"Acorn","user":"acorn","text":"!status","message":"!status","isMod":true,"mod":"yes","isBroadcaster":1}');
+  eq(calls.length && [calls[0][0], calls[0][2].isMod], ['Acorn', true], 'agreeing aliases are accepted');
+  bridge.receive('{"username":"Acorn","text":"!status","isMod":"no","displayName":null}');
+  eq(calls[1] && [calls[1][2].isMod, calls[1][2].displayName], [false, 'Acorn'], '"no" → not a mod; null displayName → username');
+  eq(['true', 'YES', ' on ', 1, true, 'false', 'No', 'off', 0, false, '', 'maybe', 2, {}, null].map(bridge.parseBool),
+    [true, true, true, true, true, false, false, false, false, false, null, null, null, null, null], 'parseBool');
+
+  // duplicateKey helper
+  eq([bridge.duplicateKey('{"a":1,"b":{"a":2},"c":[{"a":1},{"a":2}]}'), bridge.duplicateKey('{"a":"x\\"y","b":1,"b":2}'),
+    bridge.duplicateKey('{"k\\u0061":1,"ka":2}'), bridge.duplicateKey('[{"a":1,"a":1}]'), bridge.duplicateKey('{"s":"{\\"a\\":1,\\"a\\":2}"}')],
+  [null, 'b', 'ka', 'a', null], 'duplicateKey: nested / arrays / escaped quotes / unicode-escaped keys / JSON inside a string');
+  SD.processCommand = realPC;
+  tick(5000);
+}
+
+section('bridge: binary frames (review batch 1, integrations#5)');
+{
+  bridge.resetStats();
+  const realPC = SD.processCommand;
+  const calls = [];
+  SD.processCommand = function (a, b) { calls.push([a, b]); return { ok: true, isCommand: true, command: 'x', message: 'ok' }; };
+  const enc = new TextEncoder().encode('{"username":"Bin","text":"!status ✨"}');
+  const r1 = bridge.receive(enc);
+  const r2 = bridge.receive(enc.buffer.slice(enc.byteOffset, enc.byteOffset + enc.byteLength));
+  const r3 = bridge.receive(Buffer.from('{"username":"Buf","text":"!help"}'));
+  eq([r1.handled, r2.handled, r3.handled, calls.map(function (c) { return c[0]; })], [1, 1, 1, ['Bin', 'Bin', 'Buf']], 'Uint8Array / ArrayBuffer / Buffer frames decoded as UTF-8 text');
+  eq(calls[0][1], '!status ✨', 'multi-byte UTF-8 decoded');
+  const r4 = bridge.receive(new Uint8Array([0xff, 0xfe, 0x7b]));
+  eq([r4.ok, r4.malformed, r4.ignored], [false, 1, 0], 'invalid UTF-8 → malformed');
+  if (typeof Blob !== 'undefined') {
+    const ig = bridge.status().ignored;
+    const r5 = bridge.receive(new Blob(['{"username":"x","text":"!join"}']));
+    eq([r5.ok, r5.malformed, r5.ignored, bridge.status().ignored], [false, 1, 0, ig], 'a Blob is malformed, never silently "ignored"');
+    has(bridge.status().lastBad, 'text frames', 'lastBad tells the streamer to send text frames');
+  }
   SD.processCommand = realPC;
   tick(5000);
 }
@@ -567,6 +709,16 @@ section('bridge: outbound frames (fake WebSocket)');
   const cd = replies()[replies().length - 1];
   eq([cd.command, cd.ok, cd.cooldown], ['train', false, true], 'cooldown refusal carries cooldown:true');
 
+  // review batch 1 (docs-accuracy#9): a handler's own cooldown refusal is flagged like the gate's
+  tick(11000);
+  bridge.receive('{"username":"FoxFan","text":"!rest"}');
+  eq(replies()[replies().length - 1].ok, true, 'first !rest works');
+  tick(11000);
+  const restRes = SD.processCommand('FoxFan', '!rest', { source: 'bridge' });
+  const rc = replies()[replies().length - 1];
+  eq([rc.command, rc.ok, rc.cooldown, rc.locked], ['rest', false, true, undefined], "!rest on the runner's 3-minute rest cooldown → reply frame cooldown:true");
+  eq([restRes.cooldown, restRes.cooldownMs > 0], [true, true], '… and the command result carries cooldown:true + cooldownMs');
+
   bridge.receive('{"type":"ping"}');
   eq(ws.frames()[ws.frames().length - 1].type, 'pong', 'ping → pong');
 
@@ -576,6 +728,12 @@ section('bridge: outbound frames (fake WebSocket)');
   const locked = bridge.receive('{"username":"FoxFan","text":"!train speed"}');
   eq(locked.results[0].ok, false, 'mutating command refused during the race');
   eq(replies()[replies().length - 1].locked, true, 'race-lock refusal carries locked:true');
+  const ev = bridge.receive('{"username":"ModMia","text":"!event harvest","isMod":true}');
+  const evr = replies()[replies().length - 1];
+  eq([ev.results[0].ok, evr.command, evr.ok, evr.locked, evr.cooldown], [false, 'event', false, true, undefined],
+    "a mod's !event <name> refused mid-race carries locked:true (docs-accuracy#9)");
+  const look = bridge.receive('{"username":"ModMia","text":"!event today","isMod":true}');
+  eq([look.results[0].ok, replies()[replies().length - 1].locked], [true, undefined], '!event today still works mid-race, unflagged');
   SD.game.endRace();
   const race = ws.frames().filter(function (f) { return f && f.type === 'race'; });
   eq(race.length, 1, 'one race frame');
@@ -631,6 +789,84 @@ section('bridge: no server → error + quiet backoff');
   eq(systemLines(/^🔌 Connected to the chat bridge/).length, 1, '"Connected" once it answers');
   bridge.disconnect();
   eq([bridge.status().state, SD.state.runtime.connected.bridge, timers.length], ['off', 'off', 0], 'clean disconnect');
+}
+
+section('connect() when the socket cannot even be created (review batch 1, integrations#4)');
+{
+  chat.length = 0;
+  class ThrowingWS { constructor(url) { throw new SyntaxError("Failed to construct 'WebSocket': The URL '" + url + "' is invalid."); } }
+  globalThis.WebSocket = ThrowingWS;
+  const b = bridge.connect('ws://localhost:87650');
+  eq(b.ok, false, 'bridge.connect → ok:false when the WebSocket constructor throws');
+  has(b.message, 'Could not open ws://localhost:87650', 'the message is the real error, not "Connecting…"');
+  eq([bridge.status().state, bridge.status().enabled, timers.length], ['error', false, 0], 'state error, not retrying');
+  const t = twitch.connect('foxstreams');
+  eq(t.ok, false, 'twitch.connect → ok:false when the WebSocket constructor throws');
+  has(t.message, 'Could not open the Twitch socket', 'twitch message is the real error');
+  globalThis.WebSocket = FakeWS;
+  eq(bridge.connect('ws://localhost:8765').ok, true, 'a constructible socket still reports ok:true');
+  bridge.disconnect();
+  twitch.disconnect();
+}
+
+section('bridge: a relay token in the URL is never shown (fix round 1)');
+{
+  const R = SD.util.redactSecrets;
+  eq([R('ws://localhost:8765/?token=s3cret'), R('ws://localhost:8765/?a=1&token=s3cret&b=2'), R('ws://me:pw@localhost:8765/'),
+    R('ws://localhost:8765'), R("The URL 'ws://h/?key=s3cret' is invalid.")],
+  ['ws://localhost:8765/?token=…', 'ws://localhost:8765/?a=1&token=…&b=2', 'ws://me:…@localhost:8765/', 'ws://localhost:8765', "The URL 'ws://h/?key=…' is invalid."],
+  'SD.util.redactSecrets hides token / key values and URL passwords');
+  chat.length = 0;
+  const url = 'ws://localhost:8765/?token=s3cret';
+  const c = bridge.connect(url);
+  eq(bridge.status().url, url, 'status().url keeps the real URL (the socket needs the token)');
+  eq(lastWS().url, url, 'the socket is opened with the token');
+  ok(c.ok && c.message.indexOf('s3cret') < 0 && c.message.indexOf('?token=…') > 0, 'connect() message hides the token', c.message);
+  lastWS().serverClose(1006);
+  ok(bridge.status().lastError.indexOf('s3cret') < 0, 'lastError (header tooltip, admin detail) hides the token', bridge.status().lastError);
+  fireOnlyTimeout('bridge retry (token)');
+  lastWS().serverOpen();
+  const again = bridge.connect(url);
+  ok(again.message.indexOf('s3cret') < 0, '"Already connected" message hides the token', again.message);
+  bridge.disconnect();
+  const leaked = chat.filter(function (m) { return String(m.text).indexOf('s3cret') >= 0; });
+  eq(leaked.length, 0, 'no chat-feed system line shows the token');
+  ok(systemLines(/Connected to the chat bridge \(ws:\/\/localhost:8765\/\?token=…\)/).length === 1, 'the "Connected" line shows the redacted URL');
+  class ThrowingWS2 { constructor(u) { throw new SyntaxError("Failed to construct 'WebSocket': The URL '" + u + "' is invalid."); } }
+  globalThis.WebSocket = ThrowingWS2;
+  const bad = bridge.connect('ws://localhost:87650/?token=s3cret');
+  ok(bad.ok === false && bad.message.indexOf('s3cret') < 0, 'a fatal constructor error hides the token too', bad.message);
+  globalThis.WebSocket = FakeWS;
+  bridge.disconnect();
+}
+
+section('admin status text during an in-flight retry (review batch 1, integrations#3)');
+{
+  // admin.js only needs SD.ui.dom.esc / fmt at load time; retryText is a pure helper.
+  SD.ui = SD.ui || {};
+  const hadDom = !!SD.ui.dom;
+  if (!hadDom) SD.ui.dom = { esc: String, fmt: { int: String } };
+  require(path.join(__dirname, '..', 'js', 'ui', 'admin.js'));
+  const retryText = SD.ui.admin.retryText;
+  twitch.connect('foxstreams');
+  lastWS().serverClose(1006);
+  const s1 = twitch.status();
+  has(retryText(s1), 'Retry #1', 'after a failed attempt: "Retry #1 in ~1 s"');
+  fireOnlyTimeout('twitch retry (in flight)');
+  const s2 = twitch.status();
+  eq([s2.state, s2.nextRetryAt, s2.enabled], ['error', null, true], 'retry in flight: error, no nextRetryAt, still enabled');
+  eq(retryText(s2), ' Retrying now…', 'admin says "Retrying now…", not "Not retrying"');
+  lastWS().serverOpen();
+  eq(retryText(twitch.status()), ' Retrying now…', '… also while the retry socket waits for the JOIN');
+  lastWS().serverSend('@msg-id=msg_channel_suspended :tmi.twitch.tv NOTICE #foxstreams :This channel does not exist or has been suspended.');
+  has(retryText(twitch.status()), 'Not retrying', 'a fatal error still says "Not retrying — press CONNECT"');
+  bridge.connect('ws://localhost:8765');
+  lastWS().serverClose(1006);
+  fireOnlyTimeout('bridge retry (in flight)');
+  eq(retryText(bridge.status()), ' Retrying now…', 'bridge: same during its retry attempt');
+  bridge.disconnect();
+  twitch.disconnect();
+  if (!hadDom) delete SD.ui.dom;
 }
 
 restoreTimers();

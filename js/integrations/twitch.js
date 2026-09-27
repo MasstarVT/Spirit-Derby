@@ -27,8 +27,10 @@
  * ({ adapter:'twitch', ...status() }), mirrors the state into SD.state.runtime.connected.twitch,
  * and connection milestones become dim 'system' lines in the chat feed.
  *
- * Inbound flood guard: at most RATE.MAX (20) chat lines per second reach the game; extras are
- * dropped and counted in status().dropped, so a raid cannot freeze the page.
+ * Inbound flood guard: at most RATE.MAX (20) commands and, on a separate budget, RATE.CHAT_MAX
+ * (20) plain-chat lines per second reach the game; extras are dropped and counted in
+ * status().dropped (commands also in status().droppedCommands), so a raid cannot freeze the page
+ * and chatter can never crowd out the commands.
  *
  * The parser is pure and exported (parseLine, parseTags, parseBadges, privmsgToChat, pongFor,
  * normalizeChannel, backoffDelay, createRateLimiter) so tools/integration-test.js can check it
@@ -63,7 +65,7 @@
   const CAPS = 'twitch.tv/tags twitch.tv/commands';
   const ANON_PASS = 'SCHMOOPIIE';            // conventional password for justinfan guest logins
   const BACKOFF = { BASE_MS: 1000, CAP_MS: 60000, JITTER: 0.2 };
-  const RATE = { MAX: 20, WINDOW_MS: 1000 };
+  const RATE = { MAX: 20, CHAT_MAX: 20, WINDOW_MS: 1000 };   // commands / plain chat per window
   const JOIN_TIMEOUT_MS = 15000;             // no JOIN confirmation after this long → retry
   const STABLE_MS = 15000;                   // a connection that lived this long resets the backoff
   const PING_AFTER_MS = 270000;              // 4.5 min of silence → send our own PING
@@ -201,9 +203,20 @@
   }
 
   // "#Fox", "fox", "@fox", "https://www.twitch.tv/fox?x=1" → "fox"; invalid → "".
+  // Twitch route URLs name the channel in a later segment: popout/fox/chat (OBS chat docks),
+  // moderator/fox (Mod View), embed/fox/chat, dashboard.twitch.tv/u/fox/…, player.twitch.tv/?channel=fox.
   function normalizeChannel(input) {
     let s = String(input == null ? '' : input).trim().toLowerCase();
-    s = s.replace(/^https?:\/\//, '').replace(/^(www\.|m\.)?twitch\.tv\//, '').replace(/^[#@]+/, '');
+    s = s.replace(/^https?:\/\//, '');
+    const host = /^(?:[a-z0-9-]+\.)*twitch\.tv(?=[/?#]|$)/.exec(s);
+    if (host) {
+      const rest = s.slice(host[0].length);
+      const q = /[?&]channel=([^&#\s]*)/.exec(rest);
+      s = rest.replace(/^\/+/, '');
+      if (/^(?:popout|moderator|embed|u)(?:[/?#]|$)/.test(s)) s = s.replace(/^[a-z]+\/*/, '');
+      else if (q && /^(?:[?#]|$)/.test(s)) s = q[1];
+    }
+    s = s.replace(/^[#@]+/, '');
     s = s.split(/[/?#\s]/)[0];
     return CHANNEL_RE.test(s) ? s : '';
   }
@@ -238,11 +251,12 @@
   // Connection
   // ===========================================================================================
   const st = {
-    state: 'off', channel: '', since: now(), messages: 0, dropped: 0, lastError: null,
+    state: 'off', channel: '', since: now(), messages: 0, dropped: 0, droppedCommands: 0, lastError: null,
     attempt: 0, nextRetryAt: null, nick: '', lastLine: ''
   };
   const lines = [];                          // recent status lines (NOTICE, ROOMSTATE, CAP …)
-  const limiter = createRateLimiter(RATE.MAX, RATE.WINDOW_MS);
+  const limiter = createRateLimiter(RATE.MAX, RATE.WINDOW_MS);          // commands
+  const chatLimiter = createRateLimiter(RATE.CHAT_MAX, RATE.WINDOW_MS); // plain chat
   const timers = { retry: 0, join: 0, watchdog: 0 };
   let enabled = false;                       // the streamer wants to be connected (drives retries)
   let ws = null;
@@ -256,7 +270,7 @@
   function status() {
     return {
       adapter: ADAPTER, state: st.state, channel: st.channel, since: st.since, messages: st.messages,
-      dropped: st.dropped, lastError: st.lastError, attempt: st.attempt, nextRetryAt: st.nextRetryAt,
+      dropped: st.dropped, droppedCommands: st.droppedCommands, lastError: st.lastError, attempt: st.attempt, nextRetryAt: st.nextRetryAt,
       nick: st.nick, enabled: enabled, lastLine: st.lastLine, readOnly: true
     };
   }
@@ -349,9 +363,11 @@
     enabled = true;
     outage = false;
     everJoined = false;
-    if (st.channel !== chan) { st.messages = 0; st.dropped = 0; limiter.reset(); }
+    if (st.channel !== chan) resetCounters();
     Object.assign(st, { channel: chan, attempt: 0, nextRetryAt: null, lastError: null });
     open(true);
+    // open() may already have failed fatally (the WebSocket constructor threw).
+    if (!enabled) return { ok: false, message: st.lastError || 'Could not open the Twitch chat connection.' };
     return { ok: true, message: 'Connecting to Twitch chat #' + chan + (opts.auto ? ' (auto-connect)' : '') + '…' };
   }
 
@@ -547,9 +563,12 @@
   function onPrivmsg(m, acc) {
     const chat = privmsgToChat(m);
     if (!chat || !chat.username || !chat.text) return;
-    if (!limiter.allow(now())) {
+    // Separate budgets: plain chat can never use up the command budget (and vice versa).
+    const isCmd = isCommandText(chat.text);
+    if (!(isCmd ? limiter : chatLimiter).allow(now())) {
       st.dropped++;
       acc.dropped++;
+      if (isCmd) st.droppedCommands++;
       return;
     }
     st.messages++;
@@ -560,6 +579,19 @@
     } catch (e) {
       if (typeof console !== 'undefined') console.error('[twitch] processCommand failed', e);
     }
+  }
+
+  function isCommandText(text) {
+    if (SD.commands && typeof SD.commands.parse === 'function') {
+      try { return !!SD.commands.parse(text); } catch (e) { /* fall through */ }
+    }
+    return /^\s*!/.test(String(text));
+  }
+
+  function resetCounters() {
+    st.messages = 0; st.dropped = 0; st.droppedCommands = 0;
+    limiter.reset();
+    chatLimiter.reset();
   }
 
   // ===========================================================================================
@@ -583,7 +615,7 @@
     status: status,
     receive: receive,
     recentLines: function () { return lines.slice(); },
-    resetStats: function () { st.messages = 0; st.dropped = 0; limiter.reset(); },
+    resetStats: resetCounters,
     isConnected: function () { return st.state === 'on'; },
     // pure helpers
     parseLine: parseLine,
