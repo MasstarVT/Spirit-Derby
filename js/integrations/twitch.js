@@ -554,7 +554,7 @@
     const text = m.trailing || m.params.slice(1).join(' ');
     const id = (m.tags && m.tags['msg-id']) || '';
     note('NOTICE ' + (id ? '[' + id + '] ' : '') + text);
-    if (FATAL_NOTICES[id] || FATAL_TEXT.test(text)) {
+    if (Object.prototype.hasOwnProperty.call(FATAL_NOTICES, id) || FATAL_TEXT.test(text)) {
       if (enabled) fatal(text || id);
       else st.lastError = text || id;
     }

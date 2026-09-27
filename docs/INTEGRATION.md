@@ -235,7 +235,8 @@ After each command from the bridge **or from read-only Twitch chat**:
 ```
 
 - `chat` is ready to post as-is. Refusals are included with `ok: false` and carry `cooldown: true`
-  (on cooldown, including a runner's 3-minute `!rest` cooldown) or `locked: true` (a race is
+  (on cooldown, including a runner's 3-minute `!rest` cooldown and the 30 s wait after a command
+  failed with an internal error) or `locked: true` (a race is
   running, including a mod's `!event <name>` mid-race), so your bot can skip them if it likes.
 - Replies to **unknown** commands (such as `!discord`, meant for another bot) are **not** sent by
   default. For debugging you can enable them from the browser console with
@@ -578,6 +579,9 @@ in the Chat tab. A `#streamer` name arriving from Twitch, the bridge or the demo
 
 - The 10 s cooldown is per viewer and per command, and can be changed under **Tuning → User
   cooldown**. Read-only commands have no cooldown but count toward activity at most once every 10 s.
+  If a command fails with an internal error ("Something went wrong … The streamer can check the
+  log"), that viewer must wait at least 30 s (`CONFIG.COOLDOWNS.ERROR_S`) before that command runs
+  again, so one bug can't flood the log, the overlay or your bot.
 - The game answers commands meant for other bots with `Unknown command` in the feed, but these
   replies are not toasted on the overlay and not sent to the bridge.
 - Spirit Points are fictional: they cannot be bought, sold or cashed out. `!bet`, `!boost`, `!snack`,

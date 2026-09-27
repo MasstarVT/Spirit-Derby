@@ -149,7 +149,7 @@
       const cheerBonus = {};
       // Viewers are stored by username key; the race shows their display names.
       const shownName = function (by) {
-        const p = by && st.players ? st.players[String(by).toLowerCase()] : null;
+        const p = by ? U.own(st.players, String(by).toLowerCase()) : null;
         return p && p.displayName ? p.displayName : (by || 'chat');
       };
       used.forEach(function (e) {
@@ -580,8 +580,8 @@
     if (SD.persistence) SD.persistence.clear();
     SD.state.set(SD.state.create());
     const rt = SD.state.runtime;
-    rt.cooldowns = {};
-    rt.runnerCooldowns = {};
+    rt.cooldowns = U.dict();
+    rt.runnerCooldowns = U.dict();
     rt.hypeIdleAccumMs = 0;
     rt.lastClockAt = SD.clock.now();
     SD.state.log('system', 'A brand new Spirit Derby begins!', 'epic');
@@ -606,7 +606,8 @@
     if (v === 'false' || v === 0 || v === '0' || v === 'off') return false;
     return undefined;
   }
-  const SETTING_VALIDATORS = {
+  // No prototype (SD.util.dict): 'constructor' / 'toString' / '__proto__' are unknown keys, not validators.
+  const SETTING_VALIDATORS = U.dict({
     distance: function (v) { return SD.CONFIG.RACE.DISTANCES.indexOf(Number(v)) >= 0 ? Number(v) : undefined; },
     runnerCount: function (v) { return num(v, SD.CONFIG.RACE.MIN_RUNNERS, SD.CONFIG.RACE.MAX_RUNNERS, true); },
     eventFrequency: function (v) { return Object.prototype.hasOwnProperty.call(SD.CONFIG.RACE.EVENTS.SLIDER, v) ? v : undefined; },
@@ -643,7 +644,7 @@
       if ('enabled' in v && bool(v.enabled) !== undefined) out.enabled = bool(v.enabled);
       return out;
     }
-  };
+  });
 
   // Validates each key; unknown / invalid keys are rejected (and reported).
   function updateSettings(patch) {

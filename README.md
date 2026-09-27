@@ -68,7 +68,7 @@ Every source (simulated chat, SEND AS, Twitch, the bridge) goes through the same
 | `!rank [viewer]` | | Your rank on the SP, victories and hype boards | none | no | *FoxFan: #2 in SP (71) · unranked in victories · #1 in hype (5.2)* |
 | `!help [command]` | `!h` `!commands` | The list, or one command's usage | none | no | *!train <stat> or !train <runner> <stat> … — Train your runner …* |
 
-- The per-viewer cooldown (default 10 s) is **Tuning → User cooldown**. Cooldowns start only after a command succeeds. The streamer's own console (the *Streamer* sender, SEND AS) has no cooldowns and may train any runner. The *Streamer* sender runs mod and read-only commands but never plays (no `!join`, no SP, hype credit or achievements); the roster TRAIN / REST buttons and ADD HYPE credit nobody either. Pick a viewer in SEND AS (or type `@login:` in chat) to act for them.
+- The per-viewer cooldown (default 10 s) is **Tuning → User cooldown**. Cooldowns start only after a command succeeds, or after a command fails with an internal error: then that viewer has to wait at least 30 s (`COOLDOWNS.ERROR_S`) before trying that command again, so a bug can't be spammed into the event log. The streamer's own console (the *Streamer* sender, SEND AS) has no cooldowns and may train any runner. The *Streamer* sender runs mod and read-only commands but never plays (no `!join`, no SP, hype credit or achievements); the roster TRAIN / REST buttons and ADD HYPE credit nobody either. Pick a viewer in SEND AS (or type `@login:` in chat) to act for them.
 - Read-only commands have no cooldown but count toward the participation board at most once every 10 s.
 - **Open training** (default on) lets anyone `!train` / `!rest` any runner by name. This is the "chat overtrains the favourite" story. Turn it off and only owners train their runner.
 - Unknown commands (`!discord`, meant for other bots) get a short reply in the Chat tab but no toast on stream and nothing through the bridge.
@@ -178,7 +178,7 @@ The drawer footer shows the build: `Spirit Derby v1.0.0 · save schema v3 · rac
 |---|---|---|
 | `SEASON.RACES_PER_DAY` / `SEASON.DAYS` | 3 / 7 | length of a day and a season |
 | `ECONOMY.JOIN_SP`, `DAILY_SP`, `BET_MIN` / `BET_MAX`, `BOOST_COST`, `SNACK_COST`, `SABOTAGE_COST`, `RIBBON_COST` | 200, 50, 10 / 250, 40, 25, 60, 100 | the SP economy |
-| `COOLDOWNS.USER_S` / `CHEER_S` / `SABOTAGE_S` | 10 / 30 / 600 | chat cooldowns (seconds) |
+| `COOLDOWNS.USER_S` / `CHEER_S` / `SABOTAGE_S` / `ERROR_S` | 10 / 30 / 600 / 30 | chat cooldowns (seconds); `ERROR_S` applies after a command fails with an internal error |
 | `HYPE.GAINS`, `HYPE.AFTER_RACE_KEEP` | see file, 0.4 | hype per action, post-race decay |
 | `RUNNERS.MAX_ACTIVE`, `CREATE_NAME_MIN` / `MAX` | 24, 3 / 20 | roster cap, `!create` names |
 | `UI.TOAST_MAX`, `REPLY_TOASTS_PER_S`, `REPLY_QUEUE_MAX` | 4, 1, 6 | overlay toast flood control |
@@ -223,8 +223,9 @@ Classic `<script>` files on one `globalThis.SD` namespace (no modules, so it run
 | community | `community-test.js` | betting, boost / snack / sabotage / ribbon, mod commands, achievements, seasons |
 | persistence | `persistence-test.js` | an M1 save (`tools/fixtures/save-m1.json`) migrating and playing on, a v2 save with display-name owners (`tools/fixtures/save-v2-display-names.json`) upgrading to schema 3, normalize, roster reconciliation, interrupted races, backups, history trimming, UI prefs |
 | identity | `identity-test.js` | runner ownership by login (localized display names), the reserved `#streamer` console actor, SEND AS and chat-panel senders by login, roster buttons crediting nobody |
+| protokeys | `protokeys-test.js` | names like `constructor` / `__proto__` / `toString` as commands, logins, arguments, settings and save keys (every command swept), the error cooldown |
 | runners | `runners-test.js` | `!create` rules and replies, SPAWN RUNNER, the runner cap, `SD.debug` |
-| fuzz | `fuzz-test.js` | 15 seeded viewers (three with display names that are not their login) spamming every command (hostile arguments, spam bursts, mid-race attempts, non-mod mod commands, reloads) over 3 full seasons, with invariants checked after every command and race |
+| fuzz | `fuzz-test.js` | 17 seeded viewers (three with display names that are not their login, plus the logins `constructor` and `__proto__`) spamming every command (hostile arguments, spam bursts, mid-race attempts, non-mod mod commands, reloads) over 3 full seasons, with invariants checked after every command and race |
 
 Useful flags:
 

@@ -17,7 +17,7 @@
     }
     let count = 0;
     (state.bets || []).forEach(function (b) {
-      const p = state.players[String(b.username || '').toLowerCase()];
+      const p = U.own(state.players, String(b.username || '').toLowerCase());
       if (p && b.amount > 0) { p.spiritPoints = (p.spiritPoints || 0) + b.amount; count++; }
     });
     state.bets = [];
@@ -82,7 +82,7 @@
       if (SD.players && typeof SD.players.refundSp === 'function') {
         if (SD.players.refundSp(state, e.by, e.paid, 'effectRefund').ok) count++;
       } else {
-        const p = state.players[String(e.by).toLowerCase()];
+        const p = U.own(state.players, String(e.by).toLowerCase());
         if (p) { p.spiritPoints = (p.spiritPoints || 0) + e.paid; count++; }
       }
     });
@@ -90,7 +90,7 @@
   }
 
   function displayOf(state, username) {
-    const p = state.players && state.players[String(username || '').toLowerCase()];
+    const p = U.own(state.players, String(username || '').toLowerCase());
     return p && p.displayName ? p.displayName : username;
   }
 

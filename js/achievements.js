@@ -24,6 +24,7 @@
 (function (SD) {
   'use strict';
 
+  const U = SD.util;
   let enabled = false;
   let unsubs = [];
 
@@ -57,10 +58,12 @@
     if (!state.achievements.progress || typeof state.achievements.progress !== 'object') state.achievements.progress = {};
     return state.achievements;
   }
+  // progress is keyed by login ('constructor' / '__proto__' included): own read, own write.
   function progress(state, username) {
     const pr = store(state).progress;
     const k = keyOf(username);
-    return pr[k] || (pr[k] = {});
+    const mine = U.own(pr, k);
+    return mine && typeof mine === 'object' ? mine : U.setOwn(pr, k, {});
   }
   function allTime(p, key) { return ((p.stats && p.stats[key]) || 0) + ((p.lifetime && p.lifetime[key]) || 0); }
 
@@ -255,8 +258,8 @@
   function noteHype(p) {
     if (!p || !p.by || !(p.delta > 0)) return;
     const rt = SD.state.runtime;
-    if (!rt.hypeRecent) rt.hypeRecent = {};
-    rt.hypeRecent[keyOf(p.by)] = SD.clock.now();
+    if (!rt.hypeRecent || typeof rt.hypeRecent !== 'object') rt.hypeRecent = U.dict();
+    U.setOwn(rt.hypeRecent, keyOf(p.by), SD.clock.now());
   }
   function recentContributors(state, by) {
     const rt = SD.state.runtime;
@@ -304,7 +307,7 @@
     const p = playerByName(state, username);
     if (!p) return [];
     const entries = store(state).unlocked.filter(function (a) { return a.username === p.username; });
-    const seen = {};
+    const seen = U.dict();
     const out = entries.map(function (a) { seen[a.id] = true; return decorate(a); });
     (p.achievements || []).forEach(function (id) {
       if (!seen[id] && def(id)) out.push(decorate({ id: id, username: p.username, displayName: p.displayName, sp: def(id).sp, at: null }));

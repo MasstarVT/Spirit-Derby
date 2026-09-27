@@ -101,9 +101,15 @@
     return 1 + C.PERF_SLOPE * (perf - C.PERF_PIVOT) / 100;
   }
 
+  // Own catalog entries only (runner / record fields come from saves): 'constructor' is no ability.
+  function entry(table, key) {
+    const v = key == null ? undefined : U.own(table, key);
+    return v && typeof v === 'object' ? v : null;
+  }
+
   // Mood velocity multiplier per running phase.
   function moodVelArray(moodName) {
-    const m = SD.DATA.MOODS[moodName];
+    const m = entry(SD.DATA.MOODS, moodName);
     const arr = [1, 1, 1, 1, 1];
     if (!m || !m.vel) return arr;
     for (let i = 0; i < RUN_PHASES; i++) {
@@ -139,7 +145,7 @@
     const cheer = ctx.cheerBonus || {};
     const list = (runners || []).map(function (r, i) {
       const abilityId = abilityIdOf(r);
-      const ab = abilityId ? SD.DATA.ABILITIES[abilityId] : null;
+      const ab = entry(SD.DATA.ABILITIES, abilityId);
       const stats = {};
       SD.CONFIG.STATS.forEach(function (k) { stats[k] = Number(r.stats[k]) || 0; });
       const perf = {};
@@ -155,14 +161,14 @@
         badgeColor: r.badgeColor || '#5c8a4a',
         ribbonColor: r.ribbonColor || null,
         lane: i + 1,
-        style: SD.CONFIG.STYLES[r.style] ? r.style : 'paceChaser',
+        style: entry(SD.CONFIG.STYLES, r.style) ? r.style : 'paceChaser',
         abilityId: ab ? abilityId : null,
         ownerAtRace: r.owner || null,              // owner's display label (presentation, spOwner)
         ownerKeyAtRace: r.ownerKey || null,        // owner's login key (who is paid, achievements)
         level: r.level || 1,
         stats: stats,
         condition: r.condition || SD.runners.conditionOf(r.fatigue || 0),
-        mood: SD.DATA.MOODS[r.mood] ? r.mood : SD.CONFIG.MOOD.DEFAULT,
+        mood: entry(SD.DATA.MOODS, r.mood) ? r.mood : SD.CONFIG.MOOD.DEFAULT,
         energy: U.round2(r.energy == null ? maxEnergy : r.energy),
         maxEnergy: maxEnergy,
         fatigue: r.fatigue == null ? 0 : U.round2(r.fatigue),
@@ -185,13 +191,13 @@
   function oddsFeatures(e, distance) {
     const C = SD.CONFIG.RACE;
     const share = C.PHASE_SHARE;
-    const style = SD.CONFIG.STYLES[e.style] || SD.CONFIG.STYLES.paceChaser;
+    const style = entry(SD.CONFIG.STYLES, e.style) || SD.CONFIG.STYLES.paceChaser;
     const ptsPerVel = 100 / C.PERF_SLOPE;
     const moodVel = moodVelArray(e.mood);
-    const mood = SD.DATA.MOODS[e.mood] || {};
+    const mood = entry(SD.DATA.MOODS, e.mood) || {};
     const statMult = raceStatMult(e);
     let perfAvg = 0, moodAvg = 0, drainPerM = 0;
-    const ab = e.abilityId ? SD.DATA.ABILITIES[e.abilityId] : null;
+    const ab = entry(SD.DATA.ABILITIES, e.abilityId);
     for (let i = 0; i < RUN_PHASES; i++) {
       const perf = e.perf[PHASES[i]];
       perfAvg += share[i] * perf;
@@ -226,7 +232,7 @@
     let rating = f.perfAvg + f.formPts + stylePts(f.style, distance);
     rating += O.REMAIN_PTS * Math.min(f.remain, O.REMAIN_CAP == null ? 1 : O.REMAIN_CAP);
     if (f.remain < O.SAFE_REMAIN) rating -= (O.SAFE_REMAIN - f.remain) * O.SHORTFALL_PTS;
-    const ab = f.abilityId ? SD.DATA.ABILITIES[f.abilityId] : null;
+    const ab = entry(SD.DATA.ABILITIES, f.abilityId);
     if (ab && ab.rating) rating += ab.rating;
     return rating;
   }
@@ -365,9 +371,9 @@
     for (let i = 0; i < n; i++) {
       const e = entrants[i];
       const st = e.stats;
-      const style = CFG.STYLES[e.style] || CFG.STYLES.paceChaser;
-      const mood = D.MOODS[e.mood] || {};
-      const ab = e.abilityId ? (D.ABILITIES[e.abilityId] || null) : null;
+      const style = entry(CFG.STYLES, e.style) || CFG.STYLES.paceChaser;
+      const mood = entry(D.MOODS, e.mood) || {};
+      const ab = entry(D.ABILITIES, e.abilityId);
       const level = e.level || 1;
       if (!e.perf) {
         e.perf = {};

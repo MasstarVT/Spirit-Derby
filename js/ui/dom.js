@@ -204,31 +204,35 @@
   };
   const MOOD_EMOJI = { 'Determined': '😤', 'Happy': '😊', 'Nervous': '😰', 'Fired Up': '🔥', 'Sleepy': '😴', 'Chaotic': '🌀' };
   const DATA = function () { return SD.DATA || {}; };
+  // Catalog entry by an id from a save or a race record: own entries only ('constructor' is no ability).
+  const own = function (table, id) {
+    return id != null && table && Object.prototype.hasOwnProperty.call(table, id) ? table[id] : null;
+  };
 
   const info = {
     style: function (id) {
-      const s = (DATA().STYLES && DATA().STYLES[id]) || STYLE_FALLBACK[id];
+      const s = own(DATA().STYLES, id) || own(STYLE_FALLBACK, id);
       return { name: (s && s.name) || String(id || '—'), short: (s && s.short) || String(id || '—').slice(0, 2).toUpperCase(), desc: (s && s.desc) || '' };
     },
     species: function (id) {
-      const sp = DATA().SPECIES && DATA().SPECIES[id];
+      const sp = own(DATA().SPECIES, id);
       return (sp && sp.name) || String(id || '');
     },
     ability: function (r) {
       if (!r) return null;
       const id = (r.ability && r.ability.id) || r.abilityId;
-      const cat = id && DATA().ABILITIES && DATA().ABILITIES[id];
+      const cat = own(DATA().ABILITIES, id);
       const name = (r.ability && r.ability.name) || (cat && cat.name) || '';
       const desc = (r.ability && r.ability.desc) || (cat && cat.desc) || '';
       return name ? { id: id, name: name, desc: desc } : null;
     },
     abilityName: function (id) {
-      const cat = id && DATA().ABILITIES && DATA().ABILITIES[id];
+      const cat = own(DATA().ABILITIES, id);
       return (cat && cat.name) || String(id || '');
     },
     moodEmoji: function (mood) {
-      const m = DATA().MOODS && DATA().MOODS[mood];
-      return (m && m.emoji) || MOOD_EMOJI[mood] || '🙂';
+      const m = own(DATA().MOODS, mood);
+      return (m && m.emoji) || own(MOOD_EMOJI, mood) || '🙂';
     },
     dayEvent: function (x) {
       if (!x) return null;

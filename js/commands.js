@@ -5,7 +5,8 @@
  *
  * Pipeline (plan section 4), in this exact order:
  *   parse -> lookup -> admin permission -> player gate -> race lock -> per-user cooldown ->
- *   arity -> handler inside SD.state.mutate('cmd:' + name) -> stamp cooldown (ok only) ->
+ *   arity -> handler inside SD.state.mutate('cmd:' + name) -> stamp cooldown (ok, or an
+ *   unexpected exception: + the CONFIG.COOLDOWNS.ERROR_S error cooldown) ->
  *   emit chat:message (kind 'reply') + command:result
  * The incoming line itself is always emitted as chat:message kind 'user' (even plain chat).
  *
@@ -32,15 +33,17 @@
   const MAX_TEXT = 500;        // incoming chat line cap
   const MAX_REPLY = 400;       // hard safety cap (Twitch allows 500); replies aim for <= ~200
   const FEED_CAP = 80;         // SD.state.runtime.chatFeed length
-  const SOURCES = { sim: true, twitch: true, bridge: true, admin: true };
+  // Maps looked up with chat words / usernames have no prototype (SD.util.dict): '!constructor',
+  // '!__proto__' or a 'constructor' source never find an Object.prototype member.
+  const SOURCES = U.dict({ sim: true, twitch: true, bridge: true, admin: true });
   // Aliases resolved by parse() even before the target command is registered.
-  const BUILTIN_ALIASES = { t: 'train', lb: 'leaderboard', stats: 'status', r: 'rest', c: 'cheer', i: 'inspect', h: 'help', commands: 'help' };
+  const BUILTIN_ALIASES = U.dict({ t: 'train', lb: 'leaderboard', stats: 'status', r: 'rest', c: 'cheer', i: 'inspect', h: 'help', commands: 'help' });
   // Zero-width characters some chat clients append to repeated messages.
   const INVISIBLE = /[͏​-‏⁠﻿]|\udb40[\udc00-\udc7f]/g;
 
-  const registry = {};   // name -> def
-  const order = [];      // registration order (for !help)
-  const aliasMap = {};   // alias -> name
+  const registry = U.dict();   // name -> def
+  const order = [];            // registration order (for !help)
+  const aliasMap = U.dict();   // alias -> name
   let msgCounter = 0;
 
   // ---------------------------------------------------------------------------
@@ -265,9 +268,11 @@
   }
   function cooldownKeyOf(def) { return def.cooldownKey || def.name; }
 
-  function lastUse(username, def) {
-    const map = SD.state.runtime.cooldowns && SD.state.runtime.cooldowns[username];
-    return map ? map[cooldownKeyOf(def)] : undefined;
+  // Cooldown maps are keyed by login ('constructor' / '__proto__' are valid names): own reads and
+  // writes only (SD.util.own / setOwn), whatever the prototype of the map a caller installed.
+  function lastUse(username, def, key) {
+    const map = U.own(SD.state.runtime.cooldowns, username);
+    return map ? U.own(map, key || cooldownKeyOf(def)) : undefined;
   }
 
   // Remaining cooldown (ms) for username on a command (0 = ready). Used by the demo bots.
@@ -290,11 +295,19 @@
     return Math.max(0, (isFinite(s) ? s : 0) * 1000);
   }
 
-  function stampCooldown(username, def, now) {
+  function stampCooldown(username, def, now, key) {
     const rt = SD.state.runtime;
-    if (!rt.cooldowns) rt.cooldowns = {};
-    if (!rt.cooldowns[username]) rt.cooldowns[username] = {};
-    rt.cooldowns[username][cooldownKeyOf(def)] = now;
+    if (!rt.cooldowns || typeof rt.cooldowns !== 'object') rt.cooldowns = U.dict();
+    const map = U.own(rt.cooldowns, username) || U.setOwn(rt.cooldowns, username, U.dict());
+    U.setOwn(map, key || cooldownKeyOf(def), now);
+  }
+  // After a handler fails unexpectedly (a bug, not a CommandError) the same viewer's same command
+  // is refused for max(its cooldown, CONFIG.COOLDOWNS.ERROR_S): a crashing command can't be
+  // repeated at chat speed to flood the event log, the overlay and the bridge with error replies.
+  function errorKeyOf(def) { return '!error:' + cooldownKeyOf(def); }
+  function errorLockMs() {
+    const s = Number(SD.CONFIG.COOLDOWNS.ERROR_S);
+    return Math.max(0, (isFinite(s) ? s : 0) * 1000);
   }
 
   // ---------------------------------------------------------------------------
@@ -407,7 +420,7 @@
     const now = SD.clock.now();
     const rt = SD.state.runtime;
     const readOnly = def.cooldownMs === 0;
-    const lastActivity = readOnly && rt.activity ? rt.activity[username] : undefined;
+    const lastActivity = readOnly ? U.own(rt.activity, username) : undefined;
     const ctx = {
       state: state, username: username, displayName: displayName, source: source, isMod: isMod, player: player,
       parsed: parsed, args: parsed.args, argText: parsed.argText, command: def.name, now: now,
@@ -416,9 +429,11 @@
       countActivity: !(lastActivity != null && now - lastActivity < activityWindowMs())
     };
     const cdLen = cooldownLength(def, ctx);
-    if (cdLen > 0 && source !== 'admin') {
-      const last = lastUse(username, def);
-      const left = last == null ? 0 : cdLen - (now - last);
+    if (source !== 'admin') {
+      const last = cdLen > 0 ? lastUse(username, def) : undefined;
+      const failedAt = lastUse(username, def, errorKeyOf(def));
+      const left = Math.max(last == null ? 0 : cdLen - (now - last),
+        failedAt == null ? 0 : Math.max(cdLen, errorLockMs()) - (now - failedAt));
       if (left > 0) {
         return finish(false, '!' + def.name + ' is cooling down — try again in ' + U.fmtDuration(left) + '.',
           { cooldownMs: left, cooldown: true, severity: 'info' });
@@ -429,6 +444,7 @@
 
     // 7. handler (check-then-commit inside one mutate)
     let out;
+    let crashed = false;
     // Achievements unlocked by this command for this viewer are appended to the reply (M5).
     const achList = state.achievements && Array.isArray(state.achievements.unlocked) ? state.achievements.unlocked : null;
     const achMark = achList ? achList.length : 0;
@@ -457,6 +473,7 @@
         if (typeof console !== 'undefined') console.error('[SD.commands] !' + def.name + ' failed:', e);
         try { SD.state.log('error', '!' + def.name + ' from ' + displayName + ' failed: ' + ((e && e.message) || e), 'warn'); } catch (x) { /* ignore */ }
         out = { ok: false, message: 'Something went wrong with !' + def.name + '. The streamer can check the log.', severity: 'bad' };
+        crashed = true;
       }
     } finally {
       rt.activeCommand = null;
@@ -472,11 +489,12 @@
       }
     }
 
-    // 8. stamp the cooldown (successful commands only)
-    if (out.ok && cdLen > 0) stampCooldown(username, def, now);
+    // 8. stamp the cooldown (successful commands, and unexpected failures: see errorKeyOf)
+    if ((out.ok || crashed) && cdLen > 0) stampCooldown(username, def, now);
+    if (crashed) stampCooldown(username, def, now, errorKeyOf(def));
     if (out.ok && readOnly && ctx.countActivity && P() && P().get(SD.state.get(), username)) {
-      if (!rt.activity) rt.activity = {};
-      rt.activity[username] = now;
+      if (!rt.activity || typeof rt.activity !== 'object') rt.activity = U.dict();
+      U.setOwn(rt.activity, username, now);
     }
     return finish(out.ok, out.message, {
       severity: out.severity || (out.ok ? 'good' : 'bad'),
@@ -740,7 +758,7 @@
         parts.push(runner.name + ' feels the love (' + plural(total, 'cheer') + ' for the next race)');
         // Mood nudge (plan 6.6): a Nervous runner is cured by 10 cheers.
         const rt = SD.state.runtime;
-        if (!rt.nervousCheers) rt.nervousCheers = {};
+        if (!rt.nervousCheers) rt.nervousCheers = U.dict();
         if (runner.mood === 'Nervous') {
           const n = (rt.nervousCheers[runner.id] || 0) + 1;
           if (n >= SD.CONFIG.MOOD.NERVOUS_CURE_CHEERS) {
@@ -1335,8 +1353,9 @@
         runner.ribbonColor = null;
         return { message: runner.name + ' takes the ribbon off.', severity: 'info' };
       }
-      const named = (SD.DATA.RIBBON_COLORS || {})[raw];
-      let colour = named || null;
+      // Own, string-valued entries only: 'constructor' / '__proto__' are not colours.
+      const named = U.own(SD.DATA.RIBBON_COLORS, raw);
+      let colour = typeof named === 'string' && named ? named : null;
       const hex = /^#?([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(raw);
       if (!colour && hex) {
         let h = hex[1].toLowerCase();
@@ -1344,14 +1363,14 @@
         colour = '#' + h;
       }
       if (!colour) throw new CommandError('Unknown colour "' + args.join(' ').slice(0, 20) + '". ' + ribbonHelp(), { severity: 'info' });
-      if (runner.ribbonColor && runner.ribbonColor.toLowerCase() === colour) {
+      if (typeof runner.ribbonColor === 'string' && runner.ribbonColor.toLowerCase() === colour) {
         throw new CommandError(runner.name + ' already wears that ribbon.', { severity: 'info' });
       }
       const pay = spend(ctx, EC().RIBBON_COST, 'ribbon', 'A ribbon');
       // --- commit ---
       const balance = pay();
       runner.ribbonColor = colour;
-      const label = named ? raw : colour;
+      const label = colour === named ? raw : colour;
       SD.state.log('ribbon', ctx.displayName + ' tied a ' + label + ' ribbon on ' + runner.name + '.', 'good', { runnerId: runner.id });
       ctx.effects.push({ type: 'ribbon', runnerId: runner.id, color: colour });
       return { message: '\u{1F380} ' + runner.name + ' now wears a ' + label + ' ribbon!' + DOT + balance + ' SP left', severity: 'good' };

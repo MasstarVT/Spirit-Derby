@@ -14,10 +14,11 @@
   let depth = 0; // nesting level of mutate()
 
   // Non-persisted runtime data. Survives state.set() (it is about this browser session).
+  // Maps keyed by login or id have no prototype (SD.util.dict); readers still use own reads.
   const runtime = {
-    cooldowns: {},        // username -> { cmd: timestampMs }
-    activity: {},         // username -> last read-only command that counted toward stats.commands
-    runnerCooldowns: {},  // runnerId -> { rest: timestampMs }
+    cooldowns: U.dict(),        // username -> { cmd: timestampMs }
+    activity: U.dict(),         // username -> last read-only command that counted toward stats.commands
+    runnerCooldowns: U.dict(),  // runnerId -> { rest: timestampMs }
     chatFeed: [],
     connected: { twitch: 'off', bridge: 'off' },
     lastClockAt: null,    // last game.tickClock() timestamp
@@ -175,7 +176,8 @@
   function player(username, st) {
     st = st || current;
     if (!st || !username) return null;
-    return st.players[String(username).toLowerCase().replace(/^@+/, '')] || null;
+    const p = U.own(st.players, String(username).toLowerCase().replace(/^@+/, ''));
+    return p && typeof p === 'object' ? p : null;
   }
 
   function activeRunners(st) {

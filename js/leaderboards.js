@@ -71,17 +71,18 @@
   ];
   const SCOPES = ['season', 'all'];
 
-  const byId = {};
-  const aliasIndex = {};
+  // No-prototype maps (SD.util.dict): '!lb constructor' must not find Object.prototype.constructor.
+  const byId = U.dict();
+  const aliasIndex = U.dict();
   function norm(s) { return String(s == null ? '' : s).toLowerCase().replace(/[^a-z0-9]/g, ''); }
   CATEGORIES.forEach(function (c) {
     byId[c.id] = c;
     [c.id, c.short].concat(c.aliases).forEach(function (a) { const k = norm(a); if (k && !aliasIndex[k]) aliasIndex[k] = c.id; });
   });
-  const SCOPE_WORDS = {
+  const SCOPE_WORDS = U.dict({
     season: 'season', current: 'season', now: 'season', s: 'season',
     all: 'all', alltime: 'all', ever: 'all', lifetime: 'all', total: 'all', overall: 'all', forever: 'all'
-  };
+  });
 
   // ---------------------------------------------------------------------------
   // Lookups

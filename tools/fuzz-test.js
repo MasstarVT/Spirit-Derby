@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /*
  * Spirit Derby - tools/fuzz-test.js (M6)
- * Headless season fuzz: a seeded rng drives 15 fictional viewers (three of them mods, plus the
+ * Headless season fuzz: a seeded rng drives 17 fictional viewers (four of them mods, plus the
  * streamer's own console) who spam random commands - every registered command and alias with
  * valid, invalid and hostile arguments, unknown runners, spam bursts, mid-race attempts, mod
  * commands from non-mods, !bet all, !create - across 3 full seasons, while races start at
@@ -26,6 +26,8 @@
  *     that are not their login (きつね for kitsune_jp, "Mod Mia" for modmia, "Fox Fan" for user_42),
  *     the streamer's console speaks as '#streamer', and a spoofed '#streamer' arrives from Twitch;
  *     SEND AS <viewer> (source admin, the viewer's login) plays and must succeed at least once
+ *   - the logins 'constructor' and '__proto__' (a mod) play like anyone, and neither Object nor
+ *     Object.prototype ever gains a key (review batch 3)
  *   - at most one open bet per player, bets within limits on known runners; queued effects within caps
  *   - currentRace is null or a well-formed record in a valid status; hype within 0..max
  * After every race (and every 25 commands with no race running): the finished record is sane
@@ -90,7 +92,7 @@ SD.persistence.setAutoSave(false);
 const rng = SD.rng.create(SEED);            // the fuzz's own choices (the game has its own seeds)
 // SP ledger: within a season every player's balance = balance at season start + SP earned - SP spent
 // (refunds lower spSpentTotal). The baseline is taken when a season starts (and is 0 for new players).
-const spBase = {};
+const spBase = Object.create(null);   // keyed by login ('constructor' / '__proto__' are viewers too)
 SD.bus.on(SD.EVENTS.SEASON_STARTED, function () {
   const st = SD.state.get();
   Object.keys(st.players).forEach(function (k) { spBase[k] = st.players[k].spiritPoints; });
@@ -105,8 +107,12 @@ const VIEWERS = [
   { name: 'BrambleBob' }, { name: 'LanternLiz', isMod: true }, { name: 'Raid_Rick' }, { name: 'xX_Owl_Xx' },
   { name: 'Zoë_Ümlaut' }, { name: '@AtSign' }, { name: 'Spam Sam' }, { name: 'ModMaya', isMod: true },
   // name = the login (player key), display = a display name that is NOT the login in other case
-  { name: 'kitsune_jp', display: 'きつね' }, { name: 'modmia', display: 'Mod Mia', isMod: true }, { name: 'user_42', display: 'Fox Fan' }
+  { name: 'kitsune_jp', display: 'きつね' }, { name: 'modmia', display: 'Mod Mia', isMod: true }, { name: 'user_42', display: 'Fox Fan' },
+  // logins named like Object.prototype members (review batch 3): real viewers, never Object.prototype
+  { name: 'constructor' }, { name: '__proto__', display: 'Proto Fan', isMod: true }
 ];
+const PROTO_NAMES = Object.getOwnPropertyNames(Object.prototype).sort().join(',');
+const OBJECT_NAMES = Object.getOwnPropertyNames(Object).sort().join(',');
 const STREAMER = { name: SD.players.STREAMER_KEY, display: 'Streamer', admin: true };
 const SPOOF = { name: '#Streamer', display: 'Streamer', spoof: true };   // a Twitch / bridge line claiming the console key
 // SEND AS <viewer>: the streamer acting for a viewer, exactly as SD.ui.admin.sendAs() does it (the
@@ -199,7 +205,7 @@ function lineFor(v) {
     case 'hype': return '!hype';
     case 'achievements': return pick(['!achievements', '!ach', '!badges ' + viewerArg()]);
     case 'alias': return pick(['!T speed', '!LB wins all', '!Stats', '!R', '!C moss', '!I glow', '!H', '!Commands', '!TOP xp', '!ACH']);
-    case 'unknown': return pick(['!discord', '!so @someone', '!xyz', '!', '!!', '!123', '!train_', '!bet_', '!créer', '!' + 'z'.repeat(40)]);
+    case 'unknown': return pick(['!discord', '!so @someone', '!xyz', '!', '!!', '!123', '!train_', '!bet_', '!créer', '!' + 'z'.repeat(40), '!constructor', '!__proto__']);
     default: return pick(['LET\'S GOOO', 'no way', 'who fed the boar', '   ', '!', 'moss moss moss', '@FoxFan hi', 'mushroom rings are OP']);
   }
 }
@@ -269,7 +275,7 @@ function checkState(where) {
   // runners
   const names = {};
   let active = 0;
-  const owners = {};
+  const owners = Object.create(null);
   st.runners.forEach(function (r) {
     const cap = SD.runners.statCap(r.level);
     const statsOk = C.STATS.every(function (k) { return Number.isInteger(r.stats[k]) && r.stats[k] >= 1 && r.stats[k] <= cap; });
@@ -320,14 +326,16 @@ function checkState(where) {
   });
 
   ok(!Object.keys(st.hype.contributions).some(SD.players.isReservedKey), 'identity: no hype credit for a reserved key', where);
+  ok(Object.getOwnPropertyNames(Object.prototype).sort().join(',') === PROTO_NAMES && Object.getOwnPropertyNames(Object).sort().join(',') === OBJECT_NAMES &&
+    ({}).isMod === undefined, 'identity: Object.prototype / Object never gain keys from chat', where);
   ok(!st.achievements.unlocked.some(function (a) { return SD.players.isReservedKey(a.username); }), 'identity: no achievement for a reserved key', where);
 
   // bets
-  const betBy = {};
+  const betBy = Object.create(null);
   st.bets.forEach(function (b) {
     ok(!betBy[b.username], 'bets: at most one open bet per player', where + ' ' + b.username);
     betBy[b.username] = true;
-    ok(!!st.players[b.username], 'bets: placed by a known player', where + ' ' + b.username);
+    ok(Object.prototype.hasOwnProperty.call(st.players, b.username), 'bets: placed by a known player', where + ' ' + b.username);
     ok(!!SD.state.runnerById(b.runnerId, st), 'bets: on a known runner', where + ' ' + b.runnerId);
     ok(Number.isInteger(b.amount) && b.amount >= C.ECONOMY.BET_MIN && b.amount <= C.ECONOMY.BET_MAX, 'bets: amount within limits', where + ' ' + b.amount);
     ok(b.odds >= C.RACE.ODDS.MIN && b.odds <= C.RACE.ODDS.MAX, 'bets: odds within limits', where + ' ' + b.odds);
@@ -343,7 +351,7 @@ function checkState(where) {
     const k = a.username + ':' + a.id;
     ok(!ach[k], 'achievements: unlocked once per viewer', where + ' ' + k);
     ach[k] = true;
-    const p = st.players[a.username];
+    const p = Object.prototype.hasOwnProperty.call(st.players, a.username) ? st.players[a.username] : null;
     ok(!!p && p.achievements.indexOf(a.id) >= 0, 'achievements: listed on the player', where + ' ' + k);
   });
   if (st.currentRace && SD.state.isRaceLocked(st)) {

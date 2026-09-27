@@ -112,10 +112,18 @@
     return p;
   }
 
+  // state.players is a plain JSON map keyed by login, and 'constructor' / '__proto__' are valid
+  // logins: every lookup is an own-property read (SD.util.own) and every insert an own write
+  // (SD.util.setOwn), so those names get their own profile and never reach Object.prototype.
   function get(state, username) {
     if (!state || !state.players || username == null) return null;
     const k = keyOf(username);
-    return k ? (state.players[k] || null) : null;
+    return k ? byKey(state, k) : null;
+  }
+  // The player stored under exactly this key (no keyOf normalisation), or null.
+  function byKey(state, k) {
+    const p = state ? U.own(state.players, k) : undefined;
+    return p && typeof p === 'object' ? p : null;
   }
 
   function all(state) {
@@ -184,11 +192,11 @@
     opts = opts || {};
     const key = keyOf(username);
     if (!key || isReservedKey(key)) return { player: null, created: false };
-    let p = state.players[key];
+    let p = get(state, key);
     if (p) return { player: p, created: false };
     p = create(key, displayName || username, opts);
     p.lastDailyDay = dayKey(state);
-    state.players[key] = p;
+    U.setOwn(state.players, key, p);
     addSp(state, key, E().JOIN_SP, 'join');
     if (isCurrent(state)) SD.state.log('player', p.displayName + ' joined the Spirit Derby!', 'good', { username: p.username });
     // Emitted once the profile is complete (join SP credited), so listeners such as
@@ -243,7 +251,7 @@
   function ownerName(state, runner) {
     const k = ownerKey(runner);
     if (!k) return null;
-    const p = state && state.players && Object.prototype.hasOwnProperty.call(state.players, k) ? state.players[k] : null;
+    const p = byKey(state, k);
     return (p && p.displayName) || runner.owner || k;
   }
 
@@ -372,18 +380,19 @@
   function applyRaceResults(state, record) {
     const payouts = [];
     if (!state || !record || !Array.isArray(record.results)) return payouts;
-    const byRunner = {};
+    // Keyed by login / runner id: no-prototype maps (a '__proto__' key must be stored, not swallowed).
+    const byRunner = U.dict();
     record.results.forEach(function (res) { byRunner[res.runnerId] = res; });
-    const participated = {};
-    const won = {};
+    const participated = U.dict();
+    const won = U.dict();
 
     // Owners (in finishing order), by login key at race time.
-    const ownerOf = {};
+    const ownerOf = U.dict();
     record.results.forEach(function (res) {
       const k = resultOwnerKey(record, res);
       ownerOf[res.runnerId] = k;
       if (!k) return;
-      const p = Object.prototype.hasOwnProperty.call(state.players, k) ? state.players[k] : null;
+      const p = byKey(state, k);
       if (!p) return;
       const amount = award(state, p.username, res.spOwner || 0, 'raceOwner');
       participated[p.username] = true;

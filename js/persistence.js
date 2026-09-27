@@ -223,9 +223,13 @@
   }
 
   // Settings: missing keys get defaults (fillDefaults); keys of the wrong type or out of range are
-  // reset to their default. Unknown keys are kept (a newer build may know them).
+  // reset to their default. Unknown keys are kept (a newer build may know them), except keys named
+  // like Object.prototype members (see below).
   function normalizeSettings(s, d) {
     const C = SD.CONFIG.RACE;
+    // Own keys named like Object.prototype members ('toString', 'constructor', '__proto__' ...) are
+    // never settings: builds before review batch 3 let updateSettings store them. They are dropped.
+    Object.keys(s).forEach(function (k) { if (k in Object.prototype) delete s[k]; });
     Object.keys(d).forEach(function (k) {
       const dv = d[k];
       if (dv === null) return;                                  // seedOverride: checked below
@@ -315,13 +319,15 @@
       if (n > maxId) maxId = n;
     });
     if (!(M.runnerCounter >= maxId)) M.runnerCounter = maxId;
-    const seenIds = {};
+    const U = SD.util;
+    const seenIds = U.dict();
     st.runners.forEach(function (r) {
       if (r.id == null || r.id === '' || seenIds[r.id]) r.id = SD.runners ? SD.runners.nextId(st) : 'r' + (++M.runnerCounter);
       seenIds[r.id] = true;
     });
 
-    // players (keyed by username key)
+    // players (keyed by username key). Keys come from the save ('constructor' / '__proto__' are
+    // valid logins, and JSON.parse stores '__proto__' as an own key): own reads / writes only.
     const players = {};
     Object.keys(st.players).forEach(function (k) {
       const p = st.players[k];
@@ -329,10 +335,10 @@
       if (!p.username) p.username = k;
       if (SD.players && typeof SD.players.normalize === 'function') SD.players.normalize(p);
       const key = p.username || String(k).toLowerCase();
-      if (!players[key]) players[key] = p;
+      if (!hasOwn(players, key)) U.setOwn(players, key, p);
     });
     if (Object.keys(players).length !== Object.keys(st.players).length ||
-        Object.keys(players).some(function (k) { return st.players[k] !== players[k]; })) {
+        Object.keys(players).some(function (k) { return U.own(st.players, k) !== players[k]; })) {
       st.players = players;
     }
     Object.keys(st.players).forEach(function (k) {
@@ -343,12 +349,12 @@
     resolveOwners(st);
 
     // open bets: well-formed, one per player (older duplicates are refunded), known player + runner
-    const betBy = {};
+    const betBy = U.dict();
     const bets = [];
     st.bets.forEach(function (b) {
       if (!isObj(b) || !b.username || !seenIds[b.runnerId] || !(isNum(b.amount) && b.amount > 0) || !(isNum(b.odds) && b.odds > 0)) return;
-      const p = st.players[String(b.username).toLowerCase()];
-      if (!p) return;
+      const p = U.own(st.players, String(b.username).toLowerCase());
+      if (!isObj(p)) return;
       if (betBy[p.username]) {
         const old = betBy[p.username];
         p.spiritPoints += old.amount;                        // keep the newest bet, refund the older one
@@ -403,9 +409,9 @@
     const keyOf = PL ? PL.keyOf : function (n) { return String(n == null ? '' : n).trim().replace(/^@+/, '').toLowerCase(); };
     const players = st.players;
     const player = function (k) { return k && hasOwn(players, k) ? players[k] : null; };
-    const byId = {};
+    const byId = SD.util.dict();
     st.runners.forEach(function (r) { byId[r.id] = r; });
-    const holds = {};              // player key -> runner id it owns
+    const holds = SD.util.dict();  // player key -> runner id it owns
     const legacy = [];
     st.runners.forEach(function (r) {
       if (r.ownerKey) {
@@ -555,8 +561,8 @@
   function refundBetsRaw(st) {
     let count = 0;
     (st.bets || []).forEach(function (b) {
-      const p = st.players[String(b.username || '').toLowerCase()];
-      if (p && b.amount > 0) { p.spiritPoints = (p.spiritPoints || 0) + b.amount; count++; }
+      const p = SD.util.own(st.players, String(b.username || '').toLowerCase());
+      if (isObj(p) && b.amount > 0) { p.spiritPoints = (p.spiritPoints || 0) + b.amount; count++; }
     });
     st.bets = [];
     return count;

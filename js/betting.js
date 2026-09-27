@@ -68,7 +68,7 @@
 
   // Queued cheers per runner in the field (the same cheerBonus input startRace uses).
   function queuedCheers(state, ids) {
-    const out = {};
+    const out = U.dict();
     (Array.isArray(state.raceEffects) ? state.raceEffects : []).forEach(function (e) {
       if (e && e.type === 'cheer' && ids.indexOf(e.runnerId) >= 0) out[e.runnerId] = (out[e.runnerId] || 0) + Math.max(1, e.count || 1);
     });
@@ -90,7 +90,7 @@
   // -> { key, distance, field:[Runner], entrants:[Entrant], byId:{ runnerId: Entrant }, favourite:Entrant|null }
   function fieldOdds(state) {
     state = state || (SD.state && SD.state.get());
-    const empty = { key: '', distance: 0, field: [], entrants: [], byId: {}, favourite: null };
+    const empty = { key: '', distance: 0, field: [], entrants: [], byId: U.dict(), favourite: null };
     if (!state || !SD.game || typeof SD.game.previewField !== 'function' || !SD.race) return empty;
     let field;
     try { field = SD.game.previewField(); } catch (e) { return empty; }
@@ -104,7 +104,7 @@
       distance: distance, hypeLevel: state.hype.value,
       dayEvent: SD.events.dayEventById(state.season.activeDayEvent), cheerBonus: cheers
     });
-    const byId = {};
+    const byId = U.dict();
     entrants.forEach(function (e) { byId[e.runnerId] = e; });
     const favourite = entrants.slice().sort(function (a, b) { return a.odds - b.odds; })[0] || null;
     const value = { key: key, distance: distance, field: field, entrants: entrants, byId: byId, favourite: favourite };
@@ -258,7 +258,7 @@
   // SD.game.startRace: refund bets on runners that did not make the field (the paddock preview
   // can change between the bet and the gate, e.g. a runner dropped below race energy).
   function lockForRace(state, record) {
-    const ids = {};
+    const ids = U.dict();
     (record && record.entrants || []).forEach(function (e) { ids[e.runnerId] = true; });
     const refunded = [];
     list(state).slice().forEach(function (b) {
@@ -282,7 +282,7 @@
     if (!state || !record || !Array.isArray(record.results) || !record.results.length) return out;
     const bets = list(state).slice();
     if (!bets.length) return out;
-    const inField = {};
+    const inField = U.dict();
     (record.entrants || []).forEach(function (e) { inField[e.runnerId] = e; });
     const winner = record.results.filter(function (r) { return r.place === 1; })[0] || record.results[0];
     const leftovers = [];

@@ -333,7 +333,9 @@
       REPLY_QUEUE_MAX: 6
     },
 
-    COOLDOWNS: { USER_S: 10, SABOTAGE_S: 600, CHEER_S: 30 },
+    // ERROR_S: after a command fails unexpectedly (a bug, not a normal refusal) that viewer's same
+    // command is refused for max(its own cooldown, ERROR_S) seconds, so it can't flood the log.
+    COOLDOWNS: { USER_S: 10, SABOTAGE_S: 600, CHEER_S: 30, ERROR_S: 30 },
 
     // -------------------------------------------------------------------------
     // LEADERBOARDS (plan sections 4 and 7) - six independent boards

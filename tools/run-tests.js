@@ -23,8 +23,11 @@
  *                schema 3 owner-key migration from tools/fixtures/save-v2-display-names.json)
  *   identity     tools/identity-test.js (review batch 2: login-keyed players and runner ownership, the reserved
  *                '#streamer' console actor, SEND AS / chat panel senders by login, roster buttons)
+ *   protokeys    tools/protokeys-test.js (review batch 3: chat words, usernames, arguments, settings keys and save
+ *                keys named like Object.prototype members - 'constructor', '__proto__', 'toString' ... - never reach
+ *                Object.prototype; every command swept with them; error cooldown for crashing commands)
  *   runners      tools/runners-test.js (M6 !create, admin SPAWN RUNNER, MAX_ACTIVE, SD.debug)
- *   fuzz         tools/fuzz-test.js (M6 seeded 3-season fuzz: 15 viewers spamming every command, random race
+ *   fuzz         tools/fuzz-test.js (M6 seeded 3-season fuzz: 17 viewers spamming every command, random race
  *                starts / pauses / ends / aborts / reloads, invariants after every command and race)
  */
 'use strict';
@@ -42,6 +45,7 @@ const SUITES = [
   { name: 'community', file: 'community-test.js', args: VERBOSE ? ['--verbose'] : [] },
   { name: 'persistence', file: 'persistence-test.js', args: VERBOSE ? ['--verbose'] : [] },
   { name: 'identity', file: 'identity-test.js', args: VERBOSE ? ['--verbose'] : [] },
+  { name: 'protokeys', file: 'protokeys-test.js', args: VERBOSE ? ['--verbose'] : [] },
   { name: 'runners', file: 'runners-test.js', args: VERBOSE ? ['--verbose'] : [] },
   { name: 'fuzz', file: 'fuzz-test.js', args: VERBOSE ? ['--verbose'] : [] }
 ];

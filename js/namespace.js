@@ -71,6 +71,28 @@
     return String(text == null ? '' : text).replace(SECRET_PARAM_RE, '$1…').replace(URL_USERINFO_RE, '$1…@');
   }
 
+  // Prototype-safe maps. Keys that come from chat, the bridge or a save file ('constructor',
+  // '__proto__', 'toString', ...) must never reach Object.prototype: a bare map[key] returns the
+  // inherited member, and map['__proto__'] = x on a plain object swaps its prototype instead of
+  // storing x. Persisted maps (state.players, hype.contributions, achievements.progress) stay
+  // plain JSON objects and go through own / setOwn; module-local and runtime maps use dict().
+  const hasOwnProp = Object.prototype.hasOwnProperty;
+  function hasOwn(obj, key) { return obj != null && hasOwnProp.call(obj, key); }
+  // obj[key] only when it is obj's OWN property, else undefined.
+  function own(obj, key) { return obj != null && hasOwnProp.call(obj, key) ? obj[key] : undefined; }
+  // obj[key] = value as an own, enumerable data property (also for '__proto__'). Returns value.
+  function setOwn(obj, key, value) {
+    if (hasOwnProp.call(obj, key)) obj[key] = value;
+    else Object.defineProperty(obj, key, { value: value, writable: true, enumerable: true, configurable: true });
+    return value;
+  }
+  // A map with no prototype (no inherited keys), optionally filled from src's own keys.
+  function dict(src) {
+    const d = Object.create(null);
+    if (src && typeof src === 'object') Object.keys(src).forEach(function (k) { d[k] = src[k]; });
+    return d;
+  }
+
   SD.util = {
     clamp: clamp,
     round1: round1,
@@ -82,6 +104,10 @@
     ordinal: ordinal,
     fmtDuration: fmtDuration,
     capitalize: capitalize,
-    redactSecrets: redactSecrets
+    redactSecrets: redactSecrets,
+    hasOwn: hasOwn,
+    own: own,
+    setOwn: setOwn,
+    dict: dict
   };
 })(globalThis.SD = globalThis.SD || {});

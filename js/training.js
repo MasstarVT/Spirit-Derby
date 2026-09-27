@@ -18,7 +18,9 @@
   function normalizeStat(stat) {
     if (stat == null) return null;
     const k = String(stat).toLowerCase().replace(/[^a-z]/g, '');
-    return SD.DATA.STAT_ALIASES[k] || null;
+    // Own entries only: 'constructor' (all letters, so it survives the strip) is not a stat.
+    const v = U.own(SD.DATA.STAT_ALIASES, k);
+    return typeof v === 'string' && v ? v : null;
   }
 
   function fill(template, name) { return String(template).replace(/\{r\}/g, name); }

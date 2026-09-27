@@ -89,7 +89,10 @@
     if (opts.by && delta > 0) {
       const key = String(opts.by).toLowerCase();
       // The streamer's console ('#streamer', SD.players.isReservedKey) moves the meter but is not a viewer.
-      if (!(SD.players && SD.players.isReservedKey(key))) H.contributions[key] = U.round1((H.contributions[key] || 0) + delta);
+      // Keyed by login: own read / own write, so 'constructor' / '__proto__' get their own entry.
+      if (!(SD.players && SD.players.isReservedKey(key))) {
+        U.setOwn(H.contributions, key, U.round1((Number(U.own(H.contributions, key)) || 0) + delta));
+      }
     }
     const crossed = syncThresholds(state, true, opts);
     if (delta !== 0) emitChanged(state, delta, opts.by, opts.reason);

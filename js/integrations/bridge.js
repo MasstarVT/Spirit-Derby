@@ -243,7 +243,7 @@
   // race:finished payload → outbound race frame (with a ready-to-post chat line).
   function raceFrame(p) {
     const rec = (p && p.record) || {};
-    const ents = {};
+    const ents = Object.create(null);
     (rec.entrants || []).forEach(function (e) { if (e && e.runnerId) ents[e.runnerId] = e; });
     const results = ((p && p.results) || rec.results || []).slice().sort(function (a, b) {
       return (Number(a.place) || 99) - (Number(b.place) || 99);
@@ -275,7 +275,7 @@
     state: 'off', url: '', since: now(), messages: 0, dropped: 0, droppedCommands: 0, malformed: 0, ignored: 0, sent: 0,
     lastError: null, lastBad: null, attempt: 0, nextRetryAt: null
   };
-  const options = { replySources: { bridge: true, twitch: true }, replyUnknown: false };
+  const options = { replySources: Object.assign(Object.create(null), { bridge: true, twitch: true }), replyUnknown: false };
   const limiter = createRateLimiter(RATE.MAX, RATE.WINDOW_MS);          // commands
   const chatLimiter = createRateLimiter(RATE.CHAT_MAX, RATE.WINDOW_MS); // plain chat
   let enabled = false;
@@ -571,7 +571,7 @@
   function configure(o) {
     o = o || {};
     if (Array.isArray(o.replySources)) {
-      options.replySources = {};
+      options.replySources = Object.create(null);
       o.replySources.forEach(function (s) { options.replySources[String(s)] = true; });
     }
     if (o.replyUnknown !== undefined) options.replyUnknown = !!o.replyUnknown;

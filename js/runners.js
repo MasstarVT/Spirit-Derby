@@ -33,7 +33,7 @@
 
   // Bump state.meta.runnerCounter and return an unused id.
   function nextId(state) {
-    const used = {};
+    const used = U.dict();
     state.runners.forEach(function (r) { used[r.id] = true; });
     let id;
     do {
@@ -67,8 +67,15 @@
     return changed;
   }
 
+  // Catalog entry for a key from a save, the admin drawer or an API caller: own entries only, so
+  // 'constructor' / '__proto__' are unknown styles / moods / species / abilities.
+  function entry(table, key) {
+    const v = key == null ? undefined : U.own(table, key);
+    return v && typeof v === 'object' ? v : null;
+  }
+
   function setMood(runner, mood) {
-    if (!runner || !SD.DATA.MOODS[mood]) return false;
+    if (!runner || !entry(SD.DATA.MOODS, mood)) return false;
     const changed = runner.mood !== mood;
     runner.mood = mood;
     return changed;
@@ -82,7 +89,7 @@
   }
 
   function abilityInfo(id) {
-    const a = SD.DATA.ABILITIES[id];
+    const a = entry(SD.DATA.ABILITIES, id);
     return a ? { id: id, name: a.name, desc: a.desc } : { id: null, name: 'None', desc: '' };
   }
 
@@ -101,7 +108,7 @@
       species: o.species || 'Forest Spirit',
       personality: o.personality || '',
       description: o.description || '',
-      style: SD.DATA.STYLES[o.style] ? o.style : 'paceChaser',
+      style: entry(SD.DATA.STYLES, o.style) ? o.style : 'paceChaser',
       stats: stats,
       baseStats: Object.assign({}, stats),
       level: 1,
@@ -111,7 +118,7 @@
       maxEnergy: energyMax(1),
       fatigue: SD.CONFIG.CONDITION.START_FATIGUE,
       condition: 'Excellent',
-      mood: SD.DATA.MOODS[o.mood] ? o.mood : SD.CONFIG.MOOD.DEFAULT,
+      mood: entry(SD.DATA.MOODS, o.mood) ? o.mood : SD.CONFIG.MOOD.DEFAULT,
       ability: abilityInfo(o.abilityId),
       owner: null,              // owner's display label (presentation only)
       ownerKey: null,           // owner's login key: THE ownership field (players.claim / release)
@@ -235,11 +242,11 @@
   function spawnRandom(rng, opts) {
     opts = opts || {};
     const keys = Object.keys(SD.DATA.SPECIES);
-    const speciesId = SD.DATA.SPECIES[opts.speciesId] ? opts.speciesId : rng.pick(keys);
+    const speciesId = entry(SD.DATA.SPECIES, opts.speciesId) ? opts.speciesId : rng.pick(keys);
     const sp = SD.DATA.SPECIES[speciesId];
-    const style = SD.DATA.STYLES[opts.style] ? opts.style : rng.pick(sp.styles);
+    const style = entry(SD.DATA.STYLES, opts.style) ? opts.style : rng.pick(sp.styles);
     const stats = rollStats(rng, sp.statBias, SD.CONFIG.PROGRESSION.STAT_TOTAL);
-    const abilityId = SD.DATA.ABILITIES[opts.abilityId] ? opts.abilityId : rng.pick(SD.DATA.STYLE_ABILITIES[style]);
+    const abilityId = entry(SD.DATA.ABILITIES, opts.abilityId) ? opts.abilityId : rng.pick(SD.DATA.STYLE_ABILITIES[style]);
     const name = sanitizeName(opts.name) || randomName(rng);
     let id = opts.id;
     if (!id) {
@@ -336,8 +343,8 @@
     runner.trainStreak.count = Math.round(finiteOr(runner.trainStreak.count, 0, 0));
     runner.daily.snacks = Math.round(finiteOr(runner.daily.snacks, 0, 0));
     if (!Array.isArray(runner.effects)) runner.effects = [];
-    if (!SD.DATA.STYLES[runner.style]) runner.style = tmpl.style;
-    if (!SD.DATA.MOODS[runner.mood]) runner.mood = SD.CONFIG.MOOD.DEFAULT;
+    if (!entry(SD.DATA.STYLES, runner.style)) runner.style = tmpl.style;
+    if (!entry(SD.DATA.MOODS, runner.mood)) runner.mood = SD.CONFIG.MOOD.DEFAULT;
     if (!isObj(runner.ability)) runner.ability = abilityInfo(runner.abilityId);
     if (runner.ribbonColor !== null && typeof runner.ribbonColor !== 'string') runner.ribbonColor = null;
     if (runner.owner != null && typeof runner.owner !== 'string') runner.owner = String(runner.owner);
@@ -380,7 +387,7 @@
     return STATS.reduce(function (a, k) { return a + (runner.stats[k] || 0); }, 0);
   }
 
-  function styleName(style) { return SD.DATA.STYLES[style] ? SD.DATA.STYLES[style].name : style; }
+  function styleName(style) { const s = entry(SD.DATA.STYLES, style); return s ? s.name : style; }
 
   // One-line summary for chat replies.
   function describe(runner) {
