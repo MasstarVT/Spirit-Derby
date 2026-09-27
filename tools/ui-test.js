@@ -600,7 +600,9 @@ section('D. 9-10 runner fields (ui-track#6)');
   SD.game.updateSettings({ runnerCount: 8 });
   const html8 = SD.ui.track.paddockHTML(S());
   ok(/class="paddock__grid"/.test(html8) && !/paddock__grid--many/.test(html8), '8 runners: the plain grid');
-  ok(/\.paddock__grid--many\s*\{[^}]*minmax\(300px,\s*1fr\)/.test(css), 'css: .paddock__grid--many columns are at least 300 px (4 across 1392 px)');
+  // 332 px, not 300: roster names clip below 330 px at 20 px, so narrower windows (e.g. 1400x800, 3 x 306 px)
+  // must fall back to fewer, wider columns; 4 x 332 + 3 gaps still fits the 1402 px grid at 1920x1080.
+  ok(/\.paddock__grid--many\s*\{[^}]*minmax\(332px,\s*1fr\)/.test(css), 'css: .paddock__grid--many columns are at least 332 px (4 across 1402 px, no clipped roster names)');
   // Batch 11 fix round: the narrower cards leave out the running style, the owner comes before the energy
   // (so a cut meta line still shows it), and the leader line has no top margin (the 8-card paddock under
   // it overflowed by 1 px at 1920x1080 and showed a scrollbar).

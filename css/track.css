@@ -699,9 +699,11 @@
   grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
   gap: var(--sp-3);
 }
-/* Review batch 11 (R19): a 9-10 runner field (track.js adds --many) in columns of 300 px or more: four
-   across a 1920x1080 track, so 3 rows instead of 4, and the paddock fits with the leader line shown. */
-.paddock__grid--many { grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); }
+/* Review batch 11 (R19): a 9-10 runner field (track.js adds --many) in columns of 332 px or more: four
+   across a 1920x1080 track (a 1402 px grid, still four with a scrollbar), so 3 rows instead of 4, and the
+   paddock fits with the leader line shown. 330 px is the narrowest column in which every roster name fits
+   at 20 px; narrower windows fall back to fewer, wider columns instead of clipping the names. */
+.paddock__grid--many { grid-template-columns: repeat(auto-fill, minmax(332px, 1fr)); }
 .paddock__grid--many .paddock__name { font-size: 20px; }
 /* Fix round: the narrower cards leave out the running style (the roster card shows it), so condition and
    owner (track.js puts it before the energy) fit the ~150 px meta line instead of being cut after the style. */
