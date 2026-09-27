@@ -8,15 +8,19 @@
  *                                checkRace() do nothing, so suites that predate M5 are unaffected.
  *   check(state, trigger, ctx)   run one trigger's checks -> unlocked entries[]
  *   checkRace(state, record)     SD.game.finishRace hook -> every unlock tagged with this race
- *                                (owner results, sabotage backfires, winning bets)
+ *                                (owner results, sabotage backfires, settled bets: High Roller, winnings)
  *   unlock(state, user, id, extra)  award once: player.achievements (ids), state.achievements.unlocked
- *                                ({ id, name, username, displayName, sp, at, season, day, recordId? }),
- *                                +sp via SD.players.addSp, an epic log line, achievement:unlocked
+ *                                ({ id, name, username, displayName, sp, at, season, day, recordId? });
+ *                                extra: { recordId?, season?, day?, deferEvents? } (season/day default to the
+ *                                current ones), +sp via SD.players.addSp, an epic log line, achievement:unlocked
+ *                                (pushed onto extra.deferEvents instead when given: the caller emits it later)
+ *   awardSeasonChampion(state, summary)  SD.game's season rollover hook (inside its commit, before
+ *                                season:ended goes out) -> achievement:unlocked payloads to emit after
+ *                                season:ended / season:started
  *   listFor(state, user)         a viewer's unlocks in order, with name / desc / icon
  *
  * Bus triggers: player:joined, runner:claimed, runner:trained, runner:rested, hype:changed (who
- * added hype recently), hype:threshold, bet:placed, bet:resolved, race:finished, season:ended/started,
- * runner:levelup, player:sp, runner:spawned and command:result (!cheer, !snack, !sabotage).
+ * added hype recently), hype:threshold, bet:resolved, race:finished, runner:levelup, player:sp, runner:spawned and command:result (!cheer, !snack, !sabotage).
  * Listeners that fire outside a mutation wrap their writes in SD.state.mutate.
  * Count-based progress lives in state.achievements.progress[username] (trains, rests, snacks, podiums);
  * state.achievements.lastRaceChecked keeps the race checks to once per record.
@@ -84,9 +88,13 @@
     if (!Array.isArray(p.achievements)) p.achievements = [];
     if (p.achievements.indexOf(id) >= 0) return null;
     p.achievements.push(id); // marked before the SP award: player:sp re-enters check()
+    // extra.season / extra.day: the season an unlock belongs to when it is awarded after that season
+    // ended (Season Champion is awarded in the rollover, when state.season is already the next one).
+    const inSeason = extra && Number(extra.season) > 0;
     const entry = {
       id: id, name: d.name, username: p.username, displayName: p.displayName, sp: d.sp || 0,
-      at: SD.clock.now(), season: state.season.number, day: state.season.day
+      at: SD.clock.now(), season: inSeason ? Number(extra.season) : state.season.number,
+      day: inSeason && Number(extra.day) > 0 ? Number(extra.day) : state.season.day
     };
     if (extra && extra.recordId) entry.recordId = extra.recordId;
     store(state).unlocked.push(entry);
@@ -97,13 +105,13 @@
     }
     const rt = SD.state && SD.state.runtime;
     const ac = rt && rt.activeCommand;
-    if (SD.bus) {
-      SD.bus.emit(SD.EVENTS.ACHIEVEMENT_UNLOCKED, Object.assign({}, entry, {
-        desc: d.desc, icon: d.icon || '\u{1F3C5}', count: p.achievements.length, total: catalog().length,
-        // true when the viewer's own command caused it (the command reply already says so)
-        duringCommand: !!(ac && ac.username === p.username)
-      }));
-    }
+    const payload = Object.assign({}, entry, {
+      desc: d.desc, icon: d.icon || '\u{1F3C5}', count: p.achievements.length, total: catalog().length,
+      // true when the viewer's own command caused it (the command reply already says so)
+      duringCommand: !!(ac && ac.username === p.username)
+    });
+    if (extra && Array.isArray(extra.deferEvents)) extra.deferEvents.push(payload);
+    else if (SD.bus) SD.bus.emit(SD.EVENTS.ACHIEVEMENT_UNLOCKED, payload);
     return entry;
   }
 
@@ -182,14 +190,14 @@
       return recentContributors(state, c.by).map(function (u) { return unlock(state, u, id); });
     },
 
-    bet: function (state, c) {
-      const b = c.bet;
-      return b && b.amount >= (trig('highRoller').amountMin || 200) ? [unlock(state, b.username, 'highRoller')] : [];
-    },
+    // bet:resolved (review batch 4): High Roller needs a bet that was settled in a finished race, so a
+    // 200 SP bet that is cancelled, replaced or refunded (aborted / interrupted race) earns nothing.
     betResolved: function (state, c) {
       const out = [];
       const x = c.recordId ? { recordId: c.recordId } : null;
+      const min = trig('highRoller').amountMin || 200;
       (c.bets || []).forEach(function (b) {
+        if (b && b.amount >= min) out.push(unlock(state, b.username, 'highRoller', x));
         if (!b || !b.won) return;
         if (b.odds >= (trig('sharpEye').oddsMin || 5)) out.push(unlock(state, b.username, 'sharpEye', x));
         if (b.odds >= (trig('longshot').oddsMin || 10)) out.push(unlock(state, b.username, 'longshot', x));
@@ -235,11 +243,23 @@
       return out.concat(CHECKS.betResolved(state, { bets: rec.bets, recordId: rec.id }));
     },
 
+    // Recorded in the season that was won (not the one that just started): the ended season's summary
+    // and history entry count it too (endSeason built both before this unlock). c.deferEvents: see
+    // awardSeasonChampion.
     season: function (state, c) {
       const s = c.summary;
       const k = s ? (s.championOwnerKey || (s.championOwner ? keyOf(s.championOwner) : null)) : null;
       if (!k) return [];
-      return [unlock(state, k, 'seasonChampion')];
+      const extra = s.number ? { season: s.number, day: s.day } : {};
+      if (Array.isArray(c.deferEvents)) extra.deferEvents = c.deferEvents;
+      const entry = unlock(state, k, 'seasonChampion', extra);
+      if (entry && s.number) {
+        const hist = state.season && Array.isArray(state.season.history) ? state.season.history : [];
+        const h = hist.filter(function (x) { return x && x.number === s.number; }).pop();
+        if (h) h.achievementsCount = (Number(h.achievementsCount) || 0) + 1;
+        if (Array.isArray(s.achievements)) { s.achievements.push(entry); s.achievementsCount = s.achievements.length; }
+      }
+      return [entry];
     },
 
     levelup: function (state, c) {
@@ -289,7 +309,21 @@
     }
   }
 
-  // SD.game.finishRace hook: race checks, then every unlock tagged with this race (winning bets
+  // SD.game's season rollover hook (auto-advance after the last race, NEXT DAY on the last day, RESET
+  // SEASON), called inside the rollover commit after endSeason + startSeason and BEFORE season:ended is
+  // emitted: the champion's unlock is recorded in the ended season and added to the summary object and
+  // its season.history entry, so every season:ended listener (the summary modal renders synchronously)
+  // sees it. The reward lands in the new season's balance, as before. The achievement:unlocked payloads
+  // are returned for the caller to emit AFTER season:ended / season:started, so the end of the season
+  // is announced before the unlock.
+  function awardSeasonChampion(state, summary) {
+    const events = [];
+    if (!enabled || !state || !summary || !(summary.championOwnerKey || summary.championOwner)) return events;
+    check(state, 'season', { summary: summary, deferEvents: events });
+    return events;
+  }
+
+  // SD.game.finishRace hook: race checks, then every unlock tagged with this race (settled bets
   // were already checked on bet:resolved during the same finish).
   function checkRace(state, record) {
     if (!enabled || !state || !record) return [];
@@ -332,23 +366,18 @@
     on(E.RUNNER_RESTED, function (p) { if (p && p.by) run('rest', { username: p.by }); });
     on(E.HYPE_CHANGED, noteHype);
     on(E.HYPE_THRESHOLD, function (p) { if (p && p.id) run('hype', { threshold: p.id, by: p.by }); });
-    on(E.BET_PLACED, function (p) { if (p && p.bet) run('bet', { bet: p.bet }); });
     on(E.BET_RESOLVED, function (p) {
-      if (p && !p.refunded && Array.isArray(p.bets) && p.bets.some(function (b) { return b.won; })) run('betResolved', { bets: p.bets, recordId: p.recordId });
+      const min = trig('highRoller').amountMin || 200;
+      if (p && !p.refunded && Array.isArray(p.bets) && p.bets.some(function (b) { return b && (b.won || b.amount >= min); })) {
+        run('betResolved', { bets: p.bets, recordId: p.recordId });
+      }
     });
     on(E.RACE_FINISHED, function (p) {
       const st = cur();
       if (p && p.record && st && store(st).lastRaceChecked !== p.record.id) run('race', { record: p.record });
     });
-    // Season Champion is awarded on season:started (emitted right after season:ended) so the UI's
-    // own season:ended handlers (summary modal, chat line) run before the unlock is announced.
-    let endedSummary = null;
-    on(E.SEASON_ENDED, function (p) { endedSummary = p && p.summary ? p.summary : null; });
-    on(E.SEASON_STARTED, function () {
-      const sum = endedSummary;
-      endedSummary = null;
-      if (sum && (sum.championOwnerKey || sum.championOwner)) run('season', { summary: sum });
-    });
+    // Season Champion has no listener: SD.game awards it in the rollover (awardSeasonChampion), so the
+    // season:ended summary already counts it when the summary modal renders.
     on(E.RUNNER_LEVELUP, function (p) { if (p && p.level >= (trig('doubleDigits').levelMin || 10)) run('levelup', p); });
     // The listeners below pre-check so a no-op never opens a mutation (no extra state:changed / save).
     on(E.PLAYER_SP, function (p) {
@@ -388,6 +417,7 @@
     has: has,
     check: check,
     checkRace: checkRace,
+    awardSeasonChampion: awardSeasonChampion,
     unlock: unlock,
     listFor: listFor,
     progress: progress,

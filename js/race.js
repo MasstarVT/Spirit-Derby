@@ -2,7 +2,7 @@
  * Spirit Derby - race.js
  * The deterministic race engine (plan section 5.1). PURE: never touches SD.state.
  *
- *   entrants = SD.race.buildEntrants(runners, { distance, hypeLevel, dayEvent, cheerBonus })
+ *   entrants = SD.race.buildEntrants(runners, { distance, hypeLevel, dayEvent, cheerBonus, chatEffects })
  *   record   = SD.race.simulate({ id, seed, distance, entrants, eventFrequency, hypeLevel,
  *                                 dayEvent, chatEffects, trackName, season, day, indexInDay,
  *                                 rosterAvgLevel })
@@ -135,7 +135,10 @@
   }
 
   // Snapshot runners into race entrants (lane = order given, 1-based).
-  // ctx: { distance, hypeLevel, dayEvent, cheerBonus: { runnerId: cheerCount } }
+  // ctx: { distance, hypeLevel, dayEvent, cheerBonus: { runnerId: cheerCount },
+  //        chatEffects: [{ runnerId, type: 'boost' | 'sabotage', count? }] }
+  // hypeLevel and the queued boosts / sabotages only move the odds (the engine gets them again from
+  // simulate()'s own options); they are not stored on the entrants.
   function buildEntrants(runners, ctx) {
     ctx = ctx || {};
     const C = SD.CONFIG.RACE;
@@ -182,8 +185,53 @@
         odds: 0
       };
     });
-    assignOdds(list, distance);
+    assignOdds(list, distance, { hypeLevel: ctx.hypeLevel, chatPts: chatEffectPts(list, ctx.chatEffects, distance) });
     return list;
+  }
+
+  // Queued boosts / sabotages in perf points per runner (the odds' view of fireChat()): each fires
+  // once for BOOST_TICKS / SABOTAGE_TICKS ticks of a race about distance / (BASE_SPEED x DT) ticks long,
+  // and a sabotage backfires (a small boost) with the target's Wisdom-based chance. The engine's caps
+  // apply in the same order: MAX_BOOSTS_PER_RUNNER, MAX_SABOTAGE_PER_TARGET, MAX_SABOTAGE_PER_RACE.
+  function chatEffectPts(list, effects, distance) {
+    const out = Object.create(null);
+    if (!Array.isArray(effects) || !effects.length) return out;
+    const C = SD.CONFIG.RACE, CH = C.CHAT;
+    const byId = Object.create(null);
+    list.forEach(function (e) { byId[e.runnerId] = e; });
+    const share = 1 / Math.max(1, distance / (C.BASE_SPEED * C.DT)) * (100 / C.PERF_SLOPE);
+    const boosts = Object.create(null), sabs = Object.create(null);
+    let sabTotal = 0;
+    effects.forEach(function (ce) {
+      const e = ce && byId[ce.runnerId];
+      if (!e) return;
+      const n = Math.max(1, Math.round(Number(ce.count) || 1));
+      for (let k = 0; k < n; k++) {
+        if (ce.type === 'boost') {
+          boosts[e.runnerId] = (boosts[e.runnerId] || 0) + 1;
+          if (boosts[e.runnerId] > CH.MAX_BOOSTS_PER_RUNNER) continue;
+          out[e.runnerId] = (out[e.runnerId] || 0) + CH.BOOST * CH.BOOST_TICKS * share;
+        } else if (ce.type === 'sabotage') {
+          sabs[e.runnerId] = (sabs[e.runnerId] || 0) + 1;
+          if (sabs[e.runnerId] > CH.MAX_SABOTAGE_PER_TARGET || sabTotal >= CH.MAX_SABOTAGE_PER_RACE) continue;
+          sabTotal++;
+          const pBack = Math.min(CH.BACKFIRE_MAX, CH.BACKFIRE_BASE + (Number(e.stats.wisdom) || 0) / CH.BACKFIRE_WIS_DIV);
+          const vel = (1 - pBack) * (CH.SABOTAGE - 1) + pBack * (CH.BACKFIRE_BONUS - 1);
+          out[e.runnerId] = (out[e.runnerId] || 0) + vel * CH.SABOTAGE_TICKS * share;
+        }
+      }
+    });
+    return out;
+  }
+
+  // Hype tier multiplier on the odds temperature (CONFIG.RACE.ODDS.HYPE_TEMP; 1 below LOUD).
+  function hypeTempMult(hypeLevel, distance) {
+    const H = SD.CONFIG.RACE.HYPE, T = SD.CONFIG.RACE.ODDS.HYPE_TEMP;
+    const h = Math.max(0, Number(hypeLevel) || 0);
+    if (!T || h < H.LOUD) return 1;
+    const v = h >= H.AWAKENED ? T.AWAKENED : (h >= H.FERAL ? T.FERAL : T.LOUD);
+    const m = typeof v === 'number' ? v : (v && typeof v === 'object' ? interpByDistance(v, distance) : 1);
+    return m > 0 ? m : 1;
   }
 
   // Odds features for an entrant (all in "perf points": 1 point ~ PERF_SLOPE % speed).
@@ -226,14 +274,20 @@
 
   // Pre-race strength rating in perf points. Used for odds only; the engine never reads it.
   // The stamina reserve only counts up to REMAIN_CAP (beyond that nobody is short anyway).
-  function ratingOf(e, distance) {
+  // ctx (optional): { hypeLevel, chatPts: { runnerId: perf points } }. At Forest Awakened hype
+  // (RACE.HYPE.AWAKENED) every runner's expected reserve gets ODDS.AWAKEN_REMAIN (the refill at the
+  // final turn); queued boosts / sabotages add their chatPts.
+  function ratingOf(e, distance, ctx) {
     const O = SD.CONFIG.RACE.ODDS;
     const f = oddsFeatures(e, distance);
+    let remain = f.remain;
+    if (ctx && Number(ctx.hypeLevel) >= SD.CONFIG.RACE.HYPE.AWAKENED) remain += Number(O.AWAKEN_REMAIN) || 0;
     let rating = f.perfAvg + f.formPts + stylePts(f.style, distance);
-    rating += O.REMAIN_PTS * Math.min(f.remain, O.REMAIN_CAP == null ? 1 : O.REMAIN_CAP);
-    if (f.remain < O.SAFE_REMAIN) rating -= (O.SAFE_REMAIN - f.remain) * O.SHORTFALL_PTS;
+    rating += O.REMAIN_PTS * Math.min(remain, O.REMAIN_CAP == null ? 1 : O.REMAIN_CAP);
+    if (remain < O.SAFE_REMAIN) rating -= (O.SAFE_REMAIN - remain) * O.SHORTFALL_PTS;
     const ab = entry(SD.DATA.ABILITIES, f.abilityId);
     if (ab && ab.rating) rating += ab.rating;
+    if (ctx && ctx.chatPts && ctx.chatPts[e.runnerId]) rating += ctx.chatPts[e.runnerId];
     return rating;
   }
 
@@ -246,26 +300,37 @@
   }
 
   // Softmax temperature (perf points): a number or a per-distance table. Longer races
-  // average out more of the in-race swing, so the favourite is surer at 2400 m.
-  function oddsTemp(distance) {
+  // average out more of the in-race swing, so the favourite is surer at 2400 m. Louder hype
+  // makes races wilder, so the temperature grows with the hype tier (hypeTempMult).
+  function oddsTemp(distance, hypeLevel) {
     const T = SD.CONFIG.RACE.ODDS.TEMP;
-    return Math.max(0.5, typeof T === 'number' ? T : interpByDistance(T, distance));
+    return Math.max(0.5, (typeof T === 'number' ? T : interpByDistance(T, distance)) * hypeTempMult(hypeLevel, distance));
+  }
+
+  // Decimal odds for a win probability: HOUSE / p rounded DOWN to 0.1 (float dust aside) and capped
+  // at MAX, never raised above that fair-minus-edge price; shown as at least FLOOR (such a runner is
+  // below ODDS.MIN and takes no bets).
+  function oddsFor(p) {
+    const O = SD.CONFIG.RACE.ODDS;
+    const raw = O.HOUSE / Math.max(1e-9, p);
+    const down = Math.floor(raw * 10 + 1e-9) / 10;
+    return U.round1(Math.max(O.FLOOR != null ? O.FLOOR : 1, Math.min(O.MAX, down)));
   }
 
   // Softmax over ratings -> win probability -> decimal odds with house edge.
-  function assignOdds(list, distance) {
-    const O = SD.CONFIG.RACE.ODDS;
+  // ctx (optional): { hypeLevel, chatPts } (see ratingOf).
+  function assignOdds(list, distance, ctx) {
     if (!list.length) return list;
-    const ratings = list.map(function (e) { return ratingOf(e, distance); });
+    const ratings = list.map(function (e) { return ratingOf(e, distance, ctx); });
     const maxR = Math.max.apply(null, ratings);
-    const temp = oddsTemp(distance);
+    const temp = oddsTemp(distance, ctx && ctx.hypeLevel);
     const ex = ratings.map(function (r) { return Math.exp((r - maxR) / temp); });
     const sum = ex.reduce(function (a, b) { return a + b; }, 0);
     list.forEach(function (e, i) {
       const p = ex[i] / sum;
       e.rating = U.round2(ratings[i]);
       e.winProb = Math.round(p * 10000) / 10000;
-      e.odds = U.clamp(U.round1(O.HOUSE / p), O.MIN, O.MAX);
+      e.odds = oddsFor(p);
     });
     return list;
   }
@@ -1203,6 +1268,9 @@
     energyMult: energyMult,
     raceStatMult: raceStatMult,
     oddsTemp: oddsTemp,
+    oddsFor: oddsFor,
+    hypeTempMult: hypeTempMult,
+    chatEffectPts: chatEffectPts,
     segmentTicks: segmentTicks,
     coreOf: coreOf,
     buildEntrants: buildEntrants,

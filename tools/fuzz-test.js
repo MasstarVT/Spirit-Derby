@@ -92,10 +92,20 @@ SD.persistence.setAutoSave(false);
 const rng = SD.rng.create(SEED);            // the fuzz's own choices (the game has its own seeds)
 // SP ledger: within a season every player's balance = balance at season start + SP earned - SP spent
 // (refunds lower spSpentTotal). The baseline is taken when a season starts (and is 0 for new players).
+// Since review batch 4 the Season Champion reward is paid inside the rollover commit (after the SP
+// carry-over, before season:started), so it is already in the new season's balance and earned stat:
+// the baseline is balance - earned + spent, and at that point the only SP a player can have earned
+// in the new season is that reward (spent 0).
 const spBase = Object.create(null);   // keyed by login ('constructor' / '__proto__' are viewers too)
 SD.bus.on(SD.EVENTS.SEASON_STARTED, function () {
   const st = SD.state.get();
-  Object.keys(st.players).forEach(function (k) { spBase[k] = st.players[k].spiritPoints; });
+  const champSp = SD.achievements.get('seasonChampion').sp;
+  Object.keys(st.players).forEach(function (k) {
+    const p = st.players[k];
+    ok(p.stats.spSpentTotal === 0 && (p.stats.spEarnedTotal === 0 || p.stats.spEarnedTotal === champSp),
+      'players: a new season starts with nothing spent and only a Season Champion reward earned', k + ' ' + JSON.stringify(p.stats));
+    spBase[k] = p.spiritPoints - p.stats.spEarnedTotal + p.stats.spSpentTotal;
+  });
 });
 SD.state.set(SD.state.create({ seedSalt: SEED ^ 0x5bd1e995 }));
 SD.game.init();
@@ -339,6 +349,10 @@ function checkState(where) {
     ok(!!SD.state.runnerById(b.runnerId, st), 'bets: on a known runner', where + ' ' + b.runnerId);
     ok(Number.isInteger(b.amount) && b.amount >= C.ECONOMY.BET_MIN && b.amount <= C.ECONOMY.BET_MAX, 'bets: amount within limits', where + ' ' + b.amount);
     ok(b.odds >= C.RACE.ODDS.MIN && b.odds <= C.RACE.ODDS.MAX, 'bets: odds within limits', where + ' ' + b.odds);
+    // Review batch 4: a bet locked into the running race is settled at min(quoted, gate odds).
+    const gate = b.recordId && st.currentRace && st.currentRace.record.id === b.recordId
+      ? st.currentRace.record.entrants.filter(function (e) { return e.runnerId === b.runnerId; })[0] : null;
+    if (gate) ok(b.odds <= gate.odds, 'bets: a locked bet never pays more than the gate odds', where + ' ' + b.odds + ' > ' + gate.odds);
   });
 
   // day structure, ids, achievements
@@ -406,8 +420,13 @@ function checkReadModels(where) {
     const sum = SD.seasons.summary(st);
     ok(!scan(sum, 'summary'), 'seasons: summary() has no NaN', where + ' ' + scan(sum, 'summary'));
     const fo = SD.betting.fieldOdds(st);
-    ok(fo.entrants.every(function (e) { return e.odds >= SD.CONFIG.RACE.ODDS.MIN && e.odds <= SD.CONFIG.RACE.ODDS.MAX && e.winProb > 0 && e.winProb < 1; }),
-      'betting: next-field odds within limits', where);
+    // Review batch 4: odds are never raised above HOUSE / p (the 1.3x floor is gone); a runner under
+    // ODDS.MIN is odds-on (shown at FLOOR, takes no bets). The bound used to be ODDS.MIN..MAX.
+    const O = SD.CONFIG.RACE.ODDS;
+    ok(fo.entrants.every(function (e) {
+      return e.odds >= O.FLOOR && e.odds <= O.MAX && e.winProb > 0 && e.winProb < 1 &&
+        (e.odds < O.MIN || e.odds * e.winProb <= O.HOUSE + 0.001);
+    }), 'betting: next-field odds within limits and never above the fair price minus the house edge', where);
     const pSum = fo.entrants.reduce(function (a, e) { return a + e.winProb; }, 0);
     ok(!fo.entrants.length || Math.abs(pSum - 1) < 0.0005 * fo.entrants.length, 'betting: win probabilities sum to 1 (4-decimal rounding)', where + ' ' + pSum);
     st.runners.forEach(function (r) { const d = SD.runners.describe(r); ok(!/NaN|undefined/.test(d), 'runners: describe() line', where + ' ' + d); });

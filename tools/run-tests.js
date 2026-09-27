@@ -26,6 +26,10 @@
  *   protokeys    tools/protokeys-test.js (review batch 3: chat words, usernames, arguments, settings keys and save
  *                keys named like Object.prototype members - 'constructor', '__proto__', 'toString' ... - never reach
  *                Object.prototype; every command swept with them; error cooldown for crashing commands)
+ *   economy      tools/economy-test.js (review batch 4: odds never above the fair price minus the house edge,
+ *                bets settled at min(quoted, gate odds), hype-aware odds, bets counted when settled, profit-only
+ *                SP earned, exact odds display, no gate moods after an abort, !bet / !ribbon / !snack / !race /
+ *                !rest / !sabotage fixes, snack counter reset at season rollover)
  *   runners      tools/runners-test.js (M6 !create, admin SPAWN RUNNER, MAX_ACTIVE, SD.debug)
  *   fuzz         tools/fuzz-test.js (M6 seeded 3-season fuzz: 17 viewers spamming every command, random race
  *                starts / pauses / ends / aborts / reloads, invariants after every command and race)
@@ -46,6 +50,7 @@ const SUITES = [
   { name: 'persistence', file: 'persistence-test.js', args: VERBOSE ? ['--verbose'] : [] },
   { name: 'identity', file: 'identity-test.js', args: VERBOSE ? ['--verbose'] : [] },
   { name: 'protokeys', file: 'protokeys-test.js', args: VERBOSE ? ['--verbose'] : [] },
+  { name: 'economy', file: 'economy-test.js', args: VERBOSE ? ['--verbose'] : [] },
   { name: 'runners', file: 'runners-test.js', args: VERBOSE ? ['--verbose'] : [] },
   { name: 'fuzz', file: 'fuzz-test.js', args: VERBOSE ? ['--verbose'] : [] }
 ];

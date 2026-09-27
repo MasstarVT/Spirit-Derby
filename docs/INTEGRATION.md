@@ -558,21 +558,21 @@ in the Chat tab. A `#streamer` name arriving from Twitch, the bridge or the demo
 | `!claim [runner]` | — | `!join` | yes | 10 s | Claim a free runner (named, or the first free one). One runner per viewer; re-claiming releases the old one |
 | `!create <name>` | — | `!join`, no runner | yes | 10 s | When every runner has an owner (and the streamer allows it): create your own runner (random species, style and ability; stats sum to 200). Names 3–20 letters, digits, spaces or apostrophes, unique |
 | `!train <stat>` / `!train <runner> <stat>` | `!t` | `!join` | yes | 10 s | Train your runner (or any runner while *open training* is on). Stats: speed, stamina, power, wisdom, luck (short forms such as `spd`, `sta`, `pow`, `wis`, `luk` work) |
-| `!rest [runner]` | `!r` | `!join` | yes | 10 s + 3 min per runner | Energy +30, fatigue down, hype −5 |
-| `!cheer [runner]` | `!c` | `!join` | **no** | 30 s | Hype +3 and +2 SP; a named runner gets a tiny pre-race boost |
+| `!rest [runner]` | `!r` | `!join` | yes | 10 s + 3 min per runner | Energy +30, fatigue down, hype −5 (less when the meter is under 5; the reply says the real change) |
+| `!cheer [runner]` | `!c` | `!join` | **no** | 30 s | Hype +3 and +2 SP; a named runner gets a tiny pre-race boost (a cheer during a race never makes you its backer) |
 | `!status` | `!stats` | `!join` | no | none | Your SP, rank and runner at a glance |
 | `!inspect <runner>` | `!i` | — | no | none | Full runner card: style, ability, owner, stats, condition, mood, record, odds |
-| `!race` | — | — | no | none | Viewers: what is happening on the track, the next field, favourite and open bets. **Mods / streamer:** starts the race (`!race 2000` picks the distance, `!race status` only looks) |
+| `!race` | — | — | no | none | Viewers: what is happening on the track, the next field, favourite and open bets. **Mods / streamer:** starts the race (`!race 2000` or `!race 2000m` picks the distance, `!race status` or `!race next?` only looks; any other argument, e.g. `!race soon` or `!race 1500`, is refused with the usage and starts nothing) |
 | `!event` | — | — | mods: yes (looking with `!event today` still works) | none | Viewers: today's day event. **Mods / streamer:** `!event` rolls a new random day event, `!event <name>` sets one (`!event harvest`), `!event today` only looks |
 | `!leaderboard [board] [all]` | `!lb`, `!top` | — | no | none | Top 3 on a board: `wins`, `xp`, `sp`, `part`, `victories`, `hype`; add `all` for all-time |
 | `!rank [viewer]` | — | `!join` (for yourself) | no | none | Your rank on the SP, victories and hype boards |
 | `!help [command]` | `!h`, `!commands` | — | no | none | Command list, or help for one command |
-| `!bet <runner> <amount>` | — | `!join` | yes | 10 s | Bet 10–250 fictional SP on a runner in the next race (`!bet 50 moss`, `!bet moss all`, `!bet cancel`). Pays amount × the odds locked when you bet. One bet each; a new bet refunds the old one |
+| `!bet <runner> <amount>` | — | `!join` | yes | 10 s | Bet 10–250 fictional SP on a runner in the next race (`!bet 50 moss`, `!bet moss all`, `!bet cancel`). Quoted the odds shown when you bet; when the gates open it is settled at the shorter of that quote and the race's own odds (the game logs and shows whose odds shortened; a bet on a runner that became odds-on, under 1.1×, is refunded). Pays amount × those odds. No bets on an odds-on runner. One bet each; a new bet refunds the old one. `!bet` alone only looks (no cooldown) |
 | `!bets` | — | — | no | none | Open bets on the next race (count, total, per runner, yours) |
 | `!odds` | — | — | no | none | Odds for every runner in the next race (or the running race) |
 | `!boost <runner>` | — | `!join` | yes | 10 s | 40 SP: a +2.5% burst at a random moment of that runner's next race (max 3 per runner per race; your own runner is fine) |
-| `!snack <runner>` | — | `!join` | yes | 10 s | 25 SP: +10 energy (max 2 snacks per runner per day) |
-| `!sabotage <runner>` | — | `!join` | yes | **10 min** | 60 SP: a pebble in a rival's shoe for its next race (slower for a stretch); wise runners may kick it back at you. Not your own runner; max 2 per target and 4 per race; announced publicly |
+| `!snack <runner>` | — | `!join` | yes | 10 s | 25 SP: +10 energy (max 2 snacks per runner per day; refused, free, when the runner is less than 1 energy from full) |
+| `!sabotage <runner>` | — | `!join` | yes | **10 min** | 60 SP: a pebble in a rival's shoe for its next race (slower for a stretch); wise runners may kick it back at you. Not your own runner; max 2 per target and 4 per race (pebbles on the next race's runners; a pebble on a runner outside it waits for that runner's next race); announced publicly |
 | `!ribbon <colour>` | — | a runner | yes | 10 s | 100 SP: a coloured ribbon ring on your runner (named colours or `#hex`; `!ribbon off` is free) |
 | `!hype` | — | — | no | none | The hype meter and the next threshold |
 | `!achievements [viewer]` | `!ach`, `!badges` | `!join` (for yourself) | no | none | Achievements unlocked (count / total and the latest 3) |

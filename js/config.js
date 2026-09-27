@@ -139,9 +139,21 @@
         // Softmax temperature in perf points, per distance (interpolated). Longer races average
         // out more of the in-race swing, so the favourite is surer at 2400 m.
         TEMP: { 1200: 6.28, 1600: 5.77, 2000: 5.44, 2400: 5.23 },
+        // Review batch 4: odds = min(MAX, HOUSE / p rounded DOWN to 0.1), never raised above the fair
+        // price, so every bet keeps at least the 15% house edge. A runner priced under MIN is odds-on:
+        // it takes no bets (a bet whose gate price falls under MIN is refunded). FLOOR only keeps the
+        // shown number at 1.0x or more for such runners (it is below MIN, so nothing is ever paid at it).
         HOUSE: 0.85,           // odds = HOUSE / p  (15% house edge)
-        MIN: 1.3,
+        MIN: 1.1,              // shortest odds a bet is taken (and settled) at
+        FLOOR: 1.0,            // shortest odds shown
         MAX: 25,
+        // Hype tiers change the race (CONFIG.RACE.HYPE: noisier swings, more events and crits, Forest
+        // Awakened's stamina refill and last-place surge), so the odds see the hype level too: the softmax
+        // temperature is multiplied per tier (AWAKENED per distance) and Forest Awakened adds AWAKEN_REMAIN
+        // to every runner's expected stamina reserve. Fitted by maximum likelihood on simulated mixed and
+        // roster fields at hype 30 / 60 / 110 (hype below LOUD is unchanged).
+        HYPE_TEMP: { LOUD: 1.04, FERAL: 1.08, AWAKENED: { 1200: 1.10, 1600: 1.10, 2000: 1.20, 2400: 1.20 } },
+        AWAKEN_REMAIN: 0.15,
         SAFE_REMAIN: 0.14,     // expected pool left below this -> rating penalty
         SHORTFALL_PTS: 8.86,   // perf points per 100% shortfall
         REMAIN_PTS: 10.41,     // perf points per 100% expected stamina reserve ...
@@ -268,11 +280,14 @@
 
     // -------------------------------------------------------------------------
     // BETTING (plan section 6.4) - fictional Spirit Points only, never real money.
-    // Odds come from SD.race.buildEntrants (RACE.ODDS); a bet keeps the odds it was placed at.
+    // Odds come from SD.race.buildEntrants (RACE.ODDS). A bet is quoted the odds it was placed at and
+    // settled at min(quoted, the race's own odds at the gate): anything that changes the race after the
+    // bet (!rest, !snack, !boost, !cheer, hype, field size, distance, the gate's mood roll) can only
+    // shorten it. A bet counts (stats.bets, participation, hype, High Roller) once, when it is settled
+    // in a finished race, so placing and cancelling bets (or an aborted race) counts nothing.
     // -------------------------------------------------------------------------
     BETTING: {
       PAYOUT_ROUND: 2,          // payout = floor(round(amount x odds, 2)) so 10 x 2.3 pays 23, not 22
-      COUNT_REPLACEMENTS: false,// a replaced bet does not count again in stats.bets / hype
       LOG_WINNERS: 6            // winners named in the "Bets paid" log line
     },
 

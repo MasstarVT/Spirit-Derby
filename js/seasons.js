@@ -235,6 +235,7 @@
       r.record = SD.runners.freshRecord();
       r.trainStreak = { stat: null, count: 0 };
       r.effects = [];
+      r.daily = { snacks: 0 };  // Day 1 of the new season is a new day (refreshRunners does not run here)
       SD.runners.refreshCondition(r);
     });
 

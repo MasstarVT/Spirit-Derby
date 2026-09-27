@@ -5,19 +5,27 @@
  * sold or withdrawn.
  *
  *   fieldOdds(state)            the next race's field (SD.game.previewField) with odds and win
- *                               probabilities from SD.race.buildEntrants (queued cheers included,
- *                               exactly like startRace); cached per race number + settings + field
+ *                               probabilities from SD.race.buildEntrants (queued cheers, boosts and
+ *                               sabotages and the hype level included, like startRace); cached per race
+ *                               number + settings + field + queued effects
  *   odds(state, runnerId)       -> { odds, winProb } | null
  *   place(state, user, runnerId, amount|'all', now)
- *                               -> { ok, message, bet, replaced?, refunded?, balance }
+ *                               -> { ok, message, bet, replaced?, refunded?, balance, pays }
  *                               10 <= amount <= min(250, balance); one open bet per player (a new
- *                               bet refunds and replaces the old one); SP is taken immediately;
- *                               the odds are locked at placement; hype +1; emits bet:placed
+ *                               bet refunds and replaces the old one); SP is taken immediately; the
+ *                               bet is QUOTED the current odds (no bets on a runner priced under
+ *                               RACE.ODDS.MIN); emits bet:placed. Nothing is counted yet.
  *   cancel(state, user)         refund your open bet
  *   lockForRace(state, record)  (SD.game.startRace hook) refunds bets on runners that did not make
- *                               the field and stamps the rest with the race id
- *   resolve(state, record)      (SD.game.finishRace hook, alias resolveRace) winners are paid
- *                               floor(amount x locked odds); losers lose the stake; emits bet:resolved
+ *                               the field, settles every other bet at min(quoted odds, the gate odds
+ *                               in record.entrants) - refunded when that is under RACE.ODDS.MIN - and
+ *                               stamps it with the race id; emits bet:locked. Nothing is counted yet
+ *   resolve(state, record)      (SD.game.finishRace hook, alias resolveRace) winners get their stake
+ *                               back (refundSp) plus the profit floor(amount x odds) - amount as SP
+ *                               earned; losers lose the stake. Only a settled bet counts: stats.bets
+ *                               (participation) here, bet:resolved (High Roller, Sharp Eye, Longshot)
+ *   creditBetHype(state, settled)  (SD.game.finishRace, after the post-race hype decay) hype +GAINS.bet
+ *                               with credit per settled bet: it builds toward the next race
  *   refundAll(state, reason)    abort / new day / reset day / season end / interrupted race
  *   open(state)                 -> { count, total, byRunner: { runnerId: { count, total, name } } }
  *
@@ -32,6 +40,11 @@
 
   function EC() { return SD.CONFIG.ECONOMY; }
   function BC() { return SD.CONFIG.BETTING || {}; }
+  // Shortest odds a bet is taken and settled at (CONFIG.RACE.ODDS.MIN).
+  function minOdds() {
+    const m = Number(SD.CONFIG.RACE.ODDS.MIN);
+    return isFinite(m) && m > 0 ? m : 1.1;
+  }
   function P() { return SD.players; }
   function keyOf(name) {
     return P() ? P().keyOf(name) : String(name == null ? '' : name).trim().replace(/^@+/, '').toLowerCase();
@@ -42,7 +55,7 @@
   function fmtOdds(x) {
     x = Number(x);
     if (!isFinite(x) || x <= 0) return '?';
-    return (x >= 10 ? x.toFixed(0) : x.toFixed(1)) + 'x';
+    return x.toFixed(1) + 'x'; // odds are stored to 0.1 and paid exactly: always show that decimal
   }
   function orList(names) {
     if (names.length <= 1) return names.join('');
@@ -75,10 +88,21 @@
     return out;
   }
 
-  function fieldKey(state, field, cheers) {
+  // Queued boosts / sabotages the next race on this field would use (SD.game.raceEffectsFor: the same
+  // split startRace makes), as buildEntrants chatEffects.
+  function queuedChat(state, ids) {
+    const queued = Array.isArray(state.raceEffects) ? state.raceEffects : [];
+    const used = SD.game && typeof SD.game.raceEffectsFor === 'function' ? SD.game.raceEffectsFor(queued, ids).used
+      : queued.filter(function (e) { return e && ids.indexOf(e.runnerId) >= 0; });
+    return used.filter(function (e) { return e.type === 'boost' || e.type === 'sabotage'; })
+      .map(function (e) { return { runnerId: e.runnerId, type: e.type, count: Math.max(1, e.count || 1) }; });
+  }
+
+  function fieldKey(state, field, cheers, chat) {
     const s = state.settings || {};
     const parts = [state.meta.seedSalt, state.meta.raceCounter, state.season.number, state.season.day, raceDistance(state),
-      s.runnerCount, state.hype.value, state.season.activeDayEvent, s.debug ? s.seedOverride : ''];
+      s.runnerCount, state.hype.value, state.season.activeDayEvent, s.debug ? s.seedOverride : '',
+      chat.map(function (c) { return c.type + ':' + c.runnerId + ':' + c.count; }).join(',')];
     field.forEach(function (r) {
       parts.push(r.id, r.level, r.style, r.mood, r.condition, U.round2(r.energy), r.maxEnergy, r.ownerKey || '', r.owner || '',
         r.ability && r.ability.id, cheers[r.id] || 0);
@@ -97,12 +121,13 @@
     if (!Array.isArray(field) || !field.length) return empty;
     const ids = field.map(function (r) { return r.id; });
     const cheers = queuedCheers(state, ids);
-    const key = fieldKey(state, field, cheers);
+    const chat = queuedChat(state, ids);
+    const key = fieldKey(state, field, cheers, chat);
     if (cache.key === key && cache.state === state) return cache.value;
     const distance = raceDistance(state);
     const entrants = SD.race.buildEntrants(field, {
       distance: distance, hypeLevel: state.hype.value,
-      dayEvent: SD.events.dayEventById(state.season.activeDayEvent), cheerBonus: cheers
+      dayEvent: SD.events.dayEventById(state.season.activeDayEvent), cheerBonus: cheers, chatEffects: chat
     });
     const byId = U.dict();
     entrants.forEach(function (e) { byId[e.runnerId] = e; });
@@ -174,6 +199,11 @@
       const names = fo.entrants.map(function (e) { return e.name; });
       return fail(runner.name + " isn't in the next race." + (names.length ? ' Bet on ' + orList(names) + '.' : ''));
     }
+    // An odds-on runner (priced under RACE.ODDS.MIN) takes no bets: paying more would give up the house edge.
+    if (!(ent.odds >= minOdds())) {
+      return fail(runner.name + ' is the odds-on favourite (' + fmtOdds(ent.odds) + ') — no bets on it this race. Try another runner (!odds).',
+        { oddsOn: true });
+    }
     const old = betOf(state, p.username);
     const available = p.spiritPoints + (old ? old.amount : 0);
     const allIn = String(amount).toLowerCase() === 'all';
@@ -216,14 +246,8 @@
       day: state.season.day
     };
     state.bets.push(bet);
-    let hype = 0;
-    if (!old || BC().COUNT_REPLACEMENTS) {
-      P().recordAction(state, p.username, runner.id, 'bet');
-      if (SD.hype) {
-        hype = SD.hype.add(state, SD.CONFIG.HYPE.GAINS.bet, { by: p.username, reason: 'bet' }).delta;
-        P().addHypeContribution(state, p.username, hype);
-      }
-    }
+    // Nothing is counted here (stats.bets, hype, participation, High Roller): a bet counts once, when
+    // it is settled in a finished race, so placing, replacing and cancelling bets farms nothing.
     const pays = payoutFor(amt, ent.odds);
     if (isCurrent(state)) {
       SD.state.log('bet', p.displayName + ' bet ' + amt + ' SP on ' + runner.name + ' at ' + fmtOdds(ent.odds) +
@@ -238,7 +262,7 @@
       fmtOdds(ent.odds) + ' — pays ' + pays + ' SP if ' + runner.name + ' wins!' +
       (old ? ' (Your ' + old.amount + ' SP on ' + old.runnerName + ' was refunded.)' : '') +
       ' · ' + p.spiritPoints + ' SP left';
-    return { ok: true, message: message, bet: bet, replaced: old || null, refunded: refunded, balance: p.spiritPoints, pays: pays, hype: hype };
+    return { ok: true, message: message, bet: bet, replaced: old || null, refunded: refunded, balance: p.spiritPoints, pays: pays };
   }
 
   function cancel(state, username) {
@@ -255,27 +279,78 @@
   // ---------------------------------------------------------------------------
   // Race hooks
   // ---------------------------------------------------------------------------
-  // SD.game.startRace: refund bets on runners that did not make the field (the paddock preview
-  // can change between the bet and the gate, e.g. a runner dropped below race energy).
+  // SD.game.startRace, right after the race is simulated. Between a bet and the gate the race can
+  // change (!rest / !snack / !boost / !cheer on a runner, hype, the gate's mood roll, the field size or
+  // distance, the streamer's settings), so every bet is settled at min(its quoted odds, the race's own
+  // odds for that runner in record.entrants): it can only get shorter, never +EV.
+  //   - runner not in the field -> refunded ('betNonStarter');
+  //   - settled price under RACE.ODDS.MIN (the runner became odds-on) -> refunded ('betOddsOn');
+  //   - otherwise b.odds = the settled price and b.recordId = the race id.
+  // Nothing is counted here: the race can still be aborted or interrupted (every bet refunded), and
+  // hype added now would come after the race was simulated. A bet counts when resolve() settles it.
+  // Emits bet:locked { recordId, bets:[copies], repriced:[{ ..., quoted, odds }], refunded:[copies] }
+  // (the chat's re-pricing notice) and returns { locked, repriced, refunded }.
   function lockForRace(state, record) {
-    const ids = U.dict();
-    (record && record.entrants || []).forEach(function (e) { ids[e.runnerId] = true; });
-    const refunded = [];
+    const gate = U.dict();
+    (record && record.entrants || []).forEach(function (e) { gate[e.runnerId] = e; });
+    const locked = [], repriced = [], refunded = [], oddsOn = [];
     list(state).slice().forEach(function (b) {
-      if (ids[b.runnerId]) { b.recordId = record.id; return; }
-      removeBet(state, b);
-      refundBet(state, b, 'betNonStarter');
-      refunded.push(b);
+      const ent = gate[b.runnerId];
+      if (!ent) {
+        removeBet(state, b);
+        refundBet(state, b, 'betNonStarter');
+        refunded.push(Object.assign({}, b, { reason: 'nonStarter' }));
+        return;
+      }
+      const quoted = Number(b.odds) || 0;
+      const settled = Math.min(quoted, Number(ent.odds) || 0);
+      if (!(settled >= minOdds())) {
+        removeBet(state, b);
+        refundBet(state, b, 'betOddsOn');
+        const x = Object.assign({}, b, { reason: 'oddsOn', gateOdds: ent.odds });
+        refunded.push(x);
+        oddsOn.push(x);
+        return;
+      }
+      if (settled < quoted) {
+        b.odds = settled;
+        b.winProb = ent.winProb;
+        repriced.push(Object.assign({}, b, { quoted: quoted }));
+      }
+      b.recordId = record.id;
+      locked.push(b);
     });
-    if (refunded.length && isCurrent(state)) {
-      SD.state.log('bet', plural(refunded.length, 'bet') + ' refunded: ' + refunded.map(function (b) {
-        return b.displayName + ' (' + b.runnerName + ' is not in this race)';
-      }).join(', ') + '.', 'info', { recordId: record.id });
+    if (isCurrent(state)) {
+      const nonStarters = refunded.filter(function (b) { return b.reason === 'nonStarter'; });
+      if (nonStarters.length) {
+        SD.state.log('bet', plural(nonStarters.length, 'bet') + ' refunded: ' + nonStarters.map(function (b) {
+          return b.displayName + ' (' + b.runnerName + ' is not in this race)';
+        }).join(', ') + '.', 'info', { recordId: record.id });
+      }
+      if (oddsOn.length) {
+        SD.state.log('bet', plural(oddsOn.length, 'bet') + ' refunded: ' + oddsOn.map(function (b) {
+          return b.displayName + ' (' + b.runnerName + ' is odds-on at the gate, ' + fmtOdds(b.gateOdds) + ')';
+        }).join(', ') + '.', 'info', { recordId: record.id });
+      }
+      if (repriced.length) {
+        SD.state.log('bet', 'Odds shortened at the gate: ' + repriced.map(function (b) {
+          return b.displayName + "'s " + b.amount + ' SP on ' + b.runnerName + ' now pays ' + fmtOdds(b.odds) + ' (was ' + fmtOdds(b.quoted) + ')';
+        }).join(', ') + '.', 'info', { recordId: record.id });
+      }
     }
-    return refunded;
+    emit(SD.EVENTS.BET_LOCKED, {
+      recordId: record.id,
+      bets: locked.map(function (b) { return Object.assign({}, b); }),
+      repriced: repriced,
+      refunded: refunded
+    });
+    return { locked: locked, repriced: repriced, refunded: refunded };
   }
 
-  // SD.game.finishRace: pay the winners at their locked odds. Returns
+  // SD.game.finishRace: pay the winners at their settled odds (lockForRace). The stake comes back as a
+  // refund (it reverses the spend) and only the profit counts as SP earned, so betting turnover never
+  // inflates stats.spEarnedTotal (season MVP, the all-time SP board). Every settled bet counts once
+  // here (stats.bets / participation); bet:resolved awards High Roller / Sharp Eye / Longshot. Returns
   // [{ id, username, displayName, runnerId, runnerName, amount, odds, payout, won, net }]
   function resolve(state, record) {
     const out = [];
@@ -291,8 +366,11 @@
       const won = b.runnerId === winner.runnerId;
       const payout = won ? payoutFor(b.amount, b.odds) : 0;
       const p = P() ? P().get(state, b.username) : null;
+      if (p) P().recordAction(state, b.username, b.runnerId, 'bet');
       if (won && p) {
-        P().addSp(state, b.username, payout, 'betWin');
+        const back = Math.min(b.amount, payout);
+        P().refundSp(state, b.username, back, 'betStake');
+        P().addSp(state, b.username, payout - back, 'betWin');
         p.stats.betsWon += 1;
       }
       out.push({
@@ -321,6 +399,21 @@
       totalPaid: totalPaid, totalStaked: totalStaked, refunded: leftovers.length
     });
     return out;
+  }
+
+  // SD.game.finishRace, after the post-race hype decay: each settled bet (resolve's result) adds
+  // HYPE.GAINS.bet with hype credit to its bettor. Added after the race, it builds toward the next race
+  // instead of announcing a hype tier the race that just ran never had. Returns the hype added.
+  function creditBetHype(state, settled) {
+    if (!state || !SD.hype || !Array.isArray(settled)) return 0;
+    let total = 0;
+    settled.forEach(function (b) {
+      if (!b || !b.username || (P() && !P().get(state, b.username))) return;
+      const h = SD.hype.add(state, SD.CONFIG.HYPE.GAINS.bet, { by: b.username, reason: 'bet' }).delta;
+      if (P()) P().addHypeContribution(state, b.username, h);
+      total += Number(h) || 0;
+    });
+    return U.round1(total);
   }
 
   // Refund every open bet. Returns the refunded bets.
@@ -359,6 +452,7 @@
     lockForRace: lockForRace,
     resolve: resolve,
     resolveRace: resolve,       // the name SD.game.finishRace calls
+    creditBetHype: creditBetHype,
     refundAll: refundAll,
     payoutFor: payoutFor,
     fmtOdds: fmtOdds,

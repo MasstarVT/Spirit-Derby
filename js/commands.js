@@ -15,6 +15,8 @@
  * { ok?, message, severity?, effects?, cooldown?, locked? }. A refusal that is really a cooldown
  * or a race lock sets `cooldown: true` / `locked: true` (in the result or the CommandError extra)
  * so the reply line, the result and the bridge's reply frame carry the same flag as the gates'.
+ * A handler whose invocation only looked (no-argument !bet / !ribbon) sets ctx.readOnly = true: no
+ * cooldown is stamped and stats.commands counts it like a read-only command (READONLY_ACTIVITY_S).
  *
  * Commands never touch state.currentRace: mutating commands are refused while a race is
  * locked (countdown / running / paused), and SD.game.startRace refuses a second race.
@@ -166,7 +168,7 @@
   function fmtOdds(x) {
     x = Number(x);
     if (!isFinite(x) || x <= 0) return '?';
-    return (x >= 10 ? x.toFixed(0) : x.toFixed(1)) + 'x';
+    return x.toFixed(1) + 'x'; // the exact odds a bet is paid at (never rounded to whole numbers)
   }
 
   // ---------------------------------------------------------------------------
@@ -426,8 +428,16 @@
       parsed: parsed, args: parsed.args, argText: parsed.argText, command: def.name, now: now,
       effects: effects, touched: false,
       // false for a read-only command repeated inside CONFIG.LEADERBOARDS.READONLY_ACTIVITY_S
-      countActivity: !(lastActivity != null && now - lastActivity < activityWindowMs())
+      countActivity: !(lastActivity != null && now - lastActivity < activityWindowMs()),
+      // A handler sets readOnly = true when this invocation only looked (the no-argument !bet / !ribbon
+      // info lines): no cooldown is stamped and it counts toward stats.commands like a read-only
+      // command (at most once per READONLY_ACTIVITY_S), so info lines cannot farm participation.
+      readOnly: false
     };
+    function infoCount() {
+      const last = U.own(rt.activity, username);
+      return !(last != null && now - last < activityWindowMs());
+    }
     const cdLen = cooldownLength(def, ctx);
     if (source !== 'admin') {
       const last = cdLen > 0 ? lastUse(username, def) : undefined;
@@ -455,6 +465,7 @@
         const r = normalizeOut(def.handler(ctx, parsed.args));
         if (r.ok && !ctx.touched && P() && P().get(st, username)) {
           // The streamer console (source admin) can speak as anyone: it never changes player.isMod.
+          if (ctx.readOnly && !readOnly) ctx.countActivity = infoCount();
           const t = P().touch(st, username, {
             isMod: source === 'admin' ? undefined : isMod, displayName: displayName, now: now, count: ctx.countActivity
           });
@@ -490,15 +501,16 @@
     }
 
     // 8. stamp the cooldown (successful commands, and unexpected failures: see errorKeyOf)
-    if ((out.ok || crashed) && cdLen > 0) stampCooldown(username, def, now);
+    const lookedOnly = out.ok && ctx.readOnly;
+    if (((out.ok && !lookedOnly) || crashed) && cdLen > 0) stampCooldown(username, def, now);
     if (crashed) stampCooldown(username, def, now, errorKeyOf(def));
-    if (out.ok && readOnly && ctx.countActivity && P() && P().get(SD.state.get(), username)) {
+    if (out.ok && (readOnly || lookedOnly) && ctx.countActivity && P() && P().get(SD.state.get(), username)) {
       if (!rt.activity || typeof rt.activity !== 'object') rt.activity = U.dict();
       U.setOwn(rt.activity, username, now);
     }
     return finish(out.ok, out.message, {
       severity: out.severity || (out.ok ? 'good' : 'bad'),
-      cooldownMs: out.ok ? cdLen : (out.cooldownMs || 0),
+      cooldownMs: out.ok ? (lookedOnly ? 0 : cdLen) : (out.cooldownMs || 0),
       // A handler's own refusal can be a cooldown (!rest's per-runner rest) or a race lock (a mod's
       // !event mid-race): CommandError extras / handler results carry the same flags as the gates.
       cooldown: !out.ok && !!out.cooldown,
@@ -741,7 +753,9 @@
       const h = SD.hype.add(S, SD.CONFIG.HYPE.GAINS.cheer, { by: ctx.username, reason: 'cheer' });
       P().addHypeContribution(S, ctx.username, h.delta);
       const sp = P().award(S, ctx.username, Math.round(SD.CONFIG.ECONOMY.CHEER_SP * spMult(S)), 'cheer');
-      P().recordAction(S, ctx.username, runner ? runner.id : null, 'cheer');
+      // Backing is only for the race to come: a mid-race cheer (the result is already decided and being
+      // played back) counts as a cheer but never makes you the backer of the runner you see leading.
+      P().recordAction(S, ctx.username, runner && !locked ? runner.id : null, 'cheer');
       ctx.effects.push({ type: 'hype', delta: h.delta }, { type: 'sp', amount: sp, reason: 'cheer' });
 
       const parts = [h.delta > 0
@@ -898,18 +912,33 @@
     cooldownMs: 0,
     handler: function (ctx, args) {
       const S = ctx.state;
-      const wantsStatus = args.length && /^(status|info|odds|next|\?)$/i.test(args[0]);
+      const wantsStatus = args.length === 1 && /^(?:(?:status|info|odds|next)\??|\?)$/i.test(args[0]); // "!race next?" only looks too
       if (!ctx.isMod || wantsStatus || S.currentRace) return { message: raceStatusLine(S), severity: 'info' };
       if (!SD.game || typeof SD.game.startRace !== 'function') throw new CommandError('Races cannot be started right now.');
+      // A mod starts the race only with no argument or a supported distance ("2000", "2000m", "2000 m").
+      // Anything else ("!race soon", a typo, "!race 1500") is refused with the usage:
+      // chat that merely mentions the race must not lock the bets and open the gates.
       const opts = {};
-      const dist = args.map(function (a) { return parseInt(String(a).replace(/m$/i, ''), 10); })
-        .filter(function (n) { return SD.CONFIG.RACE.DISTANCES.indexOf(n) >= 0; })[0];
-      if (dist) opts.distance = dist;
+      if (args.length) {
+        const D = SD.CONFIG.RACE.DISTANCES;
+        const m = /^(\d{1,6})\s*(m|metres|meters)?$/i.exec(args.join(' '));
+        const dist = m ? Number(m[1]) : null;
+        if (dist == null || D.indexOf(dist) < 0) {
+          throw new CommandError((m ? dist + ' m is not a race distance. ' : '"' + args.join(' ').slice(0, 30) + '" is not a race option. ') +
+            'Mods: !race starts the next race, !race <' + D.join('|') + '> picks the distance, !race status just looks.', { severity: 'info' });
+        }
+        opts.distance = dist;
+      }
       const res = SD.game.startRace(opts);
       if (!res || !res.ok) return { ok: false, message: (res && res.message) || 'The race could not start.', severity: 'bad' };
       ctx.effects.push({ type: 'race', recordId: res.record.id });
       const bets = betsPhrase(ctx.state);
-      return { message: '\u{1F3C1} ' + res.message + (bets ? ' ' + bets + ' locked in.' : '') + ' Cheer with !cheer!', severity: 'epic' };
+      const moved = res.bets && Array.isArray(res.bets.repriced) ? res.bets.repriced.length : 0;
+      return {
+        message: '\u{1F3C1} ' + res.message + (bets ? ' ' + bets + ' locked in' + (moved ? ' (' + moved + ' at shorter gate odds)' : '') + '.' : '') +
+          ' Cheer with !cheer!',
+        severity: 'epic'
+      };
     }
   });
 
@@ -1077,6 +1106,14 @@
       return a + (e && e.type === type && (runnerId == null || e.runnerId === runnerId) ? Math.max(1, e.count || 1) : 0);
     }, 0);
   }
+  // Sabotages queued on runners in the next race's field (what its startRace will consume).
+  function nextRaceSabotages(state) {
+    if (!SD.betting) return queuedCount(state, 'sabotage');
+    const ids = SD.betting.fieldOdds(state).entrants.map(function (e) { return e.runnerId; });
+    return (Array.isArray(state.raceEffects) ? state.raceEffects : []).reduce(function (a, e) {
+      return a + (e && e.type === 'sabotage' && ids.indexOf(e.runnerId) >= 0 ? Math.max(1, e.count || 1) : 0);
+    }, 0);
+  }
   function queueEffect(state, type, runnerId, by, paid) {
     if (!Array.isArray(state.raceEffects)) state.raceEffects = [];
     let entry = state.raceEffects.filter(function (e) { return e.type === type && e.runnerId === runnerId && e.by === by; })[0];
@@ -1117,13 +1154,14 @@
   register({
     name: 'bet',
     usage: BET_USAGE,
-    description: 'Bet fictional Spirit Points on a runner in the next race: pays amount × odds if it wins. One bet each; a new bet replaces (and refunds) your old one. See !odds.',
+    description: 'Bet fictional Spirit Points on a runner in the next race: pays amount × odds if it wins (the odds can only get shorter when the gates open). One bet each; a new bet replaces (and refunds) your old one. See !odds.',
     requiresPlayer: true,
     lockedDuringRace: true,
     handler: function (ctx, args) {
       const B = needBetting();
       const S = ctx.state;
       if (!args.length) {
+        ctx.readOnly = true; // just looking: no cooldown, participation throttled like !status
         const mine = B.betOf(S, ctx.username);
         return { message: mine ? 'Your bet: ' + betLine(mine) + '. Change it with !bet <runner> <amount>, or !bet cancel.' : 'Usage: ' + BET_USAGE + ' — see !odds for the field.', severity: 'info' };
       }
@@ -1159,7 +1197,6 @@
         { type: 'bet', runnerId: runner.id, amount: res.bet.amount, odds: res.bet.odds, replaced: res.replaced ? res.replaced.id : null },
         { type: 'sp', amount: -res.bet.amount + (res.refunded || 0), reason: 'bet' }
       );
-      if (res.hype) ctx.effects.push({ type: 'hype', delta: res.hype });
       return { message: '\u{1F4B0} ' + res.message, severity: 'good' };
     }
   });
@@ -1266,8 +1303,11 @@
       if (had >= E.SNACKS_PER_DAY) {
         throw new CommandError(runner.name + ' has had ' + plural(E.SNACKS_PER_DAY, 'snack') + ' today — no more until tomorrow.', { severity: 'info' });
       }
-      if (runner.energy >= runner.maxEnergy) {
-        throw new CommandError(runner.name + ' is already full of energy (' + Math.floor(runner.energy) + '/' + runner.maxEnergy + ').', { severity: 'info' });
+      // Energy is fractional (passive regen): a snack that would add less than 1 energy is refused
+      // before anything is charged or a daily snack is used.
+      if (runner.maxEnergy - runner.energy < 1) {
+        throw new CommandError(runner.name + ' is already full of energy (' + Math.floor(runner.energy) + '/' + runner.maxEnergy +
+          ') — a snack would not add even 1.', { severity: 'info' });
       }
       const pay = spend(ctx, E.SNACK_COST, 'snack', 'A snack');
       // --- commit ---
@@ -1309,8 +1349,11 @@
       if (onTarget >= C.MAX_SABOTAGE_PER_TARGET) {
         throw new CommandError(runner.name + ' already has ' + plural(C.MAX_SABOTAGE_PER_TARGET, 'pebble') + ' waiting — leave the poor thing alone.', { severity: 'info' });
       }
-      if (queuedCount(S, 'sabotage') >= C.MAX_SABOTAGE_PER_RACE) {
-        throw new CommandError('The forest only hides ' + C.MAX_SABOTAGE_PER_RACE + ' pebbles per race and they are all taken. Try after the next race.', { severity: 'info' });
+      // The per-race cap counts only pebbles the next race will use (queued on runners in its field).
+      // A pebble on a runner outside it waits for that runner's next race, which takes at most
+      // MAX_SABOTAGE_PER_RACE (SD.game.raceEffectsFor keeps the rest queued, so none fizzles).
+      if (inNextField(S, runner.id) && nextRaceSabotages(S) >= C.MAX_SABOTAGE_PER_RACE) {
+        throw new CommandError('The forest only hides ' + C.MAX_SABOTAGE_PER_RACE + ' pebbles per race and the next race has them all. Try after the next race.', { severity: 'info' });
       }
       const pay = spend(ctx, EC().SABOTAGE_COST, 'sabotage', 'A sabotage');
       // --- commit ---
@@ -1346,7 +1389,7 @@
     handler: function (ctx, args) {
       const S = ctx.state;
       const runner = myRunnerOrThrow(ctx);
-      if (!args.length) return { message: ribbonHelp(), severity: 'info' };
+      if (!args.length) { ctx.readOnly = true; return { message: ribbonHelp(), severity: 'info' }; }
       const raw = args.join('').toLowerCase();
       if (/^(off|none|remove|clear)$/.test(raw)) {
         if (!runner.ribbonColor) throw new CommandError(runner.name + " isn't wearing a ribbon.", { severity: 'info' });

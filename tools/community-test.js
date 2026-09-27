@@ -174,9 +174,10 @@ section('betting: place, limits, replace, cancel, !bet all');
   const bet = S().bets[0];
   eq([bet.username, bet.runnerId, bet.amount, bet.odds], ['foxfan', A.id, 50, oddsA], 'bet { username, runnerId, amount, odds locked at placement }');
   has(b1.message, 'pays ' + SD.betting.payoutFor(50, oddsA) + ' SP', 'reply shows the potential payout');
-  eq(player('foxfan').stats.bets, 1, 'stats.bets counts the bet');
+  // Review batch 4: a bet counts (stats.bets, hype) once, when the race it rode in settles it.
+  eq(player('foxfan').stats.bets, 0, 'stats.bets does not count a bet at placement (it counts when settled)');
   eq(player('foxfan').stats.spSpentTotal, 50, 'stats.spSpentTotal += 50');
-  eq(S().hype.value - hype0, SD.CONFIG.HYPE.GAINS.bet, 'hype +1 for a bet');
+  eq(S().hype.value - hype0, 0, 'no hype for placing a bet (it comes when the bet is settled)');
   eq(placed.list.length, 1, 'bet:placed emitted');
   ok(b1.effects.some(function (e) { return e.type === 'bet' && e.amount === 50; }), 'effects include { type:"bet" }');
 
@@ -186,7 +187,7 @@ section('betting: place, limits, replace, cancel, !bet all');
   eq(S().bets.length, 1, 'still one open bet per player');
   eq([S().bets[0].runnerId, S().bets[0].amount], [B.id, 80], 'the new bet replaced the old one');
   eq(player('foxfan').spiritPoints, 120, 'old 50 refunded, new 80 taken');
-  eq(player('foxfan').stats.bets, 1, 'a replacement is not counted as another bet');
+  eq(player('foxfan').stats.bets, 0, 'a replacement is not counted either');
   eq([player('foxfan').stats.spSpentTotal, player('foxfan').stats.spEarnedTotal], [80, 200], 'a refund reverses the spend (not "SP earned")');
   eq(say('FoxFan', '!bet ' + B.name + ' 80').ok, false, 'an identical bet is refused');
 
@@ -698,16 +699,22 @@ section('achievements: a scripted session unlocks at least 8 different ones');
   ok(unlockedIds('cara').indexOf('hypeTrain') >= 0, 'Hype Train (hype past 50)');
   SD.game.addHype(100, 'cara');
   ok(unlockedIds('cara').indexOf('forestAwakened') >= 0, 'Forest Awakened (hype 100)');
-  // Dan: High Roller, Saboteur.
-  const hr = say('Dan', '!bet ' + F[0].name + ' 200');
-  has(hr.message, 'High Roller', 'High Roller in the !bet reply');
+  // Dan: Saboteur, then High Roller - which (review batch 4) unlocks when the race the 200 SP bet rode
+  // in settles it, not in the !bet reply (a placed-then-cancelled bet earns nothing).
   const sab = say('Dan', '!sabotage ' + F[1].name);
   ok(sab.ok && unlockedIds('dan').indexOf('saboteur') >= 0, 'Saboteur (first sabotage, via command:result)');
+  player('dan').spiritPoints = 300;
+  const hr = say('Dan', '!bet ' + F[0].name + ' 200');
+  ok(hr.ok && hr.message.indexOf('High Roller') < 0 && unlockedIds('dan').indexOf('highRoller') < 0, 'no High Roller at placement', hr.message);
   // Four races: somebody wins (Owner's Pride) and somebody reaches 3 podiums.
   for (let r = 0; r < 4; r++) {
     S().runners.forEach(function (x) { x.energy = x.maxEnergy; });
     const res = race();
     ok(res.ok, 'race ' + (r + 1) + ' finished', res.message);
+    if (r === 0) {
+      ok(unlockedIds('dan').indexOf('highRoller') >= 0, 'High Roller when the race settles the 200 SP bet');
+      ok(res.achievements.some(function (a) { return a.id === 'highRoller' && a.username === 'dan'; }), '… listed with the race achievements');
+    }
   }
   const winners = crew.filter(function (u) { return unlockedIds(u).indexOf('ownersPride') >= 0; });
   ok(winners.length >= 1, "Owner's Pride for a winning owner", winners);
@@ -812,8 +819,24 @@ section('season end: summary fields, rollback, history, refunds');
   const commandsBefore = player('alice').stats.commands;
 
   const ended = capture(EV.SEASON_ENDED);
+  // What a synchronous season:ended listener sees at that moment (the summary modal renders right
+  // there when no results modal is open, e.g. NEXT DAY on the last day): fix round 1 of review batch 4.
+  let atEnded = null;
+  const offAt = SD.bus.on(EV.SEASON_ENDED, function (p) {
+    const sm = p.summary;
+    atEnded = {
+      count: sm.achievementsCount, champ: sm.achievements.some(function (a) { return a.id === 'seasonChampion'; }),
+      hist: S().season.history[S().season.history.length - 1].achievementsCount
+    };
+  });
+  const unlockOrder = [];
+  const offOrder = [EV.SEASON_ENDED, EV.SEASON_STARTED, EV.ACHIEVEMENT_UNLOCKED].map(function (n) {
+    return SD.bus.on(n, function (p) { unlockOrder.push(n === EV.ACHIEVEMENT_UNLOCKED ? p.id : n); });
+  });
   days.push(SD.game.nextDay());
   ended.off();
+  offAt();
+  offOrder.forEach(function (o) { o(); });
   eq(days.map(function (x) { return !!x.seasonEnded; }), [false, false, false, false, false, false, true], 'nextDay x7: days 2..7, then the season ends');
   eq(ended.list.length, 1, 'season:ended emitted once');
   const sum = ended.list[0].summary;
@@ -825,7 +848,15 @@ section('season end: summary fields, rollback, history, refunds');
   eq(sum.biggestUpset.upset, topOdds >= SD.CONFIG.RACE.UPSET_ODDS, '… flagged as a true upset only at >= 10x');
   eq(sum.topHypeContributor && sum.topHypeContributor.username, hypeTop, 'summary: top hype contributor');
   eq(sum.topHypeContributor.displayName, player(hypeTop).displayName, '… with the display name');
-  eq(sum.achievementsCount, unlockedS1, 'summary: achievements unlocked this season');
+  // Review batch 4: Season Champion (awarded on season:started) is recorded in season 1, the season it
+  // was won, so season 1's summary and history count it (it used to land in season 2).
+  const champEntry = S().achievements.unlocked.filter(function (a) { return a.id === 'seasonChampion'; })[0];
+  eq(champEntry && [champEntry.season, champEntry.day], [1, 7], 'Season Champion is recorded in season 1 (day 7), the season it was won');
+  eq(sum.achievementsCount, unlockedS1 + 1, 'summary: achievements unlocked this season (+ Season Champion)');
+  eq(atEnded, { count: unlockedS1 + 1, champ: true, hist: unlockedS1 + 1 },
+    'a season:ended listener (the summary modal, NEXT DAY path) already sees Season Champion in the summary and history');
+  eq(unlockOrder.filter(function (x) { return x === EV.SEASON_ENDED || x === EV.SEASON_STARTED || x === 'seasonChampion'; }),
+    [EV.SEASON_ENDED, EV.SEASON_STARTED, 'seasonChampion'], 'its achievement:unlocked is announced after season:ended / season:started');
   eq(sum.runnerTable.map(function (r) { return r.runnerId; }), table.map(function (r) { return r.id; }), 'summary: per-runner table in champion order');
   ok(sum.runnerTable.every(function (r) { return 'wins' in r && 'races' in r && 'podiums' in r && 'xp' in r && r.rank >= 1; }), '… rows { rank, wins, races, podiums, xp }');
   eq([sum.refundedBets, sum.refundedEffects], [1, 1], 'open bet + queued boost refunded at season end');
@@ -833,7 +864,8 @@ section('season end: summary fields, rollback, history, refunds');
   const hist = S().season.history;
   eq(hist.length, 1, 'archived to season.history');
   const h = hist[0];
-  eq([h.number, h.championName, h.championOwner, h.mvpUsername, h.totalRaces, h.achievementsCount], [1, champ.name, champOwner, mvp.displayName, 2, unlockedS1], 'history entry fields');
+  eq([h.number, h.championName, h.championOwner, h.mvpUsername, h.totalRaces, h.achievementsCount], [1, champ.name, champOwner, mvp.displayName, 2, unlockedS1 + 1], 'history entry fields (Season Champion counted in season 1)');
+  eq(SD.seasons.summary(S()).achievements.filter(function (a) { return a.id === 'seasonChampion'; }).length, 0, 'season 2 does not count season 1\'s Season Champion');
   ok(Array.isArray(h.runnerTable) && h.runnerTable.length <= SD.CONFIG.SEASON.HISTORY_TABLE_N && h.endedAt > 0, 'history keeps a small win table + endedAt');
 
   eq([S().season.number, S().season.day, S().season.racesRun], [2, 1, 0], 'season 2, day 1');

@@ -349,7 +349,9 @@
     if (!p) return null;
     const stat = KIND_STAT[kind];
     if (stat) p.stats[stat] += 1;
-    if (runnerId && BACKING_KINDS[kind]) {
+    // Backing is decided before the gate: while a race is in progress its result is already fixed,
+    // so nothing done then (a mid-race !cheer) may move backing onto a runner in that race.
+    if (runnerId && BACKING_KINDS[kind] && !state.currentRace) {
       const b = p.backing;
       if (!b.runnerId || b.actions <= 0) { b.runnerId = runnerId; b.actions = 1; }
       else if (b.runnerId === runnerId) b.actions += 1;

@@ -5,7 +5,8 @@
  * UI buttons, the command pipeline and integrations all call these methods.
  *
  * Optional later-milestone modules are called only when present:
- *   SD.betting.lockForRace(state, record) -> refunded[] (startRace: bets on non-starters refunded)
+ *   SD.betting.lockForRace(state, record) -> { locked, repriced, refunded } (startRace: bets settled at
+ *                                         min(quoted, gate odds); non-starters / odds-on refunded)
  *   SD.betting.resolveRace(state, record) -> resolvedBets[]
  *   SD.betting.refundAll(state, reason)   -> refunded[] | count
  *   SD.players.applyRaceResults(state, record) -> payouts[]
@@ -104,6 +105,34 @@
     return fieldRng.shuffle(SD.race.selectField(s, n, fieldRng));
   }
 
+  /**
+   * Which queued chat effects (state.raceEffects) a race on this field uses: every effect on a runner
+   * in the field, except sabotages beyond CONFIG.RACE.CHAT.MAX_SABOTAGE_PER_RACE (queue order), which
+   * stay queued for that runner's next race, so a paid pebble never fizzles against the engine's cap.
+   * Pure: returns { used, rest } (an entry straddling the cap is split, its `paid` shared by count).
+   * betting.fieldOdds prices the next race with the same split.
+   */
+  function raceEffectsFor(queued, ids) {
+    const cap = Math.max(0, Number(SD.CONFIG.RACE.CHAT.MAX_SABOTAGE_PER_RACE) || 0);
+    const used = [], rest = [];
+    let sab = 0;
+    (Array.isArray(queued) ? queued : []).forEach(function (e) {
+      if (!e || typeof e !== 'object') return;
+      if (ids.indexOf(e.runnerId) < 0) { rest.push(e); return; }
+      if (e.type !== 'sabotage') { used.push(e); return; }
+      const n = Math.max(1, Math.round(Number(e.count) || 1));
+      const take = Math.max(0, Math.min(n, cap - sab));
+      sab += take;
+      if (take === n) { used.push(e); return; }
+      if (take === 0) { rest.push(e); return; }
+      const paid = Number(e.paid) || 0;
+      const paidUsed = Math.round(paid * take / n);
+      used.push(Object.assign({}, e, { count: take, paid: paidUsed }));
+      rest.push(Object.assign({}, e, { count: n - take, paid: paid - paidUsed }));
+    });
+    return { used: used, rest: rest };
+  }
+
   // ---------------------------------------------------------------------------
   // Races
   // ---------------------------------------------------------------------------
@@ -133,18 +162,23 @@
       const field = fieldRng.shuffle(SD.race.selectField(st, count, fieldRng)); // shuffle = lane draw
       const hype = st.hype.value;
 
-      // Crowd energy rubs off on the runners before the gates open.
+      // Crowd energy rubs off on the runners before the gates open. The gate mood lives on the race
+      // snapshot only (the entrants): the live runner keeps its mood until finishRace sets the result's
+      // moodAfter, so an aborted or interrupted race leaves no Chaotic / Fired Up behind.
       const H = C.HYPE, M = SD.CONFIG.MOOD;
-      field.forEach(function (r) {
-        if (hype >= H.AWAKENED && fieldRng.chance(M.CHAOTIC_RACE_CHANCE)) SD.runners.setMood(r, 'Chaotic');
-        else if (hype >= H.FERAL && fieldRng.chance(M.FIRED_UP_RACE_CHANCE)) SD.runners.setMood(r, 'Fired Up');
+      const gateField = field.map(function (r) {
+        let mood = null;
+        if (hype >= H.AWAKENED && fieldRng.chance(M.CHAOTIC_RACE_CHANCE)) mood = 'Chaotic';
+        else if (hype >= H.FERAL && fieldRng.chance(M.FIRED_UP_RACE_CHANCE)) mood = 'Fired Up';
+        return mood && mood !== r.mood ? Object.assign({}, r, { mood: mood }) : r;
       });
 
-      // Queued chat effects for runners in this field are consumed; others stay queued.
+      // Queued chat effects for runners in this field are consumed (sabotages only up to the per-race
+      // cap); the others stay queued.
       const ids = field.map(function (r) { return r.id; });
-      const queued = Array.isArray(st.raceEffects) ? st.raceEffects : [];
-      const used = queued.filter(function (e) { return ids.indexOf(e.runnerId) >= 0; });
-      st.raceEffects = queued.filter(function (e) { return ids.indexOf(e.runnerId) < 0; });
+      const split = raceEffectsFor(st.raceEffects, ids);
+      const used = split.used;
+      st.raceEffects = split.rest;
       const chatEffects = [];
       const cheerBonus = {};
       // Viewers are stored by username key; the race shows their display names.
@@ -164,7 +198,11 @@
       });
 
       const dayEvent = SD.events.dayEventById(st.season.activeDayEvent);
-      const entrants = SD.race.buildEntrants(field, { distance: distance, hypeLevel: hype, dayEvent: dayEvent, cheerBonus: cheerBonus });
+      // The gate's own odds see everything the engine will: gate moods, hype tier, cheers, boosts and
+      // sabotages. lockForRace settles every open bet at min(its quoted odds, these).
+      const entrants = SD.race.buildEntrants(gateField, {
+        distance: distance, hypeLevel: hype, dayEvent: dayEvent, cheerBonus: cheerBonus, chatEffects: chatEffects
+      });
       const active = SD.state.activeRunners(st);
       const rosterAvgLevel = active.reduce(function (a, r) { return a + r.level; }, 0) / Math.max(1, active.length);
       const trackName = fieldRng.pick(SD.DATA.TRACK_NAMES);
@@ -186,15 +224,18 @@
         rosterAvgLevel: rosterAvgLevel
       });
       st.currentRace = { record: record, status: 'countdown', startedAt: SD.clock.now() };
-      // Bets on runners that did not make the field are refunded at the gate; the rest are locked in.
-      if (SD.betting && typeof SD.betting.lockForRace === 'function') SD.betting.lockForRace(st, record);
+      // Bets on runners that did not make the field (or that are odds-on at the gate) are refunded; the
+      // rest are locked in at min(quoted, gate odds). They count (stats, hype, High Roller) only when the
+      // race finishes and they are settled, so an aborted or interrupted race counts nothing.
+      let bets = null;
+      if (SD.betting && typeof SD.betting.lockForRace === 'function') bets = SD.betting.lockForRace(st, record) || null;
 
       const fav = record.entrants.slice().sort(function (a, b) { return a.odds - b.odds; })[0];
       const message = 'Race ' + indexInDay + '/' + st.season.racesPerDay + ' at ' + trackName + ' (' + distance + ' m): ' +
-        record.entrants.map(function (e) { return e.name; }).join(', ') + '. Favourite: ' + fav.name + ' at ' + fav.odds + 'x.';
+        record.entrants.map(function (e) { return e.name; }).join(', ') + '. Favourite: ' + fav.name + ' at ' + Number(fav.odds).toFixed(1) + 'x.';
       SD.state.log('race', message, 'info', { recordId: record.id });
       emit(SD.EVENTS.RACE_STARTED, { record: record });
-      return { ok: true, message: message, record: record };
+      return { ok: true, message: message, record: record, bets: bets };
     });
   }
 
@@ -303,6 +344,9 @@
       levelUps.forEach(function (l) { major += l.levelUps * CFG.PROGRESSION.LEVELUP_HYPE; });
       SD.hype.add(st, major, { reason: 'raceFinish' });
       SD.hype.decayAfterRace(st);
+      // Settled bets add their hype now, after the decay: it builds toward the NEXT race (the one that
+      // just ran was simulated with the hype it had at the gate, so it never claims a tier it lacked).
+      if (SD.betting && typeof SD.betting.creditBetHype === 'function') SD.betting.creditBetHype(st, bets);
       record.hypeAfter = st.hype.value;
 
       if (SD.achievements && typeof SD.achievements.checkRace === 'function') achievements = SD.achievements.checkRace(st, record) || [];
@@ -331,7 +375,7 @@
         record: record, results: record.results, bets: bets, levelUps: levelUps,
         achievements: achievements, payouts: payouts, dayAdvanced: dayInfo
       });
-      if (dayInfo) emitDayInfo(dayInfo, emit);
+      if (dayInfo) emitDayInfo(st, dayInfo, emit);
     });
     saveNow();
     return { ok: true, message: record.summary.winnerName + ' wins!', record: record, levelUps: levelUps, bets: bets, achievements: achievements, dayAdvanced: dayInfo };
@@ -521,11 +565,19 @@
     return runner;
   }
 
-  function emitDayInfo(info, emit) {
-    if (info.seasonEnded) {
-      emit(SD.EVENTS.SEASON_ENDED, { summary: info.summary });
-      emit(SD.EVENTS.SEASON_STARTED, { season: info.season });
-    }
+  // A season rollover's events. Season Champion is awarded here, inside the commit and before
+  // season:ended goes out, so the summary (and its season.history entry) already count it when the
+  // summary modal renders on season:ended; its achievement:unlocked is announced after season:started.
+  function emitSeasonEnd(st, summary, season, emit) {
+    const later = SD.achievements && typeof SD.achievements.awardSeasonChampion === 'function'
+      ? SD.achievements.awardSeasonChampion(st, summary) : [];
+    emit(SD.EVENTS.SEASON_ENDED, { summary: summary });
+    emit(SD.EVENTS.SEASON_STARTED, { season: season });
+    later.forEach(function (a) { emit(SD.EVENTS.ACHIEVEMENT_UNLOCKED, a); });
+  }
+
+  function emitDayInfo(st, info, emit) {
+    if (info.seasonEnded) emitSeasonEnd(st, info.summary, info.season, emit);
     emit(SD.EVENTS.SEASON_DAY_ADVANCED, info);
     if (info.dayEvent) emit(SD.EVENTS.EVENT_DAY, { event: info.dayEvent, manual: false });
   }
@@ -537,7 +589,7 @@
     let info;
     commit('season:nextDay', function (st, emit) {
       info = SD.seasons.advanceDay(st, actionRng(st, 'day'));
-      emitDayInfo(info, emit);
+      emitDayInfo(st, info, emit);
     });
     saveNow();
     return Object.assign({ ok: true, message: info.seasonEnded ? 'Season ' + (info.season - 1) + ' ended. Season ' + info.season + ' begins!'
@@ -565,8 +617,7 @@
     commit('season:reset', function (st, emit) {
       summary = SD.seasons.endSeason(st);
       started = SD.seasons.startSeason(st, actionRng(st, 'season'));
-      emit(SD.EVENTS.SEASON_ENDED, { summary: summary });
-      emit(SD.EVENTS.SEASON_STARTED, { season: started.season });
+      emitSeasonEnd(st, summary, started.season, emit);
       emit(SD.EVENTS.EVENT_DAY, { event: started.dayEvent, manual: false });
     });
     saveNow();
@@ -717,6 +768,7 @@
     tickClock: tickClock,
     seedForRace: seedForRace,
     previewField: previewField,
+    raceEffectsFor: raceEffectsFor,
     replayLastRace: replayLastRace,
     replayInputs: replayInputs,
     resolveRunner: resolveRunner,

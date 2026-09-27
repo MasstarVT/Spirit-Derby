@@ -21,6 +21,9 @@
  *   - odds calibration: mean |implied - actual| <= 3pp and worst runner <= 8pp per distance;
  *     M4: also on mixed fields (roster + random runners, levels 1-8, any condition / mood /
  *     energy, 4-10 runners): every implied-probability bucket within 4pp of the actual rate
+ *   - review batch 4: odds at hype 30 / 60 / 110 (mixed fields @1200 and @2400 m) calibrated within
+ *     5pp per bucket, and at Forest Awakened @2400 m (roster fields, 4-8 runners) betting the longest
+ *     price returns < 1 SP per SP (it was 1.2+) and betting every runner < 0.95
  *   - style-clone fields (2 per style, all stats 40): each style wins 15-35% per distance
  *   - Ember Tail wins more at 1200 m than at 2400 m; Moonhoof the reverse
  *   - M4 sensitivity (8-runner clone fields, all stats 40, Excellent + Happy unless stated,
@@ -439,6 +442,63 @@ function mixedCalibration(count, ev) {
     'worst bucket off by ' + pct(worst));
 }
 
+// Review batch 4 (economy-abuse#5): the engine changes with the hype tier (LOUD sigma, FERAL events /
+// crits, Forest Awakened's refill and last-place surge), so the odds see the hype level too. Checks the
+// calibration at each tier on mixed fields, and that the old exploit (a max bet on the longest price
+// at Forest Awakened, 2400 m, roster fields: 1.2+ SP back per SP) is gone.
+function hypeTierOdds(count, ev) {
+  const EDGE = SD.CONFIG.RACE.ODDS.HOUSE;
+  let worst = { err: 0, where: '' };
+  const lines = [];
+  [1200, 2400].forEach(function (d) {
+    [30, 60, 110].forEach(function (h) {
+      const buckets = [[0, 0.05], [0.05, 0.10], [0.10, 0.20], [0.20, 0.35], [0.35, 1.01]].map(function (b) { return { lo: b[0], hi: b[1], n: 0, p: 0, w: 0 }; });
+      for (let i = 0; i < count; i++) {
+        const seed = SD.rng.seedFrom(opts.seed, 'hype-mixed', d, h, i);
+        const entrants = SD.race.buildEntrants(mixedField(i), { distance: d, hypeLevel: h });
+        const rec = SD.race.simulate({ seed: seed, distance: d, entrants: entrants, eventFrequency: ev, hypeLevel: h });
+        GLOBAL.races++;
+        rec.entrants.forEach(function (e) {
+          const b = buckets.filter(function (x) { return e.winProb >= x.lo && e.winProb < x.hi; })[0];
+          b.n++; b.p += e.winProb; if (e.runnerId === rec.results[0].runnerId) b.w++;
+        });
+      }
+      buckets.forEach(function (b) {
+        if (b.n < 200) return;
+        const err = Math.abs(b.p / b.n - b.w / b.n);
+        if (err > worst.err) worst = { err: err, where: d + 'm hype ' + h + ' bucket ' + Math.round(b.lo * 100) + '%' };
+      });
+      lines.push(d + 'm/h' + h + ' ' + buckets.map(function (b) { return pct(b.n ? b.p / b.n : 0) + '/' + pct(b.n ? b.w / b.n : 0); }).join(' '));
+    });
+  });
+  console.log('\nODDS AT HYPE TIERS (mixed fields, ' + count + ' races each; implied/actual per bucket): ' + lines.join(' | '));
+  check('odds calibration at hype 30 / 60 / 110 (mixed fields) @1200m and @2400m: every bucket within 5pp', worst.err <= 0.05,
+    'worst ' + pct(worst.err) + ' at ' + worst.where);
+
+  const n = Math.max(count, 2000);
+  let longStake = 0, longRet = 0, allStake = 0, allRet = 0;
+  for (let i = 0; i < n; i++) {
+    const seed = SD.rng.seedFrom(opts.seed, 'hype-roster', i);
+    const lanes = SD.rng.create(SD.rng.seedFrom(seed, 'lanes'));
+    const f = lanes.shuffle(ROSTER.slice()).slice(0, 4 + lanes.int(5));
+    const entrants = SD.race.buildEntrants(f, { distance: 2400, hypeLevel: 110 });
+    const rec = SD.race.simulate({ seed: seed, distance: 2400, entrants: entrants, eventFrequency: ev, hypeLevel: 110 });
+    GLOBAL.races++;
+    const win = rec.results[0].runnerId;
+    const longest = rec.entrants.slice().sort(function (a, b) { return b.odds - a.odds; })[0];
+    longStake++; if (longest.runnerId === win) longRet += longest.odds;
+    rec.entrants.forEach(function (e) {
+      if (e.odds < SD.CONFIG.RACE.ODDS.MIN) return;
+      allStake++; if (e.runnerId === win) allRet += e.odds;
+    });
+  }
+  console.log('FOREST AWAKENED @2400m roster fields (' + n + ' races): SP back per SP on the longest price ' + (longRet / longStake).toFixed(3) +
+    ', on every runner ' + (allRet / allStake).toFixed(3) + ' (house edge target ' + EDGE + ')');
+  check('Forest Awakened @2400m: betting the longest price is not +EV (roster fields, was 1.2+ before review batch 4)', longRet / longStake < 1,
+    (longRet / longStake).toFixed(3) + ' SP back per SP');
+  check('Forest Awakened @2400m: betting every runner returns under 0.95 per SP', allRet / allStake < 0.95, (allRet / allStake).toFixed(3));
+}
+
 // -----------------------------------------------------------------------------
 // --dump
 // -----------------------------------------------------------------------------
@@ -610,6 +670,9 @@ function streamday() {
 
   // 4b. Odds on realistic mid-season fields (levels, fatigue, moods, low energy).
   mixedCalibration(Math.max(N, 2000), ev);
+
+  // 4c. Odds at hype tiers (review batch 4).
+  hypeTierOdds(N, ev);
 
   // 5. Determinism (with every system switched on: chaos events, hype 100, chat effects)
   const detField = SD.race.buildEntrants(ROSTER.slice(0, 8), { distance: 2000, hypeLevel: 110 });

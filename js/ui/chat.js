@@ -148,6 +148,21 @@
         if (!a || a.duringCommand || a.recordId) return;
         self.system('🏅 ' + (a.displayName || a.username) + ' unlocked ' + a.name + ' (+' + (a.sp || 0) + ' SP)', 'epic');
       }));
+      // Review batch 4: bets are settled at min(quoted, gate odds); tell chat whose odds shortened.
+      this.offs.push(dom.on('BET_LOCKED', function (p) {
+        const moved = (p && Array.isArray(p.repriced)) ? p.repriced : [];
+        const oddsOn = (p && Array.isArray(p.refunded)) ? p.refunded.filter(function (b) { return b && b.reason === 'oddsOn'; }) : [];
+        if (moved.length) {
+          self.system('💰 Odds shortened at the gate: ' + moved.slice(0, 4).map(function (b) {
+            return (b.displayName || b.username) + ' on ' + b.runnerName + ' ' + dom.fmt.odds(b.quoted) + ' → ' + dom.fmt.odds(b.odds);
+          }).join(', ') + (moved.length > 4 ? ' and ' + (moved.length - 4) + ' more' : '') + '.', 'info');
+        }
+        if (oddsOn.length) {
+          self.system('💰 Refunded at the gate (odds-on, no bets): ' + oddsOn.slice(0, 4).map(function (b) {
+            return (b.displayName || b.username) + ' on ' + b.runnerName;
+          }).join(', ') + (oddsOn.length > 4 ? ' and ' + (oddsOn.length - 4) + ' more' : '') + '.', 'info');
+        }
+      }));
       this.offs.push(dom.on('BET_RESOLVED', function (p) {
         if (!p || !p.refunded || !Array.isArray(p.bets) || !p.bets.length) return;
         self.system('💰 ' + p.bets.length + ' open bet' + (p.bets.length === 1 ? ' was' : 's were') + ' refunded.', 'info');

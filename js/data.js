@@ -550,7 +550,7 @@
     { id: 'cheerleader', icon: '\u{1F4E3}', name: 'Cheerleader', desc: 'Cheer 25 times.', sp: 50, trigger: { on: 'cheer', min: 25 } },
     { id: 'hypeTrain', icon: '\u{1F682}', name: 'Hype Train', desc: 'Help push hype past 50 (FERAL MODE).', sp: 25, trigger: { on: 'hype', threshold: 'feral' } },
     { id: 'forestAwakened', icon: '\u{1F333}', name: 'Forest Awakened', desc: 'Help push hype to 100 and wake the forest.', sp: 100, trigger: { on: 'hype', threshold: 'awakened' } },
-    { id: 'highRoller', icon: '\u{1F3B2}', name: 'High Roller', desc: 'Place a bet of 200 SP or more.', sp: 50, trigger: { on: 'bet', amountMin: 200 } },
+    { id: 'highRoller', icon: '\u{1F3B2}', name: 'High Roller', desc: 'Bet 200 SP or more on a race that runs to the finish.', sp: 50, trigger: { on: 'bet', amountMin: 200 } },
     { id: 'sharpEye', icon: '\u{1F441}', name: 'Sharp Eye', desc: 'Win a bet at odds of 5x or more.', sp: 50, trigger: { on: 'betWin', oddsMin: 5 } },
     { id: 'longshot', icon: '\u{1F3AF}', name: 'Longshot', desc: 'Win a bet at odds of 10x or more.', sp: 100, trigger: { on: 'betWin', oddsMin: 10 } },
     { id: 'ownersPride', icon: '\u{1F3C6}', name: "Owner's Pride", desc: 'Own the winner of a race.', sp: 50, trigger: { on: 'race', ownerWin: true } },

@@ -23,6 +23,7 @@
     HYPE_CHANGED: 'hype:changed',
     HYPE_THRESHOLD: 'hype:threshold',
     BET_PLACED: 'bet:placed',
+    BET_LOCKED: 'bet:locked',
     BET_RESOLVED: 'bet:resolved',
     EVENT_DAY: 'event:day',
     RACE_STARTED: 'race:started',

@@ -182,6 +182,7 @@
 
   // ---------------------------------------------------------------------------
   // rest(state, runner, { by, now }) -> { ok, message, energyGain, fatigueDrop, hype, cooldownMs? }
+  // hype = the change SD.game.restRunner applies (REST.HYPE clamped to the meter), not the nominal -5.
   // Per-runner cooldown lives in SD.state.runtime.runnerCooldowns (not persisted).
   // ---------------------------------------------------------------------------
   function rest(state, runner, opts) {
@@ -209,16 +210,21 @@
     cds[runner.id] = Object.assign({}, cds[runner.id], { rest: now });
 
     const energyGain = U.round2(runner.energy - energyBefore);
+    // The hype change SD.game.restRunner will actually apply (SD.hype.add, raw: the meter is clamped
+    // to 0..max), so the reply and the { type:'hype', delta } effect never claim more than happens.
+    const hv = state && state.hype ? Number(state.hype.value) || 0 : 0;
+    const hmax = state && state.hype && state.hype.max ? state.hype.max : SD.CONFIG.HYPE.MAX;
+    const hypeDelta = U.round1(U.round1(U.clamp(hv + (Number(R.HYPE) || 0), 0, hmax)) - hv);
     const fl = SD.DATA.REST_FLAVOUR;
     const flavour = fill(fl[SD.rng.hash(runner.id + ':' + now) % fl.length], runner.name);
-    const message = flavour + '\nEnergy ' + U.signed(energyGain) + DOT + 'Hype ' + R.HYPE + DOT +
+    const message = flavour + '\nEnergy ' + U.signed(energyGain) + (hypeDelta ? DOT + 'Hype ' + (hypeDelta > 0 ? '+' : '') + hypeDelta : '') + DOT +
       'Feeling ' + runner.condition + (runner.mood === 'Sleepy' ? ' (and very Sleepy)' : '');
     return {
       ok: true,
       message: message,
       energyGain: energyGain,
       fatigueDrop: U.round2(fatigueBefore - runner.fatigue),
-      hype: R.HYPE,
+      hype: hypeDelta,
       conditionBefore: condBefore,
       condition: runner.condition,
       conditionChanged: condBefore !== runner.condition,

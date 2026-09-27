@@ -128,7 +128,7 @@
     odds: function (x) {
       x = Number(x);
       if (!isFinite(x) || x <= 0) return '–';
-      return (x >= 10 ? x.toFixed(0) : x.toFixed(1)) + '×';
+      return x.toFixed(1) + '×'; // the exact odds bets are paid at (never rounded to whole numbers)
     },
     signed: function (n, digits) {
       n = Number(n);
