@@ -35,7 +35,7 @@ Version **1.0.0** · [Architecture](docs/ARCHITECTURE.md) · [Twitch / Mix It Up
 | **Track** | Title bar (track name, distance, phase, distance progress bar) · one lane per runner (badge, name, owner, level, style, stamina bar) with the sprite moving along it · live **Positions** column (gaps in metres, finish times) · ticker with the three latest race events · countdown, fog, finish flash and photo-finish / upset / winner banners |
 | **Paddock** (no race) | The exact next field in lane order with odds, condition, energy and owner · chips for open bets, queued boosts, sabotages and cheers · the season's leader |
 | **Roster strip** | One card per runner: stats vs cap, energy, XP, mood, condition, record, owner, ability (hover for details) · local TRAIN / REST controls for the streamer |
-| **Sidebar** | **Chat** (simulated chat: speak as anyone with `@Name: !cmd`, demo bots) · **Boards** (six leaderboards, season or all-time, and past seasons) · **Log** (everything that happened) |
+| **Sidebar** | **Chat** (simulated chat: speak as any viewer with `@login: !cmd`, demo bots) · **Boards** (six leaderboards, season or all-time, and past seasons) · **Log** (everything that happened) |
 | **Modals** | Race results (places, times, XP, SP, stat gains, abilities, bets, achievements) · season summary |
 | **Toasts** | Achievements, level-ups, streamer messages; in overlay mode also every command reply (queued, max 4 visible, max 1 new reply per second) |
 
@@ -68,7 +68,7 @@ Every source (simulated chat, SEND AS, Twitch, the bridge) goes through the same
 | `!rank [viewer]` | | Your rank on the SP, victories and hype boards | none | no | *FoxFan: #2 in SP (71) · unranked in victories · #1 in hype (5.2)* |
 | `!help [command]` | `!h` `!commands` | The list, or one command's usage | none | no | *!train <stat> or !train <runner> <stat> … — Train your runner …* |
 
-- The per-viewer cooldown (default 10 s) is **Tuning → User cooldown**. Cooldowns start only after a command succeeds. The streamer's own console (the *Streamer* sender, SEND AS) has no cooldowns and may train any runner.
+- The per-viewer cooldown (default 10 s) is **Tuning → User cooldown**. Cooldowns start only after a command succeeds. The streamer's own console (the *Streamer* sender, SEND AS) has no cooldowns and may train any runner. The *Streamer* sender runs mod and read-only commands but never plays (no `!join`, no SP, hype credit or achievements); the roster TRAIN / REST buttons and ADD HYPE credit nobody either. Pick a viewer in SEND AS (or type `@login:` in chat) to act for them.
 - Read-only commands have no cooldown but count toward the participation board at most once every 10 s.
 - **Open training** (default on) lets anyone `!train` / `!rest` any runner by name. This is the "chat overtrains the favourite" story. Turn it off and only owners train their runner.
 - Unknown commands (`!discord`, meant for other bots) get a short reply in the Chat tab but no toast on stream and nothing through the bridge.
@@ -161,16 +161,16 @@ A day has 3 races and a season has 7 days. With **Auto-advance day** on, the day
 | 🎛 Tuning | event frequency (none / low / normal / high / chaos) · hype multiplier · playback speed · final-stretch speedup · user cooldown · open training · allow `!create` · auto-advance day |
 | 🐞 Debug | debug mode (hidden events such as wild rolls in the ticker, a HUD on the track with tick / fps / seed / hash / wild rolls, a perf + fatigue table, error toasts) · **seed override** (every race uses it while debug is on; the paddock matches) · **REPLAY LAST RACE** (re-simulates and compares hashes; races from an older engine are flagged as such) · **COPY LAST RACE JSON** for bug reports |
 | 💾 Save | **EXPORT JSON** / **IMPORT JSON** · `autosave ● 2 s ago · 41 KB` with a *SAVED ✓* flash · counts and storage type · **Save now** |
-| 💬 Send as | run any command as the streamer, a mod or a recent viewer (no cooldowns) |
+| 💬 Send as | run any command as the streamer (mod and read-only commands) or as a recent viewer: viewers are listed by display name and addressed by login, and your choice stays selected (no cooldowns) |
 | 📡 Twitch & bridge | read-only Twitch chat and the local bridge: connect, auto-connect, live status |
 
-The drawer footer shows the build: `Spirit Derby v1.0.0 · save schema v2 · race engine v2`.
+The drawer footer shows the build: `Spirit Derby v1.0.0 · save schema v3 · race engine v2`.
 
 **Keyboard:** **`** controls · **O** overlay mode · **Space** pause / resume · **Esc** closes the results, the season summary or the drawer.
 
 **Overlay mode** (`?overlay=1` or **O**) hides the sidebar, the drawer, the roster's TRAIN / REST controls, the streamer hint and the debug HUD, widens the track and shows command replies as toasts: at most 4 on screen, 1 new reply per second, and the oldest waiting reply is dropped during a raid. For OBS, add a Browser Source at 1920×1080 with `file:///…/index.html?overlay=1&twitch=yourchannel`, and turn **Shutdown source when not visible** off. [docs/INTEGRATION.md](docs/INTEGRATION.md) covers two-instance setups.
 
-**Saves:** the game lives in this browser's `localStorage`: `spiritderby.save` (the game), `spiritderby.backup` (the previous save, written before an upgrade or import) and `spiritderby.ui` (overlay, drawer, tab, chat sender and board choices; RESET ALL keeps them). Saves from any earlier version load and upgrade automatically. A race interrupted by closing the page is cancelled on the next load, and its bets are refunded. Use EXPORT / IMPORT to move a game between browsers or into OBS.
+**Saves:** the game lives in this browser's `localStorage`: `spiritderby.save` (the game), `spiritderby.backup` (the previous save, written before an upgrade or import) and `spiritderby.ui` (overlay, drawer, tab, chat sender and board choices; RESET ALL keeps them). Saves from any earlier version load and upgrade automatically. (Upgrading a save from before v3 drops the season hype the console's roster TRAIN / REST and ADD HYPE presses credited to `streamer`, so it cannot win the season's Top hype card. A real viewer named `streamer` loses only that season's credit.) A race interrupted by closing the page is cancelled on the next load, and its bets are refunded. Use EXPORT / IMPORT to move a game between browsers or into OBS.
 
 **Tuning beyond the sliders:** every number lives in `SD.CONFIG` (`js/config.js`). The ones worth touching first:
 
@@ -221,9 +221,10 @@ Classic `<script>` files on one `globalThis.SD` namespace (no modules, so it run
 | progression | `progression-test.js` | XP / level-ups, leaderboards, `!lb` / `!rank` |
 | integration | `integration-test.js` | Twitch IRC parsing and adapter, the bridge (no network) |
 | community | `community-test.js` | betting, boost / snack / sabotage / ribbon, mod commands, achievements, seasons |
-| persistence | `persistence-test.js` | an M1 save (`tools/fixtures/save-m1.json`) migrating and playing on, normalize, roster reconciliation, interrupted races, backups, history trimming, UI prefs |
+| persistence | `persistence-test.js` | an M1 save (`tools/fixtures/save-m1.json`) migrating and playing on, a v2 save with display-name owners (`tools/fixtures/save-v2-display-names.json`) upgrading to schema 3, normalize, roster reconciliation, interrupted races, backups, history trimming, UI prefs |
+| identity | `identity-test.js` | runner ownership by login (localized display names), the reserved `#streamer` console actor, SEND AS and chat-panel senders by login, roster buttons crediting nobody |
 | runners | `runners-test.js` | `!create` rules and replies, SPAWN RUNNER, the runner cap, `SD.debug` |
-| fuzz | `fuzz-test.js` | 12 seeded viewers spamming every command (hostile arguments, spam bursts, mid-race attempts, non-mod mod commands, reloads) over 3 full seasons, with invariants checked after every command and race |
+| fuzz | `fuzz-test.js` | 15 seeded viewers (three with display names that are not their login) spamming every command (hostile arguments, spam bursts, mid-race attempts, non-mod mod commands, reloads) over 3 full seasons, with invariants checked after every command and race |
 
 Useful flags:
 

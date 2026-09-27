@@ -186,8 +186,8 @@
   function runnersOwnedBy(username, st) {
     st = st || current;
     if (!st || !username) return [];
-    const u = String(username).toLowerCase();
-    return st.runners.filter(function (r) { return r.owner && String(r.owner).toLowerCase() === u; });
+    const u = SD.players ? SD.players.keyOf(username) : String(username).toLowerCase();
+    return st.runners.filter(function (r) { return !!r.ownerKey && r.ownerKey === u; });
   }
 
   function isRaceLocked(st) {

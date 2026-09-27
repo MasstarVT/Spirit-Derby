@@ -311,7 +311,8 @@
     // 12. optional modules (later milestones) — guarded so M1 boots without them.
     // The chat panel (M2) enables its own tab in init(); open it by default unless the
     // streamer last picked another tab. Roster TRAIN/REST buttons keep calling SD.game
-    // directly (by 'streamer'); chat commands go through SD.commands.handleChat.
+    // directly (by SD.players.STREAMER_KEY, the console's reserved actor); chat commands go
+    // through SD.commands.handleChat.
     if (SD.commands && SD.ui.chat && !(document.getElementById('tab-chat') || {}).disabled) {
       selectTab(prefs.tab || 'chat', { persist: false });
     }

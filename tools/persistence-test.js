@@ -119,7 +119,7 @@ section('A. M1 fixture: load, migrate, play, round trip');
   ok(fixture.runners.length === 4 && fixture.runners.every(function (r) { return !r.rosterKey && !r.lifetime && !r.effects && !('ribbonColor' in r) && !r.trainStreak; }),
     'the fixture has 4 M1-shaped runners');
   ok(fixture.currentRace && fixture.currentRace.status === 'running', 'the fixture was saved mid-race');
-  eq(P.SCHEMA_VERSION, 2, 'SCHEMA_VERSION is 2');
+  eq(P.SCHEMA_VERSION, 3, 'SCHEMA_VERSION is 3 (review batch 2: runner.ownerKey)');
   ok(typeof P.MIGRATIONS[2] === 'function', 'MIGRATIONS[2] exists');
   eq(P.storageKind(), 'localStorage', 'persistence uses (fake) localStorage when it exists');
 
@@ -130,7 +130,7 @@ section('A. M1 fixture: load, migrate, play, round trip');
   eq(res.migratedFrom, 1, 'load() reports migratedFrom 1');
   eq(fakeStorage.getItem(P.BACKUP_KEY), fixtureText, 'the raw M1 save was copied to spiritderby.backup before migrating');
   const st = res.state;
-  eq(st.schemaVersion, 2, 'migrated state is schema 2');
+  eq(st.schemaVersion, 3, 'migrated state is schema 3');
   eq(st.meta.migratedFrom, 1, 'MIGRATIONS[2] records meta.migratedFrom');
   ok(st.log.some(function (e) { return /Save upgraded from schema v1 to v2/.test(e.text); }), 'the upgrade is logged');
   ok(st.currentRace === null, 'the interrupted race was cancelled');
@@ -199,7 +199,7 @@ section('A. M1 fixture: load, migrate, play, round trip');
   ok(!d2, 'save -> load is lossless', d2);
   // importing the raw M1 fixture works too
   const imp2 = P.importJSON(fixtureText);
-  ok(imp2.ok && imp2.migratedFrom === 1 && SD.state.get().schemaVersion === 2 && SD.state.get().currentRace === null, 'IMPORT JSON of the M1 save migrates it as well');
+  ok(imp2.ok && imp2.migratedFrom === 1 && SD.state.get().schemaVersion === 3 && SD.state.get().currentRace === null, 'IMPORT JSON of the M1 save migrates it as well');
 })();
 
 // =============================================================================
@@ -414,7 +414,7 @@ section('E2. Import keeps this PC\'s Twitch / bridge settings (review batch 1, i
   // the M1 fixture (M1 settings, no twitch / bridge keys) still imports with the local values
   boot(local);
   const imp3 = P.importJSON(fixtureText);
-  eq([imp3.ok, SD.state.get().settings.twitch.channel, SD.state.get().schemaVersion], [true, 'myownchannel', 2], 'the M1 fixture imports and keeps the local connection settings');
+  eq([imp3.ok, SD.state.get().settings.twitch.channel, SD.state.get().schemaVersion], [true, 'myownchannel', 3], 'the M1 fixture imports and keeps the local connection settings');
   eq(imp3.ignoredConnection, false, 'the M1 fixture carries no connection settings → nothing reported as ignored (fix round 1)');
 
   // a fresh install's export (default connection values) into a configured install → nothing ignored
@@ -489,7 +489,7 @@ section('G. stats(), state:saved, autosave / flush, clear');
   off();
   const stt = P.stats();
   eq(stt.bytes, fakeStorage.getItem(KEY).length, 'stats().bytes = size of the saved JSON');
-  eq([stt.races, stt.players, stt.runners, stt.schema, stt.storage], [0, 1, SD.DATA.ROSTER.length, 2, 'localStorage'], 'stats() counts races / players / runners');
+  eq([stt.races, stt.players, stt.runners, stt.schema, stt.storage], [0, 1, SD.DATA.ROSTER.length, 3, 'localStorage'], 'stats() counts races / players / runners');
   eq(stt.savedAt, NOW, 'stats().savedAt');
   ok(evt && evt.bytes === stt.bytes && evt.at === NOW && evt.stats && evt.stats.players === 1, 'save() emits state:saved { at, bytes, stats }');
 
@@ -531,6 +531,121 @@ section('H. spiritderby.ui prefs');
   eq(prefs.read(), {}, 'corrupt prefs read as {}');
   prefs.write({ overlay: false });
   eq(prefs.read(), { overlay: false }, 'and are replaced on the next write');
+})();
+
+// =============================================================================
+section('I. Schema 3: a v2 save with display-name owners (review batch 2, economy-abuse#1)');
+// =============================================================================
+// tools/fixtures/save-v2-display-names.json was exported by the v1.0.0 / batch-1 core (schema 2):
+// Twitch viewer foxfan (display name 狐狸) claimed Moss Runner, Moonhoof, Thunder Fern and Ember Tail
+// (every claim "succeeded" and none was ever usable: runner.owner held the display name), mothmom
+// (MothMom) claimed Velvet Comet, bridge viewer user_42 (display name "Fox Fan") claimed Misty Gale,
+// acornandy cheered, the roster TRAIN buttons added hype as 'streamer' (no such player), and a
+// 6-runner race was saved 'finished' but not applied (entrants carry only the owner labels).
+(function () {
+  const text = fs.readFileSync(path.join(__dirname, 'fixtures', 'save-v2-display-names.json'), 'utf8');
+  const v2 = JSON.parse(text);
+  eq(v2.schemaVersion, 2, 'the fixture is a schema-2 save');
+  eq(v2.runners.filter(function (r) { return r.owner === '狐狸'; }).length, 4, 'four runners are held under the display name 狐狸');
+  ok(v2.runners.every(function (r) { return !('ownerKey' in r); }), 'no runner has an ownerKey yet');
+  eq(Object.keys(v2.hype.contributions).sort(), ['acornandy', 'streamer'], "the roster buttons credited hype to 'streamer'");
+
+  fakeStorage.clear();
+  fakeStorage.setItem(KEY, text);
+  const res = P.load();
+  ok(res.fromStorage && res.migratedFrom === 2, 'load() migrates the v2 save', res.migratedFrom);
+  eq(fakeStorage.getItem(P.BACKUP_KEY), text, 'the raw v2 save was backed up first');
+  const st = res.state;
+  eq([st.schemaVersion, st.meta.migratedFrom], [3, 2], 'schema 3, meta.migratedFrom 2');
+  ok(st.log.some(function (e) { return /schema v3/.test(e.text) && /3 runners/.test(e.text) && /released/.test(e.text); }), 'the upgrade and the 3 released runners are logged');
+  const R = function (id) { return st.runners.filter(function (r) { return r.id === id; })[0]; };
+  eq([R('r04').ownerKey, R('r04').owner], ['foxfan', '狐狸'], "foxfan's last claim (his runnerId) is his: ownerKey = login, owner = display label");
+  eq(['r01', 'r02', 'r03'].map(function (id) { return [R(id).ownerKey, R(id).owner]; }), [[null, null], [null, null], [null, null]],
+    'the three hoarded runners nobody could use are released');
+  eq([R('r05').ownerKey, R('r05').owner], ['mothmom', 'MothMom'], 'a case-variant owner keeps its runner');
+  eq([R('r06').ownerKey, R('r06').owner], ['user_42', 'Fox Fan'], 'a bridge display name maps to the login that claimed it');
+  eq(Object.keys(st.players).sort(), Object.keys(v2.players).sort(), 'every player is kept');
+  eq(Object.keys(st.players).map(function (k) { return st.players[k].spiritPoints; }),
+    Object.keys(st.players).map(function (k) { return v2.players[k].spiritPoints; }), 'SP balances are unchanged by the migration');
+  eq(['foxfan', 'mothmom', 'user_42', 'acornandy'].map(function (k) { return st.players[k].runnerId; }), ['r04', 'r05', 'r06', null], 'player.runnerId agrees with runner.ownerKey');
+  eq(st.currentRace.record.entrants.map(function (e) { return e.runnerId + ':' + e.ownerKeyAtRace; }).sort(),
+    ['r01:null', 'r02:null', 'r03:null', 'r04:foxfan', 'r05:mothmom', 'r06:user_42'], 'the unapplied race gets entrant.ownerKeyAtRace');
+  eq(st.currentRace.record.hash, v2.currentRace.record.hash, 'the record hash is untouched');
+
+  // Boot applies the finished race: owners are paid by login; released runners pay nobody.
+  const spBefore = {};
+  Object.keys(st.players).forEach(function (k) { spBefore[k] = st.players[k].spiritPoints; });
+  const results = st.currentRace.record.results;
+  const spOf = function (id) { return results.filter(function (x) { return x.runnerId === id; })[0].spOwner; };
+  let finished = null;
+  const off = SD.bus.on(SD.EVENTS.RACE_FINISHED, function (p) { finished = p; });
+  boot(st);
+  if (typeof off === 'function') off();
+  const s = SD.state.get();
+  ok(s.currentRace === null && s.raceHistory.length === 1 && !!finished, 'game.init() applied the finished race');
+  const owners = ((finished && finished.payouts) || []).filter(function (x) { return x.role === 'owner'; })
+    .map(function (x) { return x.username + ':' + x.runnerId + ':' + x.amount; }).sort();
+  eq(owners, ['foxfan:r04:' + spOf('r04'), 'mothmom:r05:' + spOf('r05'), 'user_42:r06:' + spOf('r06')],
+    'owner payouts go to the logins (foxfan for Ember Tail only, user_42 for Misty Gale), none for the released runners');
+  ok(spOf('r04') > 0 && s.players.foxfan.spiritPoints >= spBefore.foxfan + spOf('r04'), "foxfan's balance got Ember Tail's owner payout");
+  eq(s.players.foxfan.stats.racesParticipated, 1, 'foxfan raced as an owner');
+
+  // Playing on: foxfan now owns and can use his runner; the released runners are claimable again.
+  const tw = { source: 'twitch', displayName: '狐狸' };
+  const tr = say('foxfan', '!train speed', tw);
+  ok(tr.ok, "foxfan's !train speed trains his own runner now", tr.message);
+  eq(SD.players.runnerOf(s, 'foxfan') && SD.players.runnerOf(s, 'foxfan').id, 'r04', 'runnerOf(foxfan) is Ember Tail');
+  ok(say('acornandy', '!claim moss', { displayName: 'AcornAndy' }).ok, 'a released runner can be claimed by another viewer');
+
+  // The roster's old 'streamer' hype credit (no such player) never wins the season's Top hype card.
+  const sum = SD.seasons.summary(s);
+  ok(!sum.topHypeContributor || sum.topHypeContributor.username !== 'streamer', 'Top hype is never a key without a player', sum.topHypeContributor);
+  ok(!Object.prototype.hasOwnProperty.call(s.hype.contributions, 'streamer'), "the v2 -> v3 upgrade dropped the console's old 'streamer' credit");
+
+  // The same save where the chat panel's default "Streamer" sender had typed !join first (source
+  // admin): the old core made that a player 'streamer' (shaped like any !join), and the roster
+  // buttons / ADD HYPE then piled season hype onto it. The upgrade drops that credit; the player
+  // itself is kept as an ordinary viewer.
+  const v2c = JSON.parse(text);
+  const pc = JSON.parse(JSON.stringify(v2c.players.acornandy));
+  pc.username = 'streamer'; pc.displayName = 'Streamer'; pc.isMod = true; pc.runnerId = null;
+  v2c.players.streamer = pc;
+  v2c.hype.contributions.streamer = 24.4;
+  const mc = P.migrate(v2c);
+  ok(!!mc.players.streamer && mc.players.streamer.spiritPoints === pc.spiritPoints, "the console-joined player 'streamer' is kept, SP unchanged");
+  eq(Object.keys(mc.hype.contributions), ['acornandy'], "its old 'streamer' season hype credit is dropped");
+  const sc = SD.seasons.summary(mc);
+  eq(sc.topHypeContributor && sc.topHypeContributor.username, 'acornandy', "Top hype is the viewer who cheered, not the console's old credit");
+  // Only the v2 -> v3 step drops it: a schema-3 credit under 'streamer' is the Twitch viewer's own.
+  mc.hype.contributions.streamer = 5;
+  eq(P.migrate(JSON.parse(JSON.stringify(mc))).hype.contributions.streamer, 5, "a schema-3 'streamer' credit (the Twitch viewer) is kept");
+
+  // Idempotent: loading the upgraded save again changes nothing.
+  P.save();
+  const again = P.load();
+  ok(again.migratedFrom === null && !sameState(SD.state.get(), again.state), 'the upgraded save loads again unchanged', sameState(SD.state.get(), again.state));
+})();
+
+// Owner repair rules on hand-made legacy states.
+(function () {
+  const base = JSON.parse(JSON.stringify(SD.state.create({ seedSalt: 31 })));
+  base.schemaVersion = 2;
+  base.runners.forEach(function (r) { delete r.ownerKey; });
+  const mk = function (u, d, runnerId) {
+    return { username: u, displayName: d, joinedAt: 1, lastSeen: 1, lastDailyDay: 's1d1', spiritPoints: 100, runnerId: runnerId, isMod: false, stats: {} };
+  };
+  base.players = { kitsune_jp: mk('kitsune_jp', 'きつね', null), bob: mk('bob', 'Bob', 'r03'), carl: mk('carl', 'Carl', 'r04') };
+  base.runners[0].owner = 'Kitsune_JP';     // label = the login in other case, but kitsune_jp.runnerId is null
+  base.runners[1].owner = 'Ghost';          // nobody
+  base.runners[2].owner = 'Bob';            // normal
+  base.runners[3].owner = 'Somebody Else';  // carl points at it but the label is not carl
+  const m = P.migrate(base);
+  eq([m.runners[0].ownerKey, m.players.kitsune_jp.runnerId], ['kitsune_jp', m.runners[0].id], 'a login label pairs with a player holding no runner');
+  eq([m.runners[1].ownerKey, m.runners[1].owner], [null, null], 'a label that matches no player is released');
+  eq([m.runners[2].ownerKey, m.players.bob.runnerId], ['bob', 'r03'], 'a normal claim is kept');
+  eq([m.runners[3].ownerKey, m.runners[3].owner, m.players.carl.runnerId], [null, null, null], "a runner whose label is not its pointer's player is released, and the pointer cleared");
+  const again = P.migrate(JSON.parse(JSON.stringify(m)));
+  ok(!sameState(m, again), 'a schema-3 state goes through migrate() unchanged');
 })();
 
 console.log('\n' + (failed ? 'FAILED: ' : 'OK: ') + passed + ' passed, ' + failed + ' failed');

@@ -157,7 +157,8 @@
         lane: i + 1,
         style: SD.CONFIG.STYLES[r.style] ? r.style : 'paceChaser',
         abilityId: ab ? abilityId : null,
-        ownerAtRace: r.owner || null,
+        ownerAtRace: r.owner || null,              // owner's display label (presentation, spOwner)
+        ownerKeyAtRace: r.ownerKey || null,        // owner's login key (who is paid, achievements)
         level: r.level || 1,
         stats: stats,
         condition: r.condition || SD.runners.conditionOf(r.fatigue || 0),
@@ -452,14 +453,14 @@
       if (ce.type === 'boost') {
         boostCount[r.id] = (boostCount[r.id] || 0) + 1;
         if (boostCount[r.id] > CH.MAX_BOOSTS_PER_RUNNER) return;
-        r.chat.push({ type: 'boost', by: ce.by || 'chat', phaseIdx: P_EARLY + rng.int(4), delay: rng.int(CH.DELAY_MAX), fired: false });
+        r.chat.push({ type: 'boost', by: ce.by || 'chat', byKey: ce.byKey || null, phaseIdx: P_EARLY + rng.int(4), delay: rng.int(CH.DELAY_MAX), fired: false });
       } else if (ce.type === 'sabotage') {
         sabCount[r.id] = (sabCount[r.id] || 0) + 1;
         if (sabCount[r.id] > CH.MAX_SABOTAGE_PER_TARGET || sabTotal >= CH.MAX_SABOTAGE_PER_RACE) return;
         sabTotal++;
         const pBack = Math.min(CH.BACKFIRE_MAX, CH.BACKFIRE_BASE + r.st.wisdom / CH.BACKFIRE_WIS_DIV);
         r.chat.push({
-          type: 'sabotage', by: ce.by || 'someone', phaseIdx: P_EARLY + rng.int(4), delay: rng.int(CH.DELAY_MAX),
+          type: 'sabotage', by: ce.by || 'someone', byKey: ce.byKey || null, phaseIdx: P_EARLY + rng.int(4), delay: rng.int(CH.DELAY_MAX),
           backfire: rng.float() < pBack, fired: false
         });
       } else if (ce.type === 'cheer') {
@@ -786,11 +787,11 @@
           c.fired = true;
           if (c.type === 'boost') {
             addMod(r, 1 + CH.BOOST, 1, t, CH.BOOST_TICKS, 'boost');
-            addEvent(t, 'chat', r.id, c.by + "'s BOOST kicks in! " + r.name + ' surges forward!', 'good', { type: 'boost', by: c.by });
+            addEvent(t, 'chat', r.id, c.by + "'s BOOST kicks in! " + r.name + ' surges forward!', 'good', { type: 'boost', by: c.by, byKey: c.byKey });
           } else if (c.backfire) {
             addMod(r, CH.BACKFIRE_BONUS, 1, t, CH.SABOTAGE_TICKS, 'boost');
             addEvent(t, 'chat', r.id, c.by + "'s sabotage BACKFIRES! " + r.name + ' kicks the pebble away and speeds up!', 'good',
-              { type: 'sabotage', by: c.by, backfire: true });
+              { type: 'sabotage', by: c.by, byKey: c.byKey, backfire: true });
           } else if (!negOk(r, t)) {
             c.fired = false; // a sabotage waits until the target is clear of its last bad luck
           } else {
@@ -798,7 +799,7 @@
             r.sabotaged = true;
             r.lastNegTick = t;
             addEvent(t, 'chat', r.id, 'Pebble in the Shoe! ' + c.by + "'s sabotage slows " + r.name + '!', 'bad',
-              { type: 'sabotage', by: c.by, backfire: false });
+              { type: 'sabotage', by: c.by, byKey: c.byKey, backfire: false });
           }
         }
       }
@@ -1035,7 +1036,7 @@
         c.fired = true;
         addEvent(Math.min(totalTicks, Math.max(1, Math.ceil(r.finishTick))), 'chat', r.id,
           c.by + "'s " + (c.type === 'boost' ? 'boost' : 'sabotage') + ' never caught up with ' + r.name + '.', 'info',
-          { type: c.type, by: c.by, fizzled: true });
+          { type: c.type, by: c.by, byKey: c.byKey, fizzled: true });
       }
     }
 

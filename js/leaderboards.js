@@ -154,9 +154,8 @@
   // Ranking
   // ---------------------------------------------------------------------------
   function ownerName(state, r) {
-    if (!r.owner) return null;
-    const p = SD.players ? SD.players.get(state, r.owner) : null;
-    return (p && p.displayName) || r.owner;
+    if (SD.players) return SD.players.ownerName(state, r);
+    return r.ownerKey ? (r.owner || r.ownerKey) : null;
   }
 
   function runnerEntries(state, cat, scope) {

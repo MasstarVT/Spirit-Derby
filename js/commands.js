@@ -17,6 +17,12 @@
  *
  * Commands never touch state.currentRace: mutating commands are refused while a race is
  * locked (countdown / running / paused), and SD.game.startRace refuses a second race.
+ *
+ * Identity: msg.username is the viewer's LOGIN (the player key, SD.players.keyOf); displayName is
+ * presentation only. The streamer's console speaks as SD.players.STREAMER_KEY ('#streamer', a key
+ * no Twitch login can produce) with source 'admin': it may run mod and read-only commands but never
+ * plays (no !join, no player commands), so it earns no SP, hype credit or achievements. Reserved
+ * '#' keys from any other source are dropped before the chat line is even shown.
  */
 (function (SD) {
   'use strict';
@@ -83,7 +89,20 @@
     return (rec.wins || 0) + 'W / ' + plural(rec.races || 0, 'race');
   }
   function styleName(style) { return SD.runners ? SD.runners.styleName(style) : style; }
-  function ownerKeyOf(runner) { return runner && runner.owner ? keyOf(runner.owner) : null; }
+  // Ownership is the owner's login key (runner.ownerKey); runner.owner is only the label.
+  function ownerKeyOf(runner) { return P() ? P().ownerKey(runner) : (runner && runner.ownerKey) || null; }
+  function ownerLabel(state, runner) { return P() ? P().ownerName(state, runner) : (runner && runner.owner) || null; }
+  function isReserved(key) { return !!(P() && P().isReservedKey(key)); }
+  const STREAMER_CANT_PLAY = "The streamer console runs the derby but doesn't play. Pick a viewer in SEND AS " +
+    '(or type @login: in the chat box) to act for them.';
+  // The name shown for a message: its display name, else "Streamer" for the console key, else the login.
+  function shownName(msg, username) {
+    return cleanName(msg.displayName) || (P() && username === P().STREAMER_KEY ? P().STREAMER_NAME : '') || cleanName(msg.username);
+  }
+  function reservedRefusal(username) {
+    return { ok: false, isCommand: false, command: null, message: 'The name "' + username + '" is reserved for the streamer console.',
+      effects: [], cooldownMs: 0, reserved: true };
+  }
   function spMult(state) {
     return SD.events && SD.events.dayModifiers ? (SD.events.dayModifiers(state.season.activeDayEvent).spMult || 1) : 1;
   }
@@ -106,8 +125,8 @@
     const st = ctx.state.settings || {};
     if (st.openTraining !== false || ctx.source === 'admin') return;
     if (ownerKeyOf(runner) === ctx.username) return;
-    if (runner.owner) {
-      throw new CommandError(runner.name + ' runs for ' + runner.owner + '. Open training is off, so you can only ' + verb + ' your own runner.');
+    if (ownerKeyOf(runner)) {
+      throw new CommandError(runner.name + ' runs for ' + ownerLabel(ctx.state, runner) + '. Open training is off, so you can only ' + verb + ' your own runner.');
     }
     throw new CommandError('Open training is off: claim ' + runner.name + ' first (!claim ' + runner.name + ') to ' + verb + ' it.');
   }
@@ -326,9 +345,10 @@
   function runCommand(msg) {
     msg = msg || {};
     const username = keyOf(msg.username);
-    const displayName = cleanName(msg.displayName) || cleanName(msg.username) || username;
+    const displayName = shownName(msg, username) || username;
     const source = SOURCES[msg.source] ? msg.source : 'sim';
     const isMod = !!msg.isMod || source === 'admin';
+    if (isReserved(username) && source !== 'admin') return reservedRefusal(username);
     const parsed = msg.parsed || parse(msg.text);
     if (!parsed) return { ok: false, isCommand: false, command: null, message: '', effects: [], cooldownMs: 0 };
     const state = SD.state.get();
@@ -368,7 +388,10 @@
     if (!def) return finish(false, 'Unknown command !' + parsed.invoked + ' — try !help', { unknown: true, severity: 'info' });
     // 2. admin permission
     if (def.admin && !isMod) return finish(false, 'Only the streamer or a mod can use !' + def.name + '.');
-    // 3. player gate
+    // 3. player gate (the streamer's console never plays: see the header)
+    if (isReserved(username) && (def.requiresPlayer || def.requiresRunner || def.name === 'join')) {
+      return finish(false, STREAMER_CANT_PLAY, { severity: 'info' });
+    }
     const player = P() ? P().get(state, username) : null;
     if ((def.requiresPlayer || def.requiresRunner) && !player) {
       return finish(false, "You're not in the derby yet — type !join", { severity: 'info' });
@@ -472,13 +495,15 @@
   function handleChat(msg) {
     msg = msg || {};
     const username = keyOf(msg.username);
-    const displayName = cleanName(msg.displayName) || cleanName(msg.username);
+    const displayName = shownName(msg, username);
     const text = String(msg.text == null ? '' : msg.text).replace(INVISIBLE, '').replace(/[\r\n\t]+/g, ' ').trim().slice(0, MAX_TEXT);
     const source = SOURCES[msg.source] ? msg.source : 'sim';
     const isMod = !!msg.isMod || source === 'admin';
     if (!username || !text) {
       return { ok: false, isCommand: false, command: null, message: username ? 'Empty message.' : 'Missing username.', effects: [], cooldownMs: 0 };
     }
+    // Only the local console (source 'admin') may speak as a reserved '#' key such as '#streamer'.
+    if (isReserved(username) && source !== 'admin') return reservedRefusal(username);
     const parsed = parse(text);
     const line = emitChat({
       kind: 'user', username: username, displayName: displayName, text: text, source: source, isMod: isMod,
@@ -784,7 +809,7 @@
       else if (P()) runner = P().runnerOf(S, ctx.username);
       if (!runner) throw new CommandError('Usage: !inspect <runner>');
       const parts = [runner.emoji + ' ' + runner.name, 'Lv ' + runner.level + ' ' + styleName(runner.style),
-        runner.owner ? 'Owner: ' + runner.owner : 'Unclaimed', statsLine(runner),
+        ownerKeyOf(runner) ? 'Owner: ' + ownerLabel(S, runner) : 'Unclaimed', statsLine(runner),
         'Energy ' + Math.floor(runner.energy) + '/' + runner.maxEnergy, runner.condition, runner.mood, recordLine(runner)];
       const cr = S.currentRace;
       const inRace = cr && cr.record && cr.record.entrants.filter(function (e) { return e.runnerId === runner.id; })[0];
@@ -992,7 +1017,7 @@
         p = P().get(S, args[0]);
         if (!p) throw new CommandError('No viewer called "' + cleanName(args[0]).slice(0, 25) + '" has joined the derby.', { severity: 'info' });
       }
-      if (!p) throw new CommandError("You're not in the derby yet — type !join", { severity: 'info' });
+      if (!p) throw new CommandError(isReserved(ctx.username) ? 'The streamer console has no profile: name a viewer, e.g. !' + ctx.command + ' <viewer>.' : "You're not in the derby yet — type !join", { severity: 'info' });
       const parts = SD.CONFIG.LEADERBOARDS.RANK_BOARDS.map(function (id) {
         const cat = L.get(id);
         if (!cat) return null;
@@ -1375,7 +1400,7 @@
         p = P().get(S, args[0]);
         if (!p) throw new CommandError('No viewer called "' + cleanName(args[0]).slice(0, 25) + '" has joined the derby.', { severity: 'info' });
       }
-      if (!p) throw new CommandError("You're not in the derby yet — type !join", { severity: 'info' });
+      if (!p) throw new CommandError(isReserved(ctx.username) ? 'The streamer console has no profile: name a viewer, e.g. !' + ctx.command + ' <viewer>.' : "You're not in the derby yet — type !join", { severity: 'info' });
       const total = A.catalog().length;
       const got = A.listFor(S, p.username);
       if (!got.length) {

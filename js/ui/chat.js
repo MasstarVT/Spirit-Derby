@@ -2,8 +2,10 @@
  * Simulated Twitch chat in the sidebar Chat tab (M2):
  *  - append-only feed (cap 80 rows): viewer lines with a coloured name chip, command replies
  *    indented with ↳ in their severity colour, dim system lines (race start/finish, hype);
- *  - an input row: "@Name: !cmd" (or "Name: !cmd") speaks as Name, otherwise as the sender
- *    picked in the <select> (recent senders + Streamer = source 'admin', isMod);
+ *  - an input row: "@login: !cmd" (or "login: !cmd") speaks as that viewer login, otherwise as the
+ *    sender picked in the <select>: recent senders by login (labelled with their display name) +
+ *    Streamer = the console's reserved key SD.players.STREAMER_KEY, source 'admin', isMod (it runs
+ *    mod and read-only commands but never plays). prefs.chat.sender / recent hold logins;
  *  - a "🤖 Demo bots" toggle: six fictional viewers send plausible commands every 2–4 s
  *    (M5: they also bet, boost, snack and occasionally sabotage with what they can afford);
  *  - system lines for race results + bets, achievements, refunds and the season summary (M5);
@@ -19,7 +21,9 @@
 
   const FEED_MAX = 80;
   const RECENT_MAX = 8;
-  const STREAMER = 'Streamer';
+  // The streamer console's reserved actor key ('#streamer': no Twitch login can produce it).
+  const STREAMER = (SD.players && SD.players.STREAMER_KEY) || '#streamer';
+  const STREAMER_NAME = (SD.players && SD.players.STREAMER_NAME) || 'Streamer';
   const BOTS = ['FoxFan', 'MothMom', 'AcornAndy', 'WispWatcher', 'BrambleBob', 'LanternLiz'];
   const BOT_MIN_MS = 2000;
   const BOT_SPREAD_MS = 2000;
@@ -64,14 +68,14 @@
       '</div>' +
       '<ol class="chat__feed" data-ref="feed" aria-live="polite" aria-label="Chat messages, newest last"></ol>' +
       '<form class="chat__form" data-ref="form" autocomplete="off">' +
-        '<select class="field chat__sender" data-ref="sender" aria-label="Send as" title="Send as (or type @Name: before the message)"></select>' +
+        '<select class="field chat__sender" data-ref="sender" aria-label="Send as" title="Send as (or type @login: before the message)"></select>' +
         '<input class="field chat__input" data-ref="input" type="text" maxlength="300" spellcheck="false" ' +
           'placeholder="!join  or  @FoxFan: !train speed" aria-label="Chat message">' +
         '<button type="submit" class="btn btn--primary chat__send">Send</button>' +
       '</form>' +
       '<p class="chat__hint" data-ref="hint">Try <b>!join</b> · <b>!claim</b> · <b>!train speed</b> · <b>!rest</b> · <b>!cheer moss</b> · ' +
         '<b>!odds</b> · <b>!bet moss 50</b> · <b>!boost moss</b> · <b>!snack moss</b> · <b>!hype</b> · ' +
-        '<b>!status</b> · <b>!lb wins</b> · <b>!help</b>. Start a line with <b>@Name:</b> to speak as that viewer.</p>';
+        '<b>!status</b> · <b>!lb wins</b> · <b>!help</b>. Start a line with <b>@login:</b> to speak as that viewer.</p>';
   }
 
   const chat = {
@@ -79,8 +83,10 @@
     root: null,
     refs: {},
     offs: [],
-    sender: STREAMER,
-    recent: [],
+    sender: STREAMER,    // a login key, or STREAMER
+    recent: [],          // recent sender logins, newest first
+    labels: Object.create(null), // login -> display name seen in chat (for viewers not in state.players yet);
+                                 // prototype-free: 'constructor' / '__proto__' are valid Twitch logins
     senderKey: '',
     botsOn: false,
     botTimer: 0,
@@ -102,8 +108,11 @@
       }
 
       const prefs = readPrefs().chat || {};
-      if (Array.isArray(prefs.recent)) this.recent = prefs.recent.filter(function (n) { return typeof n === 'string' && n; }).slice(0, RECENT_MAX);
-      if (typeof prefs.sender === 'string' && prefs.sender) this.sender = prefs.sender;
+      if (Array.isArray(prefs.recent)) {
+        this.recent = prefs.recent.map(function (n) { return self.prefKey(n); })
+          .filter(function (k, i, a) { return k && k !== STREAMER && a.indexOf(k) === i; }).slice(0, RECENT_MAX);
+      }
+      if (typeof prefs.sender === 'string' && prefs.sender) this.sender = this.prefKey(prefs.sender) || STREAMER;
       this.fillSenders();
 
       this.refs.form.addEventListener('submit', function (e) { e.preventDefault(); self.submit(); });
@@ -202,7 +211,7 @@
     onMessage: function (m) {
       if (!m) return;
       this.append(m);
-      if (m.kind === 'user' && m.displayName && m.source !== 'system') this.noteSender(m.displayName);
+      if (m.kind === 'user' && m.username && m.source !== 'system') this.noteSender(m.username, m.displayName);
       // Overlay: viewers only see command feedback through the reply-toast strip.
       if (m.kind === 'reply' && !m.unknown && document.body.classList.contains('sd-overlay')) {
         // reply:true -> queued + throttled (CONFIG.UI.REPLY_TOASTS_PER_S), so a raid cannot bury the stream.
@@ -256,26 +265,62 @@
     },
 
     // ---------------------------------------------------------------- senders
-    // Keep the casing a viewer already has (typing "foxfan:" speaks as FoxFan).
-    canonicalName: function (name) {
-      const key = String(name || '').toLowerCase();
-      if (key === STREAMER.toLowerCase()) return STREAMER;
-      const s = dom.state();
-      const p = s && s.players && s.players[key];
-      if (p && p.displayName) return p.displayName;
-      const known = this.recent.concat(BOTS).filter(function (n) { return n.toLowerCase() === key; })[0];
-      return known || name;
+    // Senders are logins (player keys); display names are only labels. The one exception is the
+    // console itself (STREAMER = '#streamer'), which no typed name can reach.
+    keyOf: function (name) {
+      return SD.players ? SD.players.keyOf(name) : String(name == null ? '' : name).trim().replace(/^@+/, '').toLowerCase();
     },
 
-    noteSender: function (name) {
-      if (!name || name.toLowerCase() === STREAMER.toLowerCase()) return;
-      const key = name.toLowerCase();
-      this.recent = [name].concat(this.recent.filter(function (n) { return n.toLowerCase() !== key; })).slice(0, RECENT_MAX);
+    playerOf: function (key) {
+      const s = dom.state();
+      return s && s.players && Object.prototype.hasOwnProperty.call(s.players, key) ? s.players[key] : null;
+    },
+
+    // A stored pref entry -> login key. Prefs written before logins were stored hold display names:
+    // "Streamer" was the console, and the display name of exactly one known player maps to its login.
+    prefKey: function (n) {
+      if (typeof n !== 'string' || !n) return '';
+      if (n === STREAMER || n === STREAMER_NAME) return STREAMER;
+      const k = this.keyOf(n);
+      if (this.playerOf(k)) return k;
+      const s = dom.state();
+      const players = (s && s.players) || {};
+      const hit = Object.keys(players).filter(function (pk) { return players[pk] && players[pk].displayName === n; });
+      return hit.length === 1 ? hit[0] : k;
+    },
+
+    // Display name for a sender login: the player's display name, else the name last seen in chat.
+    labelOf: function (key) {
+      if (key === STREAMER) return STREAMER_NAME;
+      const p = this.playerOf(key);
+      return (p && p.displayName) || this.labelSeen(key) || key;
+    },
+
+    // The display name last seen in chat for a login (own keys only, whatever object labels is).
+    labelSeen: function (key) {
+      return Object.prototype.hasOwnProperty.call(this.labels, key) ? this.labels[key] : '';
+    },
+
+    // What a typed "@name:" speaks as: always a viewer login (a demo bot's casing is kept for its label).
+    resolveTyped: function (name) {
+      const key = this.keyOf(name);
+      if (!this.labelSeen(key) && !this.playerOf(key)) {
+        const bot = BOTS.filter(function (n) { return n.toLowerCase() === key; })[0];
+        this.labels[key] = bot || String(name);
+      }
+      return key;
+    },
+
+    noteSender: function (key, label) {
+      key = this.keyOf(key);
+      if (!key || key === STREAMER || (SD.players && SD.players.isReservedKey(key))) return;
+      if (label) this.labels[key] = String(label);
+      this.recent = [key].concat(this.recent.filter(function (k) { return k !== key; })).slice(0, RECENT_MAX);
       this.fillSenders();
     },
 
-    setSender: function (name) {
-      this.sender = name || STREAMER;
+    setSender: function (key) {
+      this.sender = key || STREAMER;
       if (this.sender !== STREAMER) this.noteSender(this.sender);
       this.fillSenders();
       writePrefs({ chat: { sender: this.sender, recent: this.recent } });
@@ -284,13 +329,19 @@
     fillSenders: function () {
       const sel = this.refs.sender;
       if (!sel) return;
-      const names = [STREAMER].concat(this.recent.filter(function (n) { return n.toLowerCase() !== STREAMER.toLowerCase(); }));
-      if (this.sender && names.map(function (n) { return n.toLowerCase(); }).indexOf(this.sender.toLowerCase()) < 0) names.push(this.sender);
-      const key = names.join('|') + '#' + this.sender;
+      const self = this;
+      const keys = [STREAMER].concat(this.recent.filter(function (k) { return k !== STREAMER; }));
+      if (this.sender && keys.indexOf(this.sender) < 0) keys.push(this.sender);
+      const opts = keys.map(function (k) {
+        if (k === STREAMER) return [k, '🎙 ' + STREAMER_NAME];
+        const name = self.labelOf(k);
+        return [k, String(name).toLowerCase() === k ? name : name + ' (' + k + ')'];
+      });
+      const key = opts.map(function (o) { return o[0] + '=' + o[1]; }).join('|') + '#' + this.sender;
       if (key === this.senderKey || document.activeElement === sel) return;
       this.senderKey = key;
-      sel.innerHTML = names.map(function (n) {
-        return '<option value="' + esc(n) + '">' + esc(n === STREAMER ? '🎙 Streamer' : n) + '</option>';
+      sel.innerHTML = opts.map(function (o) {
+        return '<option value="' + esc(o[0]) + '">' + esc(o[1]) + '</option>';
       }).join('');
       sel.value = this.sender;
     },
@@ -301,24 +352,26 @@
       if (!input || !SD.commands) return;
       const raw = input.value.trim();
       if (!raw) return;
-      let name = this.sender || STREAMER;
+      let key = this.sender || STREAMER;
       let text = raw;
       const m = /^@?([A-Za-z0-9_]{1,25})\s*:\s*(\S[\s\S]*)$/.exec(raw);
-      if (m && !/^\/\//.test(m[2])) {           // "Name: text" (but not "https://...")
-        name = this.canonicalName(m[1]);
+      if (m && !/^\/\//.test(m[2])) {           // "login: text" (but not "https://...")
+        key = this.resolveTyped(m[1]);
         text = m[2];
-        this.setSender(name);
+        this.setSender(key);
       }
-      this.send(name, text);
+      this.send(key, text);
       input.value = '';
       input.focus();
     },
 
-    send: function (name, text) {
-      const streamer = name.toLowerCase() === STREAMER.toLowerCase();
+    // key: a viewer login or STREAMER; label: the display name to show (default labelOf(key)).
+    send: function (key, text, label) {
+      const streamer = key === STREAMER;
+      if (!streamer) key = this.keyOf(key);
       try {
         return SD.commands.handleChat({
-          username: name, displayName: name, text: text,
+          username: key, displayName: label || this.labelOf(key), text: text,
           source: streamer ? 'admin' : 'sim', isMod: streamer
         });
       } catch (e) {
@@ -359,7 +412,7 @@
       this.botTurn = (this.botTurn + 1 + (Math.random() < 0.3 ? 1 : 0)) % BOTS.length;
       const name = BOTS[this.botTurn];
       const line = this.botLine(s, name);
-      if (line) this.send(name, line);
+      if (line) this.send(name.toLowerCase(), line, name);
     },
 
     // A plausible chat line for a bot given the current state.
@@ -371,11 +424,11 @@
       if (!runners.length) return pick(CHATTER);
       const locked = dom.isRaceLocked(s);
       const cd = function (cmd) { return SD.commands.cooldownLeft ? SD.commands.cooldownLeft(name, cmd) : 0; };
-      const mine = p.runnerId ? runners.filter(function (r) { return r.id === p.runnerId && r.owner && r.owner.toLowerCase() === key; })[0] : null;
+      const mine = p.runnerId ? runners.filter(function (r) { return r.id === p.runnerId && r.ownerKey === key; })[0] : null;
       const short = function (r) { return shortName(s, r); };
 
       if (!mine && !locked && cd('claim') === 0) {
-        const free = runners.filter(function (r) { return !r.owner; });
+        const free = runners.filter(function (r) { return !r.ownerKey; });
         if (free.length) return Math.random() < 0.6 ? '!claim ' + short(pick(free)) : '!claim';
         // M6: every runner taken -> create one (a made-up name; the pipeline checks the rules).
         if (s.settings && s.settings.allowCreate !== false && cd('create') === 0 && Math.random() < 0.5) {

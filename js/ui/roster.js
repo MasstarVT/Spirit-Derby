@@ -1,7 +1,9 @@
 /* SPIRIT DERBY — ui/roster.js
  * Horizontally scrollable strip of runner cards: badge, name, species · style, level,
  * five stat bars, energy + XP bars, mood · condition, owner, ability (tooltip) and an
- * M1 local control row (stat select + TRAIN + REST → SD.game.trainRunner / restRunner, by 'streamer').
+ * M1 local control row (stat select + TRAIN + REST → SD.game.trainRunner / restRunner, by the streamer
+ * console's reserved key SD.players.STREAMER_KEY: moves the runner and the hype meter, earns nobody SP,
+ * hype credit or achievements).
  * Cards are keyed by runner id: the info block re-renders on state:changed (coalesced via
  * dom.schedule); the control row is created once so selects keep focus/selection.
  * Panel contract: SD.ui.roster = { init(rootEl), render(state), destroy() }.
@@ -19,7 +21,8 @@
     { key: 'wisdom', short: 'WIS', label: 'Wisdom', color: 'var(--stat-wisdom)' },
     { key: 'luck', short: 'LUK', label: 'Luck', color: 'var(--stat-luck)' }
   ];
-  const BY = 'streamer';
+  // The streamer's console actor ('#streamer'): never a viewer, so the buttons credit no player.
+  const BY = (SD.players && SD.players.STREAMER_KEY) || '#streamer';
 
   function pct(v, max) { return (dom.clamp((Number(v) || 0) / (Number(max) || 1), 0, 1) * 100).toFixed(1) + '%'; }
   function condClass(c) { return /^[A-Za-z]+$/.test(String(c || '')) ? String(c) : 'Normal'; }

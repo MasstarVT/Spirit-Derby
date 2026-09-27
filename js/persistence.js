@@ -22,7 +22,8 @@
 
   const KEY = 'spiritderby.save';
   const BACKUP_KEY = 'spiritderby.backup';
-  const SCHEMA_VERSION = 2;
+  // 3 (review batch 2): runner.ownerKey (owner's login key) + entrant.ownerKeyAtRace; see MIGRATIONS[3].
+  const SCHEMA_VERSION = 3;
 
   // ---------------------------------------------------------------------------
   // Storage backend
@@ -339,6 +340,7 @@
       if (p.runnerId != null && !seenIds[p.runnerId]) p.runnerId = null;
       if (p.backing && p.backing.runnerId != null && !seenIds[p.backing.runnerId]) p.backing = { runnerId: null, actions: 0 };
     });
+    resolveOwners(st);
 
     // open bets: well-formed, one per player (older duplicates are refunded), known player + runner
     const betBy = {};
@@ -382,6 +384,88 @@
     return st;
   }
 
+  // Runner ownership (schema 3). runner.ownerKey is the owner's login key and runner.owner only its
+  // display label. Saves from before schema 3 stored the claimer's DISPLAY name in runner.owner, so a
+  // viewer whose display name was not a case variant of their login (Twitch localized names, bridge
+  // display names) never owned the runner they claimed, and each !claim locked another runner.
+  // A runner with a label but no key is paired with a player like this:
+  //   1. the player whose runnerId points at it, when the label is that player's login (any case)
+  //      or display name - the runner that player really claimed last;
+  //   2. else the player whose login the label is, when that player holds no other runner;
+  //   3. else nobody can use it (old runnerOf() refused everyone): it is released.
+  // Then every player.runnerId that does not point at a runner owned by that player is cleared, and
+  // the race in progress gets entrant.ownerKeyAtRace (a 'finished' race is applied on boot).
+  // Runners that already carry an ownerKey are kept as they are (export -> import stays lossless).
+  let ownerRepair = { paired: 0, released: 0 };
+  function hasOwn(o, k) { return Object.prototype.hasOwnProperty.call(o, k); }
+  function resolveOwners(st) {
+    const PL = SD.players;
+    const keyOf = PL ? PL.keyOf : function (n) { return String(n == null ? '' : n).trim().replace(/^@+/, '').toLowerCase(); };
+    const players = st.players;
+    const player = function (k) { return k && hasOwn(players, k) ? players[k] : null; };
+    const byId = {};
+    st.runners.forEach(function (r) { byId[r.id] = r; });
+    const holds = {};              // player key -> runner id it owns
+    const legacy = [];
+    st.runners.forEach(function (r) {
+      if (r.ownerKey) {
+        const k = keyOf(r.ownerKey);
+        if (!k || (PL && PL.isReservedKey(k))) { r.ownerKey = null; r.owner = null; r.claimedAt = null; return; }
+        r.ownerKey = k;
+        if (!r.owner) r.owner = k;
+        if (!holds[k]) holds[k] = r.id;
+      } else if (r.owner) {
+        legacy.push(r);
+      } else {
+        r.ownerKey = null;
+      }
+    });
+    const pair = function (r, p) {
+      r.ownerKey = p.username;
+      r.owner = p.displayName || p.username;
+      holds[p.username] = r.id;
+      p.runnerId = r.id;
+      ownerRepair.paired++;
+    };
+    const rest = legacy.filter(function (r) {
+      const label = String(r.owner);
+      const p = Object.keys(players).map(function (k) { return players[k]; }).filter(function (x) {
+        return x && x.runnerId === r.id && !holds[x.username] && (keyOf(label) === x.username || (PL ? PL.cleanName(label) : label) === x.displayName);
+      })[0];
+      if (p) { pair(r, p); return false; }
+      return true;
+    });
+    rest.forEach(function (r) {
+      const p = player(keyOf(r.owner));
+      if (p && !holds[p.username] && (p.runnerId == null || p.runnerId === r.id || !byId[p.runnerId])) { pair(r, p); return; }
+      r.owner = null;
+      r.ownerKey = null;
+      r.claimedAt = null;
+      ownerRepair.released++;
+    });
+    Object.keys(players).forEach(function (k) {
+      const p = players[k];
+      if (p.runnerId != null && !(byId[p.runnerId] && byId[p.runnerId].ownerKey === p.username)) p.runnerId = null;
+    });
+    // The race in progress (schema 3 entrants carry ownerKeyAtRace; stored history is left as it
+    // is: its results are hashed, and readers fall back to the owner label for old records).
+    const cr = st.currentRace;
+    const ents = cr && isObj(cr.record) && Array.isArray(cr.record.entrants) ? cr.record.entrants : [];
+    ents.forEach(function (e) {
+      if (!isObj(e) || e.ownerKeyAtRace !== undefined) return;
+      let k = null;
+      if (e.ownerAtRace) {
+        const r = byId[e.runnerId];
+        const label = String(e.ownerAtRace);
+        // Only the runner's own (just resolved) owner, or a login the label spells: a runner that was
+        // released above paid nobody before and pays nobody now.
+        if (r && r.ownerKey && (r.owner === label || keyOf(label) === r.ownerKey)) k = r.ownerKey;
+        else if (player(keyOf(label))) k = keyOf(label);
+      }
+      e.ownerKeyAtRace = k;
+    });
+  }
+
   // Spawn every SD.DATA.ROSTER entry the saved game does not have yet. Matching is by rosterKey,
   // or (saves from before rosterKey) by name among non-custom runners, which backfills rosterKey.
   // Never duplicates a runner. Returns the runners it added.
@@ -423,10 +507,29 @@
       raw.meta.migratedAt = SD.clock.now();
       pushLog(raw, 'system', 'Save upgraded from schema v' + raw.meta.migratedFrom + ' to v2 (Spirit Derby ' + SD.VERSION + ').', 'info');
       return raw;
+    },
+    // v2 -> v3 (review batch 2): runner ownership keyed by login. normalize() -> resolveOwners()
+    // backfills runner.ownerKey from the old display-name owner labels (and the race in progress's
+    // entrant.ownerKeyAtRace); runners no player can own are released. The log line says how many.
+    // Before schema 3 the streamer's console (roster TRAIN / REST, ADD HYPE) credited season hype to
+    // the plain key 'streamer', which a console "!join" also made a player - so that credit could
+    // win the season's Top hype card. It is dropped here (once, v2 -> v3 only): the console's share
+    // cannot be told apart from a real viewer 'streamer', who loses at most this season's credit.
+    // New credit under 'streamer' (the Twitch viewer; the console is '#streamer') is kept as usual.
+    3: function (raw, ctx) {
+      normalize(raw);
+      if (hasOwn(raw.hype.contributions, 'streamer')) delete raw.hype.contributions.streamer;
+      raw.meta.migratedFrom = ctx && ctx.from != null ? ctx.from : 2;
+      raw.meta.migratedAt = SD.clock.now();
+      pushLog(raw, 'system', 'Save upgraded to schema v3: runner owners are now keyed by login' +
+        (ownerRepair.released ? '; ' + ownerRepair.released + ' runner' + (ownerRepair.released === 1 ? '' : 's') +
+          ' held under a display name no viewer could use ' + (ownerRepair.released === 1 ? 'was' : 'were') + ' released' : '') + '.', 'info');
+      return raw;
     }
   };
 
   function migrate(raw) {
+    ownerRepair = { paired: 0, released: 0 };
     let data = raw;
     const from = data.schemaVersion == null ? 0 : Number(data.schemaVersion);
     let v = from;

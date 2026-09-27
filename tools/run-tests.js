@@ -19,9 +19,12 @@
  *   community    tools/community-test.js (M5 betting, boost / snack / sabotage / ribbon, mod !race / !event,
  *                achievements, season summary + rollover)
  *   persistence  tools/persistence-test.js (M6 M1-save migration from tools/fixtures/save-m1.json, normalize,
- *                roster reconciliation, interrupted races, backup key, history trimming, stats, UI prefs)
+ *                roster reconciliation, interrupted races, backup key, history trimming, stats, UI prefs,
+ *                schema 3 owner-key migration from tools/fixtures/save-v2-display-names.json)
+ *   identity     tools/identity-test.js (review batch 2: login-keyed players and runner ownership, the reserved
+ *                '#streamer' console actor, SEND AS / chat panel senders by login, roster buttons)
  *   runners      tools/runners-test.js (M6 !create, admin SPAWN RUNNER, MAX_ACTIVE, SD.debug)
- *   fuzz         tools/fuzz-test.js (M6 seeded 3-season fuzz: 12 viewers spamming every command, random race
+ *   fuzz         tools/fuzz-test.js (M6 seeded 3-season fuzz: 15 viewers spamming every command, random race
  *                starts / pauses / ends / aborts / reloads, invariants after every command and race)
  */
 'use strict';
@@ -38,6 +41,7 @@ const SUITES = [
   { name: 'integration', file: 'integration-test.js', args: VERBOSE ? ['--verbose'] : [] },
   { name: 'community', file: 'community-test.js', args: VERBOSE ? ['--verbose'] : [] },
   { name: 'persistence', file: 'persistence-test.js', args: VERBOSE ? ['--verbose'] : [] },
+  { name: 'identity', file: 'identity-test.js', args: VERBOSE ? ['--verbose'] : [] },
   { name: 'runners', file: 'runners-test.js', args: VERBOSE ? ['--verbose'] : [] },
   { name: 'fuzz', file: 'fuzz-test.js', args: VERBOSE ? ['--verbose'] : [] }
 ];

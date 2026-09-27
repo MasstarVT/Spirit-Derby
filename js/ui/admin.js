@@ -26,9 +26,21 @@
   const FREQS = [
     ['none', 'None'], ['low', 'Low'], ['normal', 'Normal'], ['high', 'High'], ['chaos', 'Chaos']
   ];
-  const BY = 'streamer';
+  // The streamer's console actor ('#streamer', SD.players.STREAMER_KEY): ADD HYPE moves the meter
+  // without crediting any viewer, and SEND AS "Streamer" speaks as it (mod rights, never a player).
+  const STREAMER_KEY = (SD.players && SD.players.STREAMER_KEY) || '#streamer';
+  const STREAMER_NAME = (SD.players && SD.players.STREAMER_NAME) || 'Streamer';
+  const BY = STREAMER_KEY;
+  const SEND_AS_MAX = 12;
 
   function opt(v, label) { return '<option value="' + esc(v) + '">' + esc(label) + '</option>'; }
+
+  // SEND AS label for a player key: the display name, plus the login when the two differ by more than case.
+  function senderLabel(players, k) {
+    const p = Object.prototype.hasOwnProperty.call(players, k) ? players[k] : null;
+    const name = (p && p.displayName) || k;
+    return String(name).toLowerCase() === k ? name : name + ' (' + k + ')';
+  }
 
   function rangeField(id, key, label, min, max, step) {
     return '<div class="adm-field"><label for="' + id + '">' + esc(label) + '</label>' +
@@ -143,7 +155,8 @@
             '<button type="button" class="btn btn--primary" data-act="send" data-ref="btnSend">SEND</button></div>' +
           '<p class="adm-reply" data-ref="sendReply" aria-live="polite"></p>' +
           '<p class="adm-note">Runs through <b>SD.processCommand</b> with streamer/mod rights (source <b>admin</b>: no cooldowns, may train any runner). ' +
-            'The sender still needs to have typed <b>!join</b> for player commands.</p>' +
+            'Viewers are listed by display name and addressed by login. <b>Streamer</b> runs mod and read-only commands but never plays: ' +
+            'pick a viewer (who has typed <b>!join</b>) for player commands.</p>' +
         '</div></details>' +
 
         // ---------------- TWITCH (M7): anonymous read-only IRC + local bridge
@@ -152,7 +165,7 @@
       '<footer class="admin__foot" data-ref="version">' + esc(versionLine()) + '</footer>';
   }
 
-  // "Spirit Derby v1.0.0 · save schema v2 · race engine v2" (drawer footer)
+  // "Spirit Derby v1.0.0 · save schema v3 · race engine v2" (drawer footer)
   function versionLine() {
     return 'Spirit Derby v' + (SD.VERSION || '?') +
       (SD.persistence ? ' · save schema v' + SD.persistence.SCHEMA_VERSION : '') +
@@ -232,6 +245,7 @@
     saveTimer: 0,
     eventListKey: '',
     sendAsKey: '',
+    sendAsValue: '',     // the chosen SEND AS sender (a login, or the '#streamer' console key)
     lastKv: null,
     lastTable: '',
 
@@ -430,6 +444,7 @@
     onChange: function (e) {
       const t = e.target;
       if (t === this.refs.file) { this.importFile(t.files && t.files[0]); return; }
+      if (t === this.refs.sendAs) { this.sendAsValue = t.value || STREAMER_KEY; return; }
       if (t === this.refs.seed) { this.commitSeed(); return; }
       const key = t.getAttribute('data-set');
       if (!key) return;
@@ -512,10 +527,14 @@
       if (typeof SD.processCommand !== 'function') { show('The command pipeline (js/commands.js) is not loaded.', 'bad'); return; }
       const text = r.sendText ? r.sendText.value.trim() : '';
       if (!text) { if (r.sendText) r.sendText.focus(); return; }
-      const name = (r.sendAs && r.sendAs.value) || 'Streamer';
+      // The option value is the viewer's login (the player key); the display name is only shown.
+      const key = (r.sendAs && r.sendAs.value) || this.sendAsValue || STREAMER_KEY;
+      const st = dom.state();
+      const p = key !== STREAMER_KEY && st && st.players && Object.prototype.hasOwnProperty.call(st.players, key) ? st.players[key] : null;
+      const name = key === STREAMER_KEY ? STREAMER_NAME : ((p && p.displayName) || key);
       let res;
       try {
-        res = SD.processCommand(name, text, { source: 'admin', isMod: true, displayName: name });
+        res = SD.processCommand(key, text, { source: 'admin', isMod: true, displayName: name });
       } catch (e) {
         console.error('[admin] SEND AS failed', e);
         res = { ok: false, isCommand: true, message: (e && e.message) || 'Command failed.' };
@@ -526,24 +545,26 @@
       if (r.sendText) { r.sendText.value = ''; r.sendText.focus(); }
     },
 
-    // Sender list: Streamer, Mod, then the most recently active viewers.
+    // Sender list: the Streamer console, then the most recently active viewers. Option values are
+    // logins (player keys), labels are display names ("日本語 (abc123)" when the name is not the
+    // login in other letter case). The chosen sender stays listed even after it drops out of the
+    // recent SEND_AS_MAX, so a re-render never silently switches who the next command runs as.
     fillSendAs: function (state) {
       const sel = this.refs.sendAs;
       if (!sel) return;
-      const players = Object.keys(state.players || {}).map(function (k) { return state.players[k]; })
-        .sort(function (a, b) { return (b.lastSeen || 0) - (a.lastSeen || 0); })
-        .map(function (p) { return p.displayName || p.username; })
-        .filter(function (n) { return n && n.toLowerCase() !== 'streamer' && n.toLowerCase() !== 'mod'; })
-        .slice(0, 12);
-      const names = ['Streamer', 'Mod'].concat(players);
-      const key = names.join('|');
+      const players = state.players || {};
+      const reserved = function (k) { return !!(SD.players && SD.players.isReservedKey(k)); };
+      const keys = Object.keys(players).filter(function (k) { return players[k] && typeof players[k] === 'object' && !reserved(k); })
+        .sort(function (a, b) { return ((players[b].lastSeen || 0) - (players[a].lastSeen || 0)) || (a < b ? -1 : (a > b ? 1 : 0)); })
+        .slice(0, SEND_AS_MAX);
+      const chosen = this.sendAsValue || STREAMER_KEY;
+      if (chosen !== STREAMER_KEY && keys.indexOf(chosen) < 0) keys.push(chosen);
+      const options = [[STREAMER_KEY, '🎙 ' + STREAMER_NAME]].concat(keys.map(function (k) { return [k, senderLabel(players, k)]; }));
+      const key = options.map(function (o) { return o[0] + '=' + o[1]; }).join('|') + '#' + chosen;
       if (key === this.sendAsKey || document.activeElement === sel) return;
       this.sendAsKey = key;
-      const prev = sel.value || 'Streamer';
-      sel.innerHTML = names.map(function (n) {
-        return opt(n, n === 'Streamer' ? '🎙 Streamer' : (n === 'Mod' ? '🛡 Mod' : n));
-      }).join('');
-      sel.value = names.indexOf(prev) >= 0 ? prev : 'Streamer';
+      sel.innerHTML = options.map(function (o) { return opt(o[0], o[1]); }).join('');
+      sel.value = chosen;
     },
 
     exportSave: function () {

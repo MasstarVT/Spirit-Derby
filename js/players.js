@@ -6,6 +6,10 @@
  *   addSp / spendSp / award SP faucets and sinks (never negative, totals tracked, emits player:sp)
  *   refundSp                give back spent SP (bet refunds): reverses spSpentTotal, not "earned"
  *   claim / release         one runner per player; re-claiming releases the old one
+ *   ownerKey / ownerName    runner ownership is keyed by the owner's login (runner.ownerKey);
+ *                           runner.owner is only the display label shown on cards and in chat
+ *   STREAMER_KEY            the streamer console's reserved actor key ('#streamer'): no Twitch
+ *                           login can produce it, it never becomes a player and earns nothing
  *   recordAction            participation counters + "backing" (the runner you act on most)
  *
  * Hooks called by the rest of the core when this module is loaded:
@@ -32,6 +36,15 @@
   const BACKING_KINDS = { train: true, rest: true, cheer: true, boost: true, snack: true };
 
   function E() { return SD.CONFIG.ECONOMY; }
+
+  // The streamer's own console (chat panel "Streamer" sender, admin SEND AS, roster TRAIN / REST,
+  // admin ADD HYPE) acts as this key. Twitch logins match /^[a-z0-9_]{1,25}$/, so a key that
+  // starts with '#' can never collide with a viewer. Every '#' key is reserved for local actors:
+  // it is never a player (ensure() refuses it), earns no SP, hype credit or achievements, and
+  // SD.commands only accepts it from source 'admin'.
+  const STREAMER_KEY = '#streamer';
+  const STREAMER_NAME = 'Streamer';
+  function isReservedKey(key) { return typeof key === 'string' && key.charAt(0) === '#'; }
 
   // ---------------------------------------------------------------------------
   // Names
@@ -170,7 +183,7 @@
   function ensure(state, username, displayName, opts) {
     opts = opts || {};
     const key = keyOf(username);
-    if (!key) return { player: null, created: false };
+    if (!key || isReservedKey(key)) return { player: null, created: false };
     let p = state.players[key];
     if (p) return { player: p, created: false };
     p = create(key, displayName || username, opts);
@@ -194,7 +207,12 @@
     p.lastSeen = opts.now != null ? opts.now : SD.clock.now();
     if (opts.isMod != null) p.isMod = !!opts.isMod;
     const shown = cleanName(opts.displayName);
-    if (shown && shown.toLowerCase() === p.username) p.displayName = shown;
+    if (shown && shown.toLowerCase() === p.username && shown !== p.displayName) {
+      p.displayName = shown;
+      // The owned runner's owner label follows the new casing (ownership itself is the login key).
+      const mine = p.runnerId ? SD.state.runnerById(p.runnerId, state) : null;
+      if (mine && mine.ownerKey === p.username) mine.owner = shown;
+    }
     if (opts.count !== false) p.stats.commands += 1;
     let dailyBonus = 0;
     const today = dayKey(state);
@@ -218,10 +236,36 @@
   // ---------------------------------------------------------------------------
   // Runner ownership
   // ---------------------------------------------------------------------------
-  function ownerKey(runner) { return runner && runner.owner ? keyOf(runner.owner) : null; }
+  // The owner's login key (runner.ownerKey), or null. runner.owner is only the display label.
+  function ownerKey(runner) { return runner && typeof runner.ownerKey === 'string' && runner.ownerKey ? runner.ownerKey : null; }
+
+  // Name to show for a runner's owner: the owner's current display name, else the stored label.
+  function ownerName(state, runner) {
+    const k = ownerKey(runner);
+    if (!k) return null;
+    const p = state && state.players && Object.prototype.hasOwnProperty.call(state.players, k) ? state.players[k] : null;
+    return (p && p.displayName) || runner.owner || k;
+  }
+
+  function setOwner(runner, p) {
+    runner.ownerKey = p ? p.username : null;
+    runner.owner = p ? p.displayName : null;
+    runner.claimedAt = p ? SD.clock.now() : null;
+  }
 
   function freeRunners(state) {
-    return state.runners.filter(function (r) { return !r.retired && !r.owner; });
+    return state.runners.filter(function (r) { return !r.retired && !ownerKey(r); });
+  }
+
+  // The login key of a race result's owner at race time. Entrants carry ownerKeyAtRace (schema 3);
+  // older records only have the owner label, which old claims wrote as the display name, so it is
+  // read as a login (a case variant of it) - never matched against other players' display names.
+  function resultOwnerKey(record, res) {
+    if (!res) return null;
+    const e = record && Array.isArray(record.entrants)
+      ? record.entrants.filter(function (x) { return x && x.runnerId === res.runnerId; })[0] : null;
+    if (e && e.ownerKeyAtRace !== undefined) return e.ownerKeyAtRace || null;
+    return res.ownerAtRace ? keyOf(res.ownerAtRace) || null : null;
   }
 
   // Claim runnerId for username. One runner per player: re-claiming releases the old one.
@@ -234,11 +278,10 @@
     const ok = ownerKey(runner);
     if (ok === p.username) return { ok: false, message: runner.name + ' is already yours!' };
     if (ok) {
-      const holder = get(state, ok);
       const free = freeRunners(state).slice(0, 3).map(function (r) { return r.name; });
       return {
         ok: false,
-        message: runner.name + ' already runs for ' + ((holder && holder.displayName) || runner.owner) + '. ' +
+        message: runner.name + ' already runs for ' + ownerName(state, runner) + '. ' +
           (free.length ? 'Free runners: ' + free.join(', ') + '.' : 'Every runner is taken right now.')
       };
     }
@@ -246,12 +289,10 @@
     let released = null;
     const old = p.runnerId ? SD.state.runnerById(p.runnerId, state) : null;
     if (old && ownerKey(old) === p.username) {
-      old.owner = null;
-      old.claimedAt = null;
+      setOwner(old, null);
       released = old.name;
     }
-    runner.owner = p.displayName;
-    runner.claimedAt = SD.clock.now();
+    setOwner(runner, p);
     p.runnerId = runner.id;
     if (isCurrent(state)) {
       SD.state.log('claim', p.displayName + ' claimed ' + runner.emoji + ' ' + runner.name + (released ? ' (released ' + released + ')' : '') + '.',
@@ -273,14 +314,14 @@
       p.runnerId = null;
       return { ok: false, message: "You don't have a runner to release." };
     }
-    if (ownerKey(r) === p.username) { r.owner = null; r.claimedAt = null; }
+    if (ownerKey(r) === p.username) setOwner(r, null);
     p.runnerId = null;
     if (isCurrent(state)) SD.state.log('claim', p.displayName + ' released ' + r.name + '.', 'info', { username: p.username, runnerId: r.id });
     emit(SD.EVENTS.RUNNER_CLAIMED, { runnerId: r.id, username: null, displayName: null, releasedRunnerId: r.id, releasedBy: p.username });
     return { ok: true, message: p.displayName + ' released ' + r.name + '.', runnerId: r.id };
   }
 
-  // The runner a player owns (validated against runner.owner), or null.
+  // The runner a player owns (validated against runner.ownerKey), or null.
   function runnerOf(state, username) {
     const p = get(state, username);
     if (!p || !p.runnerId) return null;
@@ -336,10 +377,13 @@
     const participated = {};
     const won = {};
 
-    // Owners (in finishing order).
+    // Owners (in finishing order), by login key at race time.
+    const ownerOf = {};
     record.results.forEach(function (res) {
-      if (!res.ownerAtRace) return;
-      const p = get(state, res.ownerAtRace);
+      const k = resultOwnerKey(record, res);
+      ownerOf[res.runnerId] = k;
+      if (!k) return;
+      const p = Object.prototype.hasOwnProperty.call(state.players, k) ? state.players[k] : null;
       if (!p) return;
       const amount = award(state, p.username, res.spOwner || 0, 'raceOwner');
       participated[p.username] = true;
@@ -355,7 +399,7 @@
       if (!b || !b.runnerId || !(b.actions > 0)) return;
       const res = byRunner[b.runnerId];
       if (!res) return; // backed runner was not in this race: keep backing for the next one
-      if (!res.ownerAtRace || keyOf(res.ownerAtRace) !== p.username) {
+      if (ownerOf[res.runnerId] !== p.username) {
         const amount = award(state, p.username, res.spBacker || 0, 'raceBacker');
         payouts.push({ username: p.username, displayName: p.displayName, runnerId: res.runnerId, runnerName: res.name,
           place: res.place, amount: amount, role: 'backer' });
@@ -406,6 +450,9 @@
 
   SD.players = {
     STAT_KEYS: STAT_KEYS,
+    STREAMER_KEY: STREAMER_KEY,
+    STREAMER_NAME: STREAMER_NAME,
+    isReservedKey: isReservedKey,
     cleanName: cleanName,
     keyOf: keyOf,
     dayKey: dayKey,
@@ -423,6 +470,9 @@
     claim: claim,
     release: release,
     runnerOf: runnerOf,
+    ownerKey: ownerKey,
+    ownerName: ownerName,
+    resultOwnerKey: resultOwnerKey,
     freeRunners: freeRunners,
     recordAction: recordAction,
     addHypeContribution: addHypeContribution,

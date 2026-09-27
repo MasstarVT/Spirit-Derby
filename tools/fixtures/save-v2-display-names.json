@@ -1,0 +1,1883 @@
+{
+ "schemaVersion": 2,
+ "meta": {
+  "createdAt": 1767225600000,
+  "updatedAt": 1767225747000,
+  "raceCounter": 1,
+  "seedSalt": 4242,
+  "runnerCounter": 10,
+  "actionCounter": 3,
+  "betCounter": 0
+ },
+ "season": {
+  "number": 1,
+  "day": 1,
+  "daysPerSeason": 7,
+  "racesPerDay": 3,
+  "raceIndexInDay": 0,
+  "racesRun": 0,
+  "startedAt": 1767225600000,
+  "activeDayEvent": "clearSkies",
+  "history": []
+ },
+ "hype": {
+  "value": 6.6,
+  "max": 120,
+  "thresholdsHit": [],
+  "contributions": {
+   "acornandy": 3,
+   "streamer": 3.6
+  },
+  "lastChangedAt": 1767225747000
+ },
+ "runners": [
+  {
+   "id": "r01",
+   "rosterKey": "mossRunner",
+   "name": "Moss Runner",
+   "emoji": "🦌",
+   "badgeColor": "#5c8a4a",
+   "ribbonColor": null,
+   "avatarUrl": null,
+   "species": "Forest Stag",
+   "personality": "Quiet, steady, and suspiciously good at hide-and-seek.",
+   "description": "A young stag spirit whose antlers sprout real moss every spring. Starts slow, then the whole forest seems to push him home.",
+   "style": "lateSurger",
+   "stats": {
+    "speed": 40,
+    "stamina": 42,
+    "power": 40,
+    "wisdom": 40,
+    "luck": 38
+   },
+   "baseStats": {
+    "speed": 40,
+    "stamina": 42,
+    "power": 40,
+    "wisdom": 40,
+    "luck": 38
+   },
+   "level": 1,
+   "xp": 0,
+   "totalXp": 0,
+   "energy": 100,
+   "maxEnergy": 100,
+   "fatigue": 10,
+   "condition": "Excellent",
+   "mood": "Happy",
+   "ability": {
+    "id": "forestsFavor",
+    "name": "Forest's Favor",
+    "desc": "At the final stretch: a Luck-scaled chance (at least 40%) of a +18% burst for 6 ticks. Guaranteed when running 3rd to 5th."
+   },
+   "owner": "狐狸",
+   "claimedAt": 1767225622000,
+   "record": {
+    "races": 0,
+    "wins": 0,
+    "losses": 0,
+    "podiums": 0,
+    "bestTimeSec": null,
+    "winStreak": 0
+   },
+   "lifetime": {
+    "races": 0,
+    "wins": 0,
+    "totalXp": 0
+   },
+   "trainStreak": {
+    "stat": null,
+    "count": 0
+   },
+   "effects": [],
+   "daily": {
+    "snacks": 0
+   },
+   "custom": false,
+   "retired": false,
+   "lastActionAt": null,
+   "createdAt": 1767225600000
+  },
+  {
+   "id": "r02",
+   "rosterKey": "moonhoof",
+   "name": "Moonhoof",
+   "emoji": "🐎",
+   "badgeColor": "#8fa3c7",
+   "ribbonColor": null,
+   "avatarUrl": null,
+   "species": "Moon Horse",
+   "personality": "Calm as a lake at midnight and has never once hurried.",
+   "description": "A silver-maned horse who only trains by moonlight. Her pace barely changes from gate to finish, and that is exactly the point.",
+   "style": "paceChaser",
+   "stats": {
+    "speed": 36,
+    "stamina": 58,
+    "power": 36,
+    "wisdom": 42,
+    "luck": 28
+   },
+   "baseStats": {
+    "speed": 36,
+    "stamina": 58,
+    "power": 36,
+    "wisdom": 42,
+    "luck": 28
+   },
+   "level": 1,
+   "xp": 0,
+   "totalXp": 0,
+   "energy": 100,
+   "maxEnergy": 100,
+   "fatigue": 10,
+   "condition": "Excellent",
+   "mood": "Happy",
+   "ability": {
+    "id": "moonlightPace",
+    "name": "Moonlight Pace",
+    "desc": "During the mid race: stamina drain x0.80 and +2% speed."
+   },
+   "owner": "狐狸",
+   "claimedAt": 1767225633000,
+   "record": {
+    "races": 0,
+    "wins": 0,
+    "losses": 0,
+    "podiums": 0,
+    "bestTimeSec": null,
+    "winStreak": 0
+   },
+   "lifetime": {
+    "races": 0,
+    "wins": 0,
+    "totalXp": 0
+   },
+   "trainStreak": {
+    "stat": null,
+    "count": 0
+   },
+   "effects": [],
+   "daily": {
+    "snacks": 0
+   },
+   "custom": false,
+   "retired": false,
+   "lastActionAt": null,
+   "createdAt": 1767225600000
+  },
+  {
+   "id": "r03",
+   "rosterKey": "thunderFern",
+   "name": "Thunder Fern",
+   "emoji": "🐗",
+   "badgeColor": "#7a5a3a",
+   "ribbonColor": null,
+   "avatarUrl": null,
+   "species": "Storm Boar",
+   "personality": "Loud, proud, and deeply allergic to being behind anyone.",
+   "description": "A boar spirit who charges through the bracken like a rolling storm. Every runner he passes only makes him louder and faster.",
+   "style": "frontRunner",
+   "stats": {
+    "speed": 42,
+    "stamina": 36,
+    "power": 58,
+    "wisdom": 34,
+    "luck": 30
+   },
+   "baseStats": {
+    "speed": 42,
+    "stamina": 36,
+    "power": 58,
+    "wisdom": 34,
+    "luck": 30
+   },
+   "level": 1,
+   "xp": 0,
+   "totalXp": 0,
+   "energy": 100,
+   "maxEnergy": 100,
+   "fatigue": 10,
+   "condition": "Excellent",
+   "mood": "Happy",
+   "ability": {
+    "id": "thunderStep",
+    "name": "Thunder Step",
+    "desc": "Overtaking in the mid race or final turn: +30% speed for 3 ticks (max 3 procs, 20-tick cooldown)."
+   },
+   "owner": "狐狸",
+   "claimedAt": 1767225644000,
+   "record": {
+    "races": 0,
+    "wins": 0,
+    "losses": 0,
+    "podiums": 0,
+    "bestTimeSec": null,
+    "winStreak": 0
+   },
+   "lifetime": {
+    "races": 0,
+    "wins": 0,
+    "totalXp": 0
+   },
+   "trainStreak": {
+    "stat": null,
+    "count": 0
+   },
+   "effects": [],
+   "daily": {
+    "snacks": 0
+   },
+   "custom": false,
+   "retired": false,
+   "lastActionAt": null,
+   "createdAt": 1767225600000
+  },
+  {
+   "id": "r04",
+   "rosterKey": "emberTail",
+   "name": "Ember Tail",
+   "emoji": "🦊",
+   "badgeColor": "#d9642b",
+   "ribbonColor": null,
+   "avatarUrl": null,
+   "species": "Fire Fox",
+   "personality": "Talks fast, runs faster, forgets to breathe.",
+   "description": "A fox kit whose tail smoulders when she gets excited, which is always. Blistering off the line, but long races test her lungs.",
+   "style": "frontRunner",
+   "stats": {
+    "speed": 60,
+    "stamina": 24,
+    "power": 44,
+    "wisdom": 32,
+    "luck": 40
+   },
+   "baseStats": {
+    "speed": 60,
+    "stamina": 24,
+    "power": 44,
+    "wisdom": 32,
+    "luck": 40
+   },
+   "level": 1,
+   "xp": 0,
+   "totalXp": 0,
+   "energy": 100,
+   "maxEnergy": 100,
+   "fatigue": 10,
+   "condition": "Excellent",
+   "mood": "Happy",
+   "ability": {
+    "id": "secondWind",
+    "name": "Second Wind",
+    "desc": "Once per race, when stamina drops below 12%: restore 15% stamina and ignore fatigue for 10 ticks."
+   },
+   "owner": "狐狸",
+   "claimedAt": 1767225655000,
+   "record": {
+    "races": 0,
+    "wins": 0,
+    "losses": 0,
+    "podiums": 0,
+    "bestTimeSec": null,
+    "winStreak": 0
+   },
+   "lifetime": {
+    "races": 0,
+    "wins": 0,
+    "totalXp": 0
+   },
+   "trainStreak": {
+    "stat": null,
+    "count": 0
+   },
+   "effects": [],
+   "daily": {
+    "snacks": 0
+   },
+   "custom": false,
+   "retired": false,
+   "lastActionAt": null,
+   "createdAt": 1767225600000
+  },
+  {
+   "id": "r05",
+   "rosterKey": "velvetComet",
+   "name": "Velvet Comet",
+   "emoji": "🐈",
+   "badgeColor": "#6b4fa3",
+   "ribbonColor": null,
+   "avatarUrl": null,
+   "species": "Star Cat",
+   "personality": "Elegant, aloof, and secretly competitive about everything.",
+   "description": "A midnight cat who drifts at the back looking bored, then streaks home like a falling star while everyone else blinks.",
+   "style": "lateSurger",
+   "stats": {
+    "speed": 56,
+    "stamina": 38,
+    "power": 34,
+    "wisdom": 42,
+    "luck": 30
+   },
+   "baseStats": {
+    "speed": 56,
+    "stamina": 38,
+    "power": 34,
+    "wisdom": 42,
+    "luck": 30
+   },
+   "level": 1,
+   "xp": 0,
+   "totalXp": 0,
+   "energy": 100,
+   "maxEnergy": 100,
+   "fatigue": 10,
+   "condition": "Excellent",
+   "mood": "Happy",
+   "ability": {
+    "id": "cometTail",
+    "name": "Comet Tail",
+    "desc": "At the final stretch: +9% for 12 ticks when running 2nd to 5th, +6% when 6th or worse. Nothing when already leading."
+   },
+   "owner": "MothMom",
+   "claimedAt": 1767225688000,
+   "record": {
+    "races": 0,
+    "wins": 0,
+    "losses": 0,
+    "podiums": 0,
+    "bestTimeSec": null,
+    "winStreak": 0
+   },
+   "lifetime": {
+    "races": 0,
+    "wins": 0,
+    "totalXp": 0
+   },
+   "trainStreak": {
+    "stat": null,
+    "count": 0
+   },
+   "effects": [],
+   "daily": {
+    "snacks": 0
+   },
+   "custom": false,
+   "retired": false,
+   "lastActionAt": null,
+   "createdAt": 1767225600000
+  },
+  {
+   "id": "r06",
+   "rosterKey": "mistyGale",
+   "name": "Misty Gale",
+   "emoji": "🦢",
+   "badgeColor": "#a7c4c2",
+   "ribbonColor": null,
+   "avatarUrl": null,
+   "species": "Mist Swan",
+   "personality": "Reads the wind like a book and will quote it at you.",
+   "description": "A swan spirit born from lake fog. She reads the course better than anyone and sidesteps trouble before it happens.",
+   "style": "paceChaser",
+   "stats": {
+    "speed": 40,
+    "stamina": 42,
+    "power": 34,
+    "wisdom": 58,
+    "luck": 28
+   },
+   "baseStats": {
+    "speed": 38,
+    "stamina": 42,
+    "power": 34,
+    "wisdom": 58,
+    "luck": 28
+   },
+   "level": 1,
+   "xp": 3,
+   "totalXp": 3,
+   "energy": 88,
+   "maxEnergy": 100,
+   "fatigue": 15,
+   "condition": "Excellent",
+   "mood": "Happy",
+   "ability": {
+    "id": "readingTheWind",
+    "name": "Reading the Wind",
+    "desc": "At the final turn: a Wisdom roll (50% + Wis/200) grants +5% through the turn and stamina drain x0.85 afterwards. Passive: bad events find her half as often."
+   },
+   "owner": "Fox Fan",
+   "claimedAt": 1767225710000,
+   "record": {
+    "races": 0,
+    "wins": 0,
+    "losses": 0,
+    "podiums": 0,
+    "bestTimeSec": null,
+    "winStreak": 0
+   },
+   "lifetime": {
+    "races": 0,
+    "wins": 0,
+    "totalXp": 3
+   },
+   "trainStreak": {
+    "stat": "speed",
+    "count": 1
+   },
+   "effects": [],
+   "daily": {
+    "snacks": 0
+   },
+   "custom": false,
+   "retired": false,
+   "lastActionAt": 1767225737000,
+   "createdAt": 1767225600000
+  },
+  {
+   "id": "r07",
+   "rosterKey": "copperBloom",
+   "name": "Copper Bloom",
+   "emoji": "🐿️",
+   "badgeColor": "#c9783a",
+   "ribbonColor": null,
+   "avatarUrl": null,
+   "species": "Copper Squirrel",
+   "personality": "Chaotic good, powered entirely by acorns and vibes.",
+   "description": "A squirrel who believes every acorn is lucky, and somehow she is right. Bouncy, unpredictable, and prone to sudden bursts.",
+   "style": "wildCard",
+   "stats": {
+    "speed": 40,
+    "stamina": 36,
+    "power": 36,
+    "wisdom": 30,
+    "luck": 60
+   },
+   "baseStats": {
+    "speed": 38,
+    "stamina": 36,
+    "power": 36,
+    "wisdom": 30,
+    "luck": 60
+   },
+   "level": 1,
+   "xp": 3,
+   "totalXp": 3,
+   "energy": 88,
+   "maxEnergy": 100,
+   "fatigue": 15,
+   "condition": "Excellent",
+   "mood": "Happy",
+   "ability": {
+    "id": "acornHoard",
+    "name": "Acorn Hoard",
+    "desc": "Crit chance x2.5 and crits give +22% for 6 ticks. Good events find her 1.5x as often. One guaranteed crit at the final stretch if none yet."
+   },
+   "owner": null,
+   "claimedAt": null,
+   "record": {
+    "races": 0,
+    "wins": 0,
+    "losses": 0,
+    "podiums": 0,
+    "bestTimeSec": null,
+    "winStreak": 0
+   },
+   "lifetime": {
+    "races": 0,
+    "wins": 0,
+    "totalXp": 3
+   },
+   "trainStreak": {
+    "stat": "speed",
+    "count": 1
+   },
+   "effects": [],
+   "daily": {
+    "snacks": 0
+   },
+   "custom": false,
+   "retired": false,
+   "lastActionAt": 1767225742000,
+   "createdAt": 1767225600000
+  },
+  {
+   "id": "r08",
+   "rosterKey": "nightLantern",
+   "name": "Night Lantern",
+   "emoji": "🦉",
+   "badgeColor": "#c9a84c",
+   "ribbonColor": null,
+   "avatarUrl": null,
+   "species": "Lantern Owl",
+   "personality": "Wise, patient, and awake at deeply inconvenient hours.",
+   "description": "An owl spirit carrying a lantern of captured starlight. Saves every spark, then burns the whole lantern down the final stretch.",
+   "style": "wildCard",
+   "stats": {
+    "speed": 35,
+    "stamina": 50,
+    "power": 30,
+    "wisdom": 50,
+    "luck": 38
+   },
+   "baseStats": {
+    "speed": 32,
+    "stamina": 50,
+    "power": 30,
+    "wisdom": 50,
+    "luck": 38
+   },
+   "level": 1,
+   "xp": 3,
+   "totalXp": 3,
+   "energy": 88,
+   "maxEnergy": 100,
+   "fatigue": 15,
+   "condition": "Excellent",
+   "mood": "Happy",
+   "ability": {
+    "id": "longNight",
+    "name": "Long Night",
+    "desc": "At the final stretch: bonus speed equal to remaining stamina x 14%. Stamina pool x1.06 in races of 2000 m or more."
+   },
+   "owner": null,
+   "claimedAt": null,
+   "record": {
+    "races": 0,
+    "wins": 0,
+    "losses": 0,
+    "podiums": 0,
+    "bestTimeSec": null,
+    "winStreak": 0
+   },
+   "lifetime": {
+    "races": 0,
+    "wins": 0,
+    "totalXp": 3
+   },
+   "trainStreak": {
+    "stat": "speed",
+    "count": 1
+   },
+   "effects": [],
+   "daily": {
+    "snacks": 0
+   },
+   "custom": false,
+   "retired": false,
+   "lastActionAt": 1767225747000,
+   "createdAt": 1767225600000
+  },
+  {
+   "id": "r09",
+   "rosterKey": "brambleJack",
+   "name": "Bramble Jack",
+   "emoji": "🦝",
+   "badgeColor": "#4a5d3a",
+   "ribbonColor": null,
+   "avatarUrl": null,
+   "species": "Hedge Cryptid",
+   "personality": "A hedge-dwelling trickster who treats rules as light suggestions.",
+   "description": "Nobody is quite sure what Bramble Jack is, only that trouble slides right off him and onto whoever is running in front.",
+   "style": "wildCard",
+   "stats": {
+    "speed": 40,
+    "stamina": 34,
+    "power": 46,
+    "wisdom": 26,
+    "luck": 54
+   },
+   "baseStats": {
+    "speed": 40,
+    "stamina": 34,
+    "power": 46,
+    "wisdom": 26,
+    "luck": 54
+   },
+   "level": 1,
+   "xp": 0,
+   "totalXp": 0,
+   "energy": 100,
+   "maxEnergy": 100,
+   "fatigue": 10,
+   "condition": "Excellent",
+   "mood": "Happy",
+   "ability": {
+    "id": "hedgeHop",
+    "name": "Hedge Hop",
+    "desc": "When hit by a bad event: 50% + Luck/200 to shrug it off, bounce it onto the runner directly ahead and spring forward (+12% for 10 ticks)."
+   },
+   "owner": null,
+   "claimedAt": null,
+   "record": {
+    "races": 0,
+    "wins": 0,
+    "losses": 0,
+    "podiums": 0,
+    "bestTimeSec": null,
+    "winStreak": 0
+   },
+   "lifetime": {
+    "races": 0,
+    "wins": 0,
+    "totalXp": 0
+   },
+   "trainStreak": {
+    "stat": null,
+    "count": 0
+   },
+   "effects": [],
+   "daily": {
+    "snacks": 0
+   },
+   "custom": false,
+   "retired": false,
+   "lastActionAt": null,
+   "createdAt": 1767225600000
+  },
+  {
+   "id": "r10",
+   "rosterKey": "glowWisp",
+   "name": "Glow Wisp",
+   "emoji": "🐇",
+   "badgeColor": "#4fd1c5",
+   "ribbonColor": null,
+   "avatarUrl": null,
+   "species": "Marsh Hare",
+   "personality": "Shy until the lights go down, then absolutely unstoppable.",
+   "description": "A bioluminescent hare from the fen who glows brighter the further behind she falls. Lives for a comeback.",
+   "style": "lateSurger",
+   "stats": {
+    "speed": 52,
+    "stamina": 30,
+    "power": 34,
+    "wisdom": 46,
+    "luck": 38
+   },
+   "baseStats": {
+    "speed": 52,
+    "stamina": 30,
+    "power": 34,
+    "wisdom": 46,
+    "luck": 38
+   },
+   "level": 1,
+   "xp": 0,
+   "totalXp": 0,
+   "energy": 100,
+   "maxEnergy": 100,
+   "fatigue": 10,
+   "condition": "Excellent",
+   "mood": "Happy",
+   "ability": {
+    "id": "afterglow",
+    "name": "Afterglow",
+    "desc": "At the final stretch: +2% speed per runner ahead (max +10%) for the rest of the race."
+   },
+   "owner": null,
+   "claimedAt": null,
+   "record": {
+    "races": 0,
+    "wins": 0,
+    "losses": 0,
+    "podiums": 0,
+    "bestTimeSec": null,
+    "winStreak": 0
+   },
+   "lifetime": {
+    "races": 0,
+    "wins": 0,
+    "totalXp": 0
+   },
+   "trainStreak": {
+    "stat": null,
+    "count": 0
+   },
+   "effects": [],
+   "daily": {
+    "snacks": 0
+   },
+   "custom": false,
+   "retired": false,
+   "lastActionAt": null,
+   "createdAt": 1767225600000
+  }
+ ],
+ "players": {
+  "foxfan": {
+   "username": "foxfan",
+   "displayName": "狐狸",
+   "joinedAt": 1767225611000,
+   "lastSeen": 1767225655000,
+   "lastDailyDay": "s1d1",
+   "spiritPoints": 250,
+   "runnerId": "r04",
+   "isMod": false,
+   "stats": {
+    "commands": 5,
+    "trains": 0,
+    "rests": 0,
+    "cheers": 0,
+    "bets": 0,
+    "betsWon": 0,
+    "sabotages": 0,
+    "boosts": 0,
+    "racesParticipated": 0,
+    "raceVictories": 0,
+    "hypeContributed": 0,
+    "spEarnedTotal": 250,
+    "spSpentTotal": 0
+   },
+   "lifetime": {
+    "commands": 0,
+    "trains": 0,
+    "rests": 0,
+    "cheers": 0,
+    "bets": 0,
+    "betsWon": 0,
+    "sabotages": 0,
+    "boosts": 0,
+    "racesParticipated": 0,
+    "raceVictories": 0,
+    "hypeContributed": 0,
+    "spEarnedTotal": 0,
+    "spSpentTotal": 0
+   },
+   "achievements": [
+    "firstSteps",
+    "stableHand"
+   ],
+   "backing": {
+    "runnerId": null,
+    "actions": 0
+   }
+  },
+  "mothmom": {
+   "username": "mothmom",
+   "displayName": "MothMom",
+   "joinedAt": 1767225677000,
+   "lastSeen": 1767225688000,
+   "lastDailyDay": "s1d1",
+   "spiritPoints": 250,
+   "runnerId": "r05",
+   "isMod": false,
+   "stats": {
+    "commands": 2,
+    "trains": 0,
+    "rests": 0,
+    "cheers": 0,
+    "bets": 0,
+    "betsWon": 0,
+    "sabotages": 0,
+    "boosts": 0,
+    "racesParticipated": 0,
+    "raceVictories": 0,
+    "hypeContributed": 0,
+    "spEarnedTotal": 250,
+    "spSpentTotal": 0
+   },
+   "lifetime": {
+    "commands": 0,
+    "trains": 0,
+    "rests": 0,
+    "cheers": 0,
+    "bets": 0,
+    "betsWon": 0,
+    "sabotages": 0,
+    "boosts": 0,
+    "racesParticipated": 0,
+    "raceVictories": 0,
+    "hypeContributed": 0,
+    "spEarnedTotal": 0,
+    "spSpentTotal": 0
+   },
+   "achievements": [
+    "firstSteps",
+    "stableHand"
+   ],
+   "backing": {
+    "runnerId": null,
+    "actions": 0
+   }
+  },
+  "user_42": {
+   "username": "user_42",
+   "displayName": "Fox Fan",
+   "joinedAt": 1767225699000,
+   "lastSeen": 1767225710000,
+   "lastDailyDay": "s1d1",
+   "spiritPoints": 250,
+   "runnerId": "r06",
+   "isMod": false,
+   "stats": {
+    "commands": 2,
+    "trains": 0,
+    "rests": 0,
+    "cheers": 0,
+    "bets": 0,
+    "betsWon": 0,
+    "sabotages": 0,
+    "boosts": 0,
+    "racesParticipated": 0,
+    "raceVictories": 0,
+    "hypeContributed": 0,
+    "spEarnedTotal": 250,
+    "spSpentTotal": 0
+   },
+   "lifetime": {
+    "commands": 0,
+    "trains": 0,
+    "rests": 0,
+    "cheers": 0,
+    "bets": 0,
+    "betsWon": 0,
+    "sabotages": 0,
+    "boosts": 0,
+    "racesParticipated": 0,
+    "raceVictories": 0,
+    "hypeContributed": 0,
+    "spEarnedTotal": 0,
+    "spSpentTotal": 0
+   },
+   "achievements": [
+    "firstSteps",
+    "stableHand"
+   ],
+   "backing": {
+    "runnerId": null,
+    "actions": 0
+   }
+  },
+  "acornandy": {
+   "username": "acornandy",
+   "displayName": "AcornAndy",
+   "joinedAt": 1767225721000,
+   "lastSeen": 1767225732000,
+   "lastDailyDay": "s1d1",
+   "spiritPoints": 227,
+   "runnerId": null,
+   "isMod": false,
+   "stats": {
+    "commands": 2,
+    "trains": 0,
+    "rests": 0,
+    "cheers": 1,
+    "bets": 0,
+    "betsWon": 0,
+    "sabotages": 0,
+    "boosts": 0,
+    "racesParticipated": 0,
+    "raceVictories": 0,
+    "hypeContributed": 3,
+    "spEarnedTotal": 227,
+    "spSpentTotal": 0
+   },
+   "lifetime": {
+    "commands": 0,
+    "trains": 0,
+    "rests": 0,
+    "cheers": 0,
+    "bets": 0,
+    "betsWon": 0,
+    "sabotages": 0,
+    "boosts": 0,
+    "racesParticipated": 0,
+    "raceVictories": 0,
+    "hypeContributed": 0,
+    "spEarnedTotal": 0,
+    "spSpentTotal": 0
+   },
+   "achievements": [
+    "firstSteps"
+   ],
+   "backing": {
+    "runnerId": null,
+    "actions": 0
+   }
+  }
+ },
+ "bets": [],
+ "raceEffects": [],
+ "currentRace": {
+  "record": {
+   "id": "s1d1r1-1",
+   "season": 1,
+   "day": 1,
+   "indexInDay": 1,
+   "seed": 1132817552,
+   "engineVersion": 2,
+   "distance": 1200,
+   "trackName": "Fernfall Hollow",
+   "settingsSnapshot": {
+    "eventFrequency": "normal",
+    "hypeLevel": 6.6,
+    "dayEventId": "clearSkies"
+   },
+   "inputs": {
+    "chatEffects": [],
+    "raceEffects": [],
+    "rosterAvgLevel": 1
+   },
+   "entrants": [
+    {
+     "runnerId": "r06",
+     "name": "Misty Gale",
+     "emoji": "🦢",
+     "badgeColor": "#a7c4c2",
+     "ribbonColor": null,
+     "lane": 1,
+     "style": "paceChaser",
+     "abilityId": "readingTheWind",
+     "ownerAtRace": "Fox Fan",
+     "level": 1,
+     "stats": {
+      "speed": 40,
+      "stamina": 42,
+      "power": 34,
+      "wisdom": 58,
+      "luck": 28
+     },
+     "condition": "Excellent",
+     "mood": "Happy",
+     "energy": 88,
+     "maxEnergy": 100,
+     "fatigue": 15,
+     "perf": {
+      "START": 38.9,
+      "EARLY": 41.9,
+      "MID": 43.8,
+      "FINAL_TURN": 40.7,
+      "FINAL_STRETCH": 38.5
+     },
+     "stamMax": 1972.5,
+     "cheerBonus": 0,
+     "wildRoll": null,
+     "form": -0.0167,
+     "rating": 47.96,
+     "winProb": 0.1628,
+     "odds": 5.2
+    },
+    {
+     "runnerId": "r02",
+     "name": "Moonhoof",
+     "emoji": "🐎",
+     "badgeColor": "#8fa3c7",
+     "ribbonColor": null,
+     "lane": 2,
+     "style": "paceChaser",
+     "abilityId": "moonlightPace",
+     "ownerAtRace": "狐狸",
+     "level": 1,
+     "stats": {
+      "speed": 36,
+      "stamina": 58,
+      "power": 36,
+      "wisdom": 42,
+      "luck": 28
+     },
+     "condition": "Excellent",
+     "mood": "Happy",
+     "energy": 100,
+     "maxEnergy": 100,
+     "fatigue": 10,
+     "perf": {
+      "START": 37.2,
+      "EARLY": 40.8,
+      "MID": 42.6,
+      "FINAL_TURN": 40.9,
+      "FINAL_STRETCH": 38.8
+     },
+     "stamMax": 2443.5,
+     "cheerBonus": 0,
+     "wildRoll": null,
+     "form": 0.0103,
+     "rating": 47.06,
+     "winProb": 0.1411,
+     "odds": 6
+    },
+    {
+     "runnerId": "r04",
+     "name": "Ember Tail",
+     "emoji": "🦊",
+     "badgeColor": "#d9642b",
+     "ribbonColor": null,
+     "lane": 3,
+     "style": "frontRunner",
+     "abilityId": "secondWind",
+     "ownerAtRace": "狐狸",
+     "level": 1,
+     "stats": {
+      "speed": 60,
+      "stamina": 24,
+      "power": 44,
+      "wisdom": 32,
+      "luck": 40
+     },
+     "condition": "Excellent",
+     "mood": "Happy",
+     "energy": 100,
+     "maxEnergy": 100,
+     "fatigue": 10,
+     "perf": {
+      "START": 44.8,
+      "EARLY": 42.8,
+      "MID": 41.4,
+      "FINAL_TURN": 42.8,
+      "FINAL_STRETCH": 47.2
+     },
+     "stamMax": 1442.6,
+     "cheerBonus": 0,
+     "wildRoll": null,
+     "form": 0.0461,
+     "rating": 48.91,
+     "winProb": 0.1892,
+     "odds": 4.5
+    },
+    {
+     "runnerId": "r01",
+     "name": "Moss Runner",
+     "emoji": "🦌",
+     "badgeColor": "#5c8a4a",
+     "ribbonColor": null,
+     "lane": 4,
+     "style": "lateSurger",
+     "abilityId": "forestsFavor",
+     "ownerAtRace": "狐狸",
+     "level": 1,
+     "stats": {
+      "speed": 40,
+      "stamina": 42,
+      "power": 40,
+      "wisdom": 40,
+      "luck": 38
+     },
+     "condition": "Excellent",
+     "mood": "Happy",
+     "energy": 100,
+     "maxEnergy": 100,
+     "fatigue": 10,
+     "perf": {
+      "START": 39.9,
+      "EARLY": 40.2,
+      "MID": 40.4,
+      "FINAL_TURN": 40.3,
+      "FINAL_STRETCH": 40.1
+     },
+     "stamMax": 1972.5,
+     "cheerBonus": 0,
+     "wildRoll": null,
+     "form": -0.0057,
+     "rating": 45.71,
+     "winProb": 0.1138,
+     "odds": 7.5
+    },
+    {
+     "runnerId": "r03",
+     "name": "Thunder Fern",
+     "emoji": "🐗",
+     "badgeColor": "#7a5a3a",
+     "ribbonColor": null,
+     "lane": 5,
+     "style": "frontRunner",
+     "abilityId": "thunderStep",
+     "ownerAtRace": "狐狸",
+     "level": 1,
+     "stats": {
+      "speed": 42,
+      "stamina": 36,
+      "power": 58,
+      "wisdom": 34,
+      "luck": 30
+     },
+     "condition": "Excellent",
+     "mood": "Happy",
+     "energy": 100,
+     "maxEnergy": 100,
+     "fatigue": 10,
+     "perf": {
+      "START": 46.5,
+      "EARLY": 40.4,
+      "MID": 39.5,
+      "FINAL_TURN": 43.8,
+      "FINAL_STRETCH": 43.5
+     },
+     "stamMax": 1795.8,
+     "cheerBonus": 0,
+     "wildRoll": null,
+     "form": 0.0565,
+     "rating": 48.72,
+     "winProb": 0.1836,
+     "odds": 4.6
+    },
+    {
+     "runnerId": "r05",
+     "name": "Velvet Comet",
+     "emoji": "🐈",
+     "badgeColor": "#6b4fa3",
+     "ribbonColor": null,
+     "lane": 6,
+     "style": "lateSurger",
+     "abilityId": "cometTail",
+     "ownerAtRace": "MothMom",
+     "level": 1,
+     "stats": {
+      "speed": 56,
+      "stamina": 38,
+      "power": 34,
+      "wisdom": 42,
+      "luck": 30
+     },
+     "condition": "Excellent",
+     "mood": "Happy",
+     "energy": 100,
+     "maxEnergy": 100,
+     "fatigue": 10,
+     "perf": {
+      "START": 40.5,
+      "EARLY": 43.7,
+      "MID": 44.5,
+      "FINAL_TURN": 42.4,
+      "FINAL_STRETCH": 44.5
+     },
+     "stamMax": 1854.7,
+     "cheerBonus": 0,
+     "wildRoll": null,
+     "form": -0.0046,
+     "rating": 49.55,
+     "winProb": 0.2095,
+     "odds": 4.1
+    }
+   ],
+   "ticks": [],
+   "events": [
+    {
+     "tick": 0,
+     "kind": "phase",
+     "runnerId": null,
+     "text": "A horn echoes through Fernfall Hollow... GO!",
+     "severity": "epic",
+     "data": {
+      "phase": "START"
+     }
+    },
+    {
+     "tick": 7,
+     "kind": "phase",
+     "runnerId": "r04",
+     "text": "Ember Tail leads the pack into the early straight.",
+     "severity": "info",
+     "data": {
+      "phase": "EARLY"
+     }
+    },
+    {
+     "tick": 15,
+     "kind": "overtake",
+     "runnerId": "r06",
+     "text": "Misty Gale slips past Velvet Comet into 3rd.",
+     "severity": "info",
+     "data": {
+      "passed": "r05",
+      "place": 3
+     }
+    },
+    {
+     "tick": 40,
+     "kind": "phase",
+     "runnerId": "r04",
+     "text": "MID RACE: Ember Tail sets the pace, Thunder Fern tucked in behind.",
+     "severity": "info",
+     "data": {
+      "phase": "MID"
+     }
+    },
+    {
+     "tick": 51,
+     "kind": "ability",
+     "runnerId": "r02",
+     "text": "MOONLIGHT PACE: Moonhoof settles into a silver rhythm.",
+     "severity": "good",
+     "data": {
+      "abilityId": "moonlightPace"
+     }
+    },
+    {
+     "tick": 52,
+     "kind": "crit",
+     "runnerId": "r04",
+     "text": "CRIT! Ember Tail finds another gear!",
+     "severity": "good"
+    },
+    {
+     "tick": 83,
+     "kind": "event",
+     "runnerId": "r01",
+     "text": "A trail of fireflies lights the way for Moss Runner at the back!",
+     "severity": "good",
+     "data": {
+      "eventId": "fireflyTrail",
+      "targets": [
+       "r01"
+      ],
+      "outcome": "pos"
+     }
+    },
+    {
+     "tick": 90,
+     "kind": "phase",
+     "runnerId": "r04",
+     "text": "FINAL TURN! Ember Tail leads into the bend!",
+     "severity": "good",
+     "data": {
+      "phase": "FINAL_TURN"
+     }
+    },
+    {
+     "tick": 101,
+     "kind": "ability",
+     "runnerId": "r06",
+     "text": "READING THE WIND: Misty Gale finds the perfect line through the turn.",
+     "severity": "good",
+     "data": {
+      "abilityId": "readingTheWind"
+     }
+    },
+    {
+     "tick": 119,
+     "kind": "phase",
+     "runnerId": "r04",
+     "text": "FINAL STRETCH! Ember Tail is clear by 8 m!",
+     "severity": "epic",
+     "data": {
+      "phase": "FINAL_STRETCH"
+     }
+    },
+    {
+     "tick": 122,
+     "kind": "event",
+     "runnerId": "r03",
+     "text": "Thunder Fern lands SPLAT in the middle of a giant puddle.",
+     "severity": "bad",
+     "data": {
+      "eventId": "puddleJump",
+      "targets": [
+       "r03"
+      ],
+      "outcome": "neg"
+     }
+    },
+    {
+     "tick": 128,
+     "kind": "ability",
+     "runnerId": "r05",
+     "text": "COMET TAIL! Velvet Comet streaks out of the pack (+9%)!",
+     "severity": "epic",
+     "data": {
+      "abilityId": "cometTail"
+     }
+    },
+    {
+     "tick": 130,
+     "kind": "ability",
+     "runnerId": "r01",
+     "text": "FOREST'S FAVOR! The old trees push Moss Runner forward (+18%)!",
+     "severity": "epic",
+     "data": {
+      "abilityId": "forestsFavor"
+     }
+    },
+    {
+     "tick": 140,
+     "kind": "finish",
+     "runnerId": "r04",
+     "text": "Ember Tail WINS at Fernfall Hollow in 69.9s!",
+     "severity": "epic",
+     "data": {
+      "place": 1,
+      "timeSec": 69.88,
+      "margin": 18.2
+     }
+    },
+    {
+     "tick": 143,
+     "kind": "crit",
+     "runnerId": "r02",
+     "text": "Moonhoof CRITS! A burst of wild spirit speed!",
+     "severity": "good"
+    },
+    {
+     "tick": 143,
+     "kind": "finish",
+     "runnerId": "r03",
+     "text": "Thunder Fern takes 2nd.",
+     "severity": "good",
+     "data": {
+      "place": 2,
+      "timeSec": 71.06,
+      "margin": 18.2
+     }
+    },
+    {
+     "tick": 146,
+     "kind": "finish",
+     "runnerId": "r05",
+     "text": "Velvet Comet takes 3rd.",
+     "severity": "good",
+     "data": {
+      "place": 3,
+      "timeSec": 72.87,
+      "margin": 31.33
+     }
+    },
+    {
+     "tick": 148,
+     "kind": "finish",
+     "runnerId": "r01",
+     "text": "Moss Runner finishes 4th.",
+     "severity": "info",
+     "data": {
+      "place": 4,
+      "timeSec": 73.79,
+      "margin": 16.41
+     }
+    },
+    {
+     "tick": 154,
+     "kind": "finish",
+     "runnerId": "r06",
+     "text": "Misty Gale finishes 5th.",
+     "severity": "info",
+     "data": {
+      "place": 5,
+      "timeSec": 76.85,
+      "margin": 45.58
+     }
+    },
+    {
+     "tick": 156,
+     "kind": "finish",
+     "runnerId": "r02",
+     "text": "Moonhoof finishes 6th.",
+     "severity": "info",
+     "data": {
+      "place": 6,
+      "timeSec": 77.69,
+      "margin": 12.74
+     }
+    }
+   ],
+   "results": [
+    {
+     "runnerId": "r04",
+     "name": "Ember Tail",
+     "place": 1,
+     "finishTick": 139.76,
+     "timeSec": 69.88,
+     "margin": 18.2,
+     "wallHit": false,
+     "xp": 120,
+     "spOwner": 50,
+     "spBacker": 25,
+     "statChanges": {
+      "power": 1
+     },
+     "energyDelta": -25,
+     "fatigueDelta": 15,
+     "moodAfter": "Happy",
+     "abilityActivations": [],
+     "majorEvents": [],
+     "levelUps": 0,
+     "crits": 1,
+     "overtakes": 0,
+     "odds": 4.5,
+     "ownerAtRace": "狐狸"
+    },
+    {
+     "runnerId": "r03",
+     "name": "Thunder Fern",
+     "place": 2,
+     "finishTick": 142.118,
+     "timeSec": 71.06,
+     "margin": 18.2,
+     "wallHit": false,
+     "xp": 90,
+     "spOwner": 35,
+     "spBacker": 17,
+     "statChanges": {
+      "speed": 1
+     },
+     "energyDelta": -25,
+     "fatigueDelta": 15,
+     "moodAfter": "Happy",
+     "abilityActivations": [],
+     "majorEvents": [
+      "puddleJump"
+     ],
+     "levelUps": 0,
+     "crits": 0,
+     "overtakes": 0,
+     "odds": 4.6,
+     "ownerAtRace": "狐狸"
+    },
+    {
+     "runnerId": "r05",
+     "name": "Velvet Comet",
+     "place": 3,
+     "finishTick": 145.745,
+     "timeSec": 72.87,
+     "margin": 31.33,
+     "wallHit": false,
+     "xp": 70,
+     "spOwner": 25,
+     "spBacker": 12,
+     "statChanges": {
+      "power": 1,
+      "wisdom": 1
+     },
+     "energyDelta": -25,
+     "fatigueDelta": 15,
+     "moodAfter": "Happy",
+     "abilityActivations": [
+      {
+       "tick": 128,
+       "id": "cometTail",
+       "text": "COMET TAIL! Velvet Comet streaks out of the pack (+9%)!"
+      }
+     ],
+     "majorEvents": [],
+     "levelUps": 0,
+     "crits": 0,
+     "overtakes": 1,
+     "odds": 4.1,
+     "ownerAtRace": "MothMom"
+    },
+    {
+     "runnerId": "r01",
+     "name": "Moss Runner",
+     "place": 4,
+     "finishTick": 147.572,
+     "timeSec": 73.79,
+     "margin": 16.41,
+     "wallHit": false,
+     "xp": 55,
+     "spOwner": 15,
+     "spBacker": 7,
+     "statChanges": {
+      "stamina": 1
+     },
+     "energyDelta": -25,
+     "fatigueDelta": 15,
+     "moodAfter": "Determined",
+     "abilityActivations": [
+      {
+       "tick": 130,
+       "id": "forestsFavor",
+       "text": "FOREST'S FAVOR! The old trees push Moss Runner forward (+18%)!"
+      }
+     ],
+     "majorEvents": [
+      "fireflyTrail"
+     ],
+     "levelUps": 0,
+     "crits": 0,
+     "overtakes": 2,
+     "odds": 7.5,
+     "ownerAtRace": "狐狸"
+    },
+    {
+     "runnerId": "r06",
+     "name": "Misty Gale",
+     "place": 5,
+     "finishTick": 153.695,
+     "timeSec": 76.85,
+     "margin": 45.58,
+     "wallHit": false,
+     "xp": 45,
+     "spOwner": 15,
+     "spBacker": 7,
+     "statChanges": {
+      "luck": 1
+     },
+     "energyDelta": -25,
+     "fatigueDelta": 15,
+     "moodAfter": "Determined",
+     "abilityActivations": [
+      {
+       "tick": 101,
+       "id": "readingTheWind",
+       "text": "READING THE WIND: Misty Gale finds the perfect line through the turn."
+      }
+     ],
+     "majorEvents": [],
+     "levelUps": 0,
+     "crits": 0,
+     "overtakes": 1,
+     "odds": 5.2,
+     "ownerAtRace": "Fox Fan"
+    },
+    {
+     "runnerId": "r02",
+     "name": "Moonhoof",
+     "place": 6,
+     "finishTick": 155.384,
+     "timeSec": 77.69,
+     "margin": 12.74,
+     "wallHit": false,
+     "xp": 40,
+     "spOwner": 8,
+     "spBacker": 4,
+     "statChanges": {
+      "luck": 1,
+      "speed": 1
+     },
+     "energyDelta": -25,
+     "fatigueDelta": 15,
+     "moodAfter": "Determined",
+     "abilityActivations": [
+      {
+       "tick": 51,
+       "id": "moonlightPace",
+       "text": "MOONLIGHT PACE: Moonhoof settles into a silver rhythm."
+      }
+     ],
+     "majorEvents": [],
+     "levelUps": 0,
+     "crits": 1,
+     "overtakes": 1,
+     "odds": 6,
+     "ownerAtRace": "狐狸"
+    }
+   ],
+   "bets": [],
+   "hypeBefore": 6.6,
+   "hypeAfter": null,
+   "totalTicks": 156,
+   "summary": {
+    "winnerId": "r04",
+    "winnerName": "Ember Tail",
+    "winnerEmoji": "🦊",
+    "photoFinish": false,
+    "forestAwakened": false,
+    "eventsCount": 2,
+    "critsCount": 2,
+    "upset": false,
+    "upsetOdds": null,
+    "margin": 18.2,
+    "wallHits": 0,
+    "timedOut": false
+   },
+   "hash": "db9ebe60"
+  },
+  "status": "finished",
+  "startedAt": 1767225747000
+ },
+ "raceHistory": [],
+ "settings": {
+  "distance": 1200,
+  "runnerCount": 6,
+  "eventFrequency": "normal",
+  "hypeMultiplier": 1,
+  "playbackSpeed": 1,
+  "finalStretchSpeedup": 1.25,
+  "userCooldownS": 10,
+  "openTraining": true,
+  "allowCreate": true,
+  "autoAdvanceDay": true,
+  "debug": false,
+  "seedOverride": null,
+  "overlay": false,
+  "resultsAutoCloseMs": 25000,
+  "twitch": {
+   "channel": "",
+   "enabled": false
+  },
+  "bridge": {
+   "url": "ws://localhost:8765",
+   "enabled": false
+  }
+ },
+ "achievements": {
+  "unlocked": [
+   {
+    "id": "firstSteps",
+    "name": "First Steps",
+    "username": "foxfan",
+    "displayName": "狐狸",
+    "sp": 25,
+    "at": 1767225611000,
+    "season": 1,
+    "day": 1
+   },
+   {
+    "id": "stableHand",
+    "name": "Stable Hand",
+    "username": "foxfan",
+    "displayName": "狐狸",
+    "sp": 25,
+    "at": 1767225622000,
+    "season": 1,
+    "day": 1
+   },
+   {
+    "id": "firstSteps",
+    "name": "First Steps",
+    "username": "mothmom",
+    "displayName": "MothMom",
+    "sp": 25,
+    "at": 1767225677000,
+    "season": 1,
+    "day": 1
+   },
+   {
+    "id": "stableHand",
+    "name": "Stable Hand",
+    "username": "mothmom",
+    "displayName": "MothMom",
+    "sp": 25,
+    "at": 1767225688000,
+    "season": 1,
+    "day": 1
+   },
+   {
+    "id": "firstSteps",
+    "name": "First Steps",
+    "username": "user_42",
+    "displayName": "Fox Fan",
+    "sp": 25,
+    "at": 1767225699000,
+    "season": 1,
+    "day": 1
+   },
+   {
+    "id": "stableHand",
+    "name": "Stable Hand",
+    "username": "user_42",
+    "displayName": "Fox Fan",
+    "sp": 25,
+    "at": 1767225710000,
+    "season": 1,
+    "day": 1
+   },
+   {
+    "id": "firstSteps",
+    "name": "First Steps",
+    "username": "acornandy",
+    "displayName": "AcornAndy",
+    "sp": 25,
+    "at": 1767225721000,
+    "season": 1,
+    "day": 1
+   }
+  ],
+  "progress": {}
+ },
+ "log": [
+  {
+   "t": 1767225611000,
+   "season": 1,
+   "day": 1,
+   "type": "player",
+   "text": "狐狸 joined the Spirit Derby!",
+   "severity": "good",
+   "username": "foxfan"
+  },
+  {
+   "t": 1767225611000,
+   "season": 1,
+   "day": 1,
+   "type": "achievement",
+   "text": "🏅 狐狸 unlocked First Steps (+25 SP): Join the Spirit Derby.",
+   "severity": "epic",
+   "username": "foxfan",
+   "achievementId": "firstSteps"
+  },
+  {
+   "t": 1767225622000,
+   "season": 1,
+   "day": 1,
+   "type": "claim",
+   "text": "狐狸 claimed 🦌 Moss Runner.",
+   "severity": "good",
+   "username": "foxfan",
+   "runnerId": "r01"
+  },
+  {
+   "t": 1767225622000,
+   "season": 1,
+   "day": 1,
+   "type": "achievement",
+   "text": "🏅 狐狸 unlocked Stable Hand (+25 SP): Claim your first runner.",
+   "severity": "epic",
+   "username": "foxfan",
+   "achievementId": "stableHand"
+  },
+  {
+   "t": 1767225633000,
+   "season": 1,
+   "day": 1,
+   "type": "claim",
+   "text": "狐狸 claimed 🐎 Moonhoof.",
+   "severity": "good",
+   "username": "foxfan",
+   "runnerId": "r02"
+  },
+  {
+   "t": 1767225644000,
+   "season": 1,
+   "day": 1,
+   "type": "claim",
+   "text": "狐狸 claimed 🐗 Thunder Fern.",
+   "severity": "good",
+   "username": "foxfan",
+   "runnerId": "r03"
+  },
+  {
+   "t": 1767225655000,
+   "season": 1,
+   "day": 1,
+   "type": "claim",
+   "text": "狐狸 claimed 🦊 Ember Tail.",
+   "severity": "good",
+   "username": "foxfan",
+   "runnerId": "r04"
+  },
+  {
+   "t": 1767225677000,
+   "season": 1,
+   "day": 1,
+   "type": "player",
+   "text": "MothMom joined the Spirit Derby!",
+   "severity": "good",
+   "username": "mothmom"
+  },
+  {
+   "t": 1767225677000,
+   "season": 1,
+   "day": 1,
+   "type": "achievement",
+   "text": "🏅 MothMom unlocked First Steps (+25 SP): Join the Spirit Derby.",
+   "severity": "epic",
+   "username": "mothmom",
+   "achievementId": "firstSteps"
+  },
+  {
+   "t": 1767225688000,
+   "season": 1,
+   "day": 1,
+   "type": "claim",
+   "text": "MothMom claimed 🐈 Velvet Comet.",
+   "severity": "good",
+   "username": "mothmom",
+   "runnerId": "r05"
+  },
+  {
+   "t": 1767225688000,
+   "season": 1,
+   "day": 1,
+   "type": "achievement",
+   "text": "🏅 MothMom unlocked Stable Hand (+25 SP): Claim your first runner.",
+   "severity": "epic",
+   "username": "mothmom",
+   "achievementId": "stableHand"
+  },
+  {
+   "t": 1767225699000,
+   "season": 1,
+   "day": 1,
+   "type": "player",
+   "text": "Fox Fan joined the Spirit Derby!",
+   "severity": "good",
+   "username": "user_42"
+  },
+  {
+   "t": 1767225699000,
+   "season": 1,
+   "day": 1,
+   "type": "achievement",
+   "text": "🏅 Fox Fan unlocked First Steps (+25 SP): Join the Spirit Derby.",
+   "severity": "epic",
+   "username": "user_42",
+   "achievementId": "firstSteps"
+  },
+  {
+   "t": 1767225710000,
+   "season": 1,
+   "day": 1,
+   "type": "claim",
+   "text": "Fox Fan claimed 🦢 Misty Gale.",
+   "severity": "good",
+   "username": "user_42",
+   "runnerId": "r06"
+  },
+  {
+   "t": 1767225710000,
+   "season": 1,
+   "day": 1,
+   "type": "achievement",
+   "text": "🏅 Fox Fan unlocked Stable Hand (+25 SP): Claim your first runner.",
+   "severity": "epic",
+   "username": "user_42",
+   "achievementId": "stableHand"
+  },
+  {
+   "t": 1767225721000,
+   "season": 1,
+   "day": 1,
+   "type": "player",
+   "text": "AcornAndy joined the Spirit Derby!",
+   "severity": "good",
+   "username": "acornandy"
+  },
+  {
+   "t": 1767225721000,
+   "season": 1,
+   "day": 1,
+   "type": "achievement",
+   "text": "🏅 AcornAndy unlocked First Steps (+25 SP): Join the Spirit Derby.",
+   "severity": "epic",
+   "username": "acornandy",
+   "achievementId": "firstSteps"
+  },
+  {
+   "t": 1767225737000,
+   "season": 1,
+   "day": 1,
+   "type": "train",
+   "text": "Misty Gale did wind sprints between the mushroom rings. | Speed +2 · Energy -12 · Hype +1",
+   "severity": "info",
+   "runnerId": "r06",
+   "by": "streamer",
+   "outcome": "normal"
+  },
+  {
+   "t": 1767225742000,
+   "season": 1,
+   "day": 1,
+   "type": "train",
+   "text": "Copper Bloom practiced explosive starts. | Speed +2 · Energy -12 · Hype +1",
+   "severity": "info",
+   "runnerId": "r07",
+   "by": "streamer",
+   "outcome": "normal"
+  },
+  {
+   "t": 1767225747000,
+   "season": 1,
+   "day": 1,
+   "type": "train",
+   "text": "Night Lantern did wind sprints between the mushroom rings. | Speed +3 · Energy -12 · Hype +1",
+   "severity": "info",
+   "runnerId": "r08",
+   "by": "streamer",
+   "outcome": "normal"
+  },
+  {
+   "t": 1767225747000,
+   "season": 1,
+   "day": 1,
+   "type": "race",
+   "text": "Race 1/3 at Fernfall Hollow (1200 m): Misty Gale, Moonhoof, Ember Tail, Moss Runner, Thunder Fern, Velvet Comet. Favourite: Velvet Comet at 4.1x.",
+   "severity": "info",
+   "recordId": "s1d1r1-1"
+  }
+ ]
+}

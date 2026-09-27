@@ -57,7 +57,10 @@ What happens under the hood:
 - **Mods** are recognised from Twitch's own data: the `mod=1` tag, a `moderator/1` badge or the
   `broadcaster/1` badge. You count as a mod in your own chat.
 - **Player identity** is the viewer's login (lowercase). The feed shows their display name, so a
-  viewer with a localized display name still keeps a single profile.
+  viewer with a localized display name still keeps a single profile, and the runner they `!claim`
+  is owned by that login: they can train it and are paid for it like everyone else. (Before review
+  batch 2 a claim stored the display name, so such a viewer never really owned the runner; loading an
+  older save repairs this and releases runners nobody could use.)
 - **Flood guard:** at most 20 commands per second, and separately at most 20 plain chat lines per
   second, reach the game. The two budgets are independent, so a busy chat can never crowd out the
   `!commands`. During a raid the rest are dropped and counted, and the admin section shows
@@ -538,6 +541,15 @@ Recommended setups:
 Sources: `twitch` (read-only chat), `bridge` (relay), `sim` (Chat tab / demo bots) and `admin`
 (the Streamer sender and SEND AS). **Admin** skips cooldowns and may train any runner even with
 open training off. Mod status comes from Twitch badges and tags, or from the bridge's `isMod`.
+
+The **Streamer** sender (Chat tab and SEND AS) is the streamer's console, not a viewer. It acts as
+the reserved name `#streamer`, which no Twitch login can be, so it never shares a profile with a
+viewer called `streamer`. It can run every mod and read-only command (`!race`, `!event`, `!odds`,
+`!help` …) but never plays: `!join` and player commands reply that the console doesn't play, and
+it never earns SP, hype credit or achievements. The roster TRAIN / REST buttons and **ADD HYPE**
+act as the console too: they move runners and the hype meter without crediting anyone. To act for
+a viewer, pick them in SEND AS (listed by display name, sent by login) or type `@login: !command`
+in the Chat tab. A `#streamer` name arriving from Twitch, the bridge or the demo chat is ignored.
 
 | Command | Aliases | Needs | Locked during a race | Cooldown | What it does |
 |---|---|---|---|---|---|

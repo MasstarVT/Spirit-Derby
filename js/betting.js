@@ -80,7 +80,7 @@
     const parts = [state.meta.seedSalt, state.meta.raceCounter, state.season.number, state.season.day, raceDistance(state),
       s.runnerCount, state.hype.value, state.season.activeDayEvent, s.debug ? s.seedOverride : ''];
     field.forEach(function (r) {
-      parts.push(r.id, r.level, r.style, r.mood, r.condition, U.round2(r.energy), r.maxEnergy, r.owner || '',
+      parts.push(r.id, r.level, r.style, r.mood, r.condition, U.round2(r.energy), r.maxEnergy, r.ownerKey || '', r.owner || '',
         r.ability && r.ability.id, cheers[r.id] || 0);
       SD.CONFIG.STATS.forEach(function (k) { parts.push(r.stats[k]); });
     });

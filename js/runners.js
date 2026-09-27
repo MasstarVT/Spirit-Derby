@@ -113,7 +113,8 @@
       condition: 'Excellent',
       mood: SD.DATA.MOODS[o.mood] ? o.mood : SD.CONFIG.MOOD.DEFAULT,
       ability: abilityInfo(o.abilityId),
-      owner: null,
+      owner: null,              // owner's display label (presentation only)
+      ownerKey: null,           // owner's login key: THE ownership field (players.claim / release)
       claimedAt: null,
       record: freshRecord(),
       lifetime: { races: 0, wins: 0, totalXp: 0 },
@@ -341,6 +342,11 @@
     if (runner.ribbonColor !== null && typeof runner.ribbonColor !== 'string') runner.ribbonColor = null;
     if (runner.owner != null && typeof runner.owner !== 'string') runner.owner = String(runner.owner);
     if (runner.owner === '') runner.owner = null;
+    // ownerKey (schema 3) is a login key or null; a key without a label shows the key. A legacy
+    // label without a key is resolved against the players by persistence.normalize.
+    if (runner.ownerKey != null && typeof runner.ownerKey !== 'string') runner.ownerKey = String(runner.ownerKey);
+    if (runner.ownerKey === '') runner.ownerKey = null;
+    if (runner.ownerKey && !runner.owner) runner.owner = runner.ownerKey;
     runner.custom = !!runner.custom;
     runner.retired = !!runner.retired;
     const P = SD.CONFIG.PROGRESSION;

@@ -88,7 +88,8 @@
     if (delta !== 0 && !opts.idle) H.lastChangedAt = SD.clock.now();
     if (opts.by && delta > 0) {
       const key = String(opts.by).toLowerCase();
-      H.contributions[key] = U.round1((H.contributions[key] || 0) + delta);
+      // The streamer's console ('#streamer', SD.players.isReservedKey) moves the meter but is not a viewer.
+      if (!(SD.players && SD.players.isReservedKey(key))) H.contributions[key] = U.round1((H.contributions[key] || 0) + delta);
     }
     const crossed = syncThresholds(state, true, opts);
     if (delta !== 0) emitChanged(state, delta, opts.by, opts.reason);

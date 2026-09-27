@@ -158,7 +158,8 @@
           // Also passed to the engine so the cheer shows up as a 'chat' line with the viewer's name.
           chatEffects.push({ runnerId: e.runnerId, type: 'cheer', by: shownName(e.by), count: Math.max(1, e.count || 1) });
         } else if (e.type === 'boost' || e.type === 'sabotage') {
-          for (let k = 0; k < Math.max(1, e.count || 1); k++) chatEffects.push({ runnerId: e.runnerId, type: e.type, by: shownName(e.by) });
+          // by = the display name the race commentary shows; byKey = the viewer's login (Karma, etc.)
+          for (let k = 0; k < Math.max(1, e.count || 1); k++) chatEffects.push({ runnerId: e.runnerId, type: e.type, by: shownName(e.by), byKey: e.by || null });
         }
       });
 
@@ -483,8 +484,9 @@
   // species runs, stats summing to PROGRESSION.STAT_TOTAL (200) and a style-suited ability from the
   // catalog. Admin SPAWN RUNNER and !create <name> both come through here.
   // opts: { name, speciesId, style, abilityId, owner, by, byName }  (`by` = username key of the viewer
-  // who created it: Creator achievement; `byName` = their display name for the log; `owner` = claim it
-  // straight away without the players module).
+  // who created it: Creator achievement; `byName` = their display name for the log; `owner` = the
+  // login of a viewer to own it straight away without SD.players.claim: runner.ownerKey is that
+  // login's key and runner.owner the player's display name, or the login when nobody has joined).
   // Returns the new Runner, or { ok:false, message } when refused (CONFIG.RUNNERS.MAX_ACTIVE reached).
   function spawnRunner(opts) {
     opts = opts || {};
@@ -504,14 +506,17 @@
       });
       // Names must be unique (case / punctuation-insensitive): "Moss Runner 2".
       runner.name = SD.runners.uniqueName(st, runner.name);
-      if (opts.owner) {
-        runner.owner = String(opts.owner);
+      const ownerKey = opts.owner && SD.players ? SD.players.keyOf(opts.owner) : (opts.owner ? String(opts.owner).toLowerCase() : '');
+      if (ownerKey && !(SD.players && SD.players.isReservedKey(ownerKey))) {
+        const holder = st.players && Object.prototype.hasOwnProperty.call(st.players, ownerKey) ? st.players[ownerKey] : null;
+        runner.ownerKey = ownerKey;
+        runner.owner = (holder && holder.displayName) || (SD.players ? SD.players.cleanName(opts.owner) : String(opts.owner));
         runner.claimedAt = SD.clock.now();
       }
       st.runners.push(runner);
       SD.state.log('runner', 'A new runner joins the derby: ' + runner.emoji + ' ' + runner.name + ', a ' + runner.species + ' (' +
         SD.runners.styleName(runner.style) + ')' + (opts.by ? ', created by ' + (opts.byName || opts.by) : '') + '.', 'good', { runnerId: runner.id });
-      emit(SD.EVENTS.RUNNER_SPAWNED, { runner: runner, by: opts.by || opts.owner || null });
+      emit(SD.EVENTS.RUNNER_SPAWNED, { runner: runner, by: opts.by || runner.ownerKey || null });
     });
     return runner;
   }

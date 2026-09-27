@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /*
  * Spirit Derby - tools/fuzz-test.js (M6)
- * Headless season fuzz: a seeded rng drives 12 fictional viewers (two of them mods, plus the
+ * Headless season fuzz: a seeded rng drives 15 fictional viewers (three of them mods, plus the
  * streamer's own console) who spam random commands - every registered command and alias with
  * valid, invalid and hostile arguments, unknown runners, spam bursts, mid-race attempts, mod
  * commands from non-mods, !bet all, !create - across 3 full seasons, while races start at
@@ -19,7 +19,13 @@
  *     record is scanned once, ticks included, when it is recorded)
  *   - runners: 1 <= stat <= cap, 0 <= energy <= maxEnergy, maxEnergy / cap match the level,
  *     0 <= fatigue <= 120, condition matches fatigue, unique names, at most MAX_ACTIVE active
- *   - players: SP integer >= 0, stats >= 0, one runner per viewer (owner <-> runnerId agree)
+ *   - players: SP integer >= 0, stats >= 0, one runner per viewer: every owned runner's ownerKey is
+ *     a player whose runnerId points back at it (no orphans), every player.runnerId points at a runner
+ *     that player owns, the owner label is that player's display name; no reserved ('#') key is ever
+ *     a player, a hype contributor or an achiever (review batch 2). Some viewers have display names
+ *     that are not their login (きつね for kitsune_jp, "Mod Mia" for modmia, "Fox Fan" for user_42),
+ *     the streamer's console speaks as '#streamer', and a spoofed '#streamer' arrives from Twitch;
+ *     SEND AS <viewer> (source admin, the viewer's login) plays and must succeed at least once
  *   - at most one open bet per player, bets within limits on known runners; queued effects within caps
  *   - currentRace is null or a well-formed record in a valid status; hype within 0..max
  * After every race (and every 25 commands with no race running): the finished record is sane
@@ -97,9 +103,20 @@ function S() { return SD.state.get(); }
 const VIEWERS = [
   { name: 'FoxFan' }, { name: 'MothMom' }, { name: 'AcornAndy' }, { name: 'WispWatcher' },
   { name: 'BrambleBob' }, { name: 'LanternLiz', isMod: true }, { name: 'Raid_Rick' }, { name: 'xX_Owl_Xx' },
-  { name: 'Zoë_Ümlaut' }, { name: '@AtSign' }, { name: 'Spam Sam' }, { name: 'ModMaya', isMod: true }
+  { name: 'Zoë_Ümlaut' }, { name: '@AtSign' }, { name: 'Spam Sam' }, { name: 'ModMaya', isMod: true },
+  // name = the login (player key), display = a display name that is NOT the login in other case
+  { name: 'kitsune_jp', display: 'きつね' }, { name: 'modmia', display: 'Mod Mia', isMod: true }, { name: 'user_42', display: 'Fox Fan' }
 ];
-const STREAMER = { name: 'Streamer', admin: true };
+const STREAMER = { name: SD.players.STREAMER_KEY, display: 'Streamer', admin: true };
+const SPOOF = { name: '#Streamer', display: 'Streamer', spoof: true };   // a Twitch / bridge line claiming the console key
+// SEND AS <viewer>: the streamer acting for a viewer, exactly as SD.ui.admin.sendAs() does it (the
+// viewer's login, source 'admin' = no cooldowns and the open-training bypass, mod rights, the
+// player's display name). Unlike the '#streamer' console this actor plays.
+function sendAsActor() {
+  const key = SD.players.keyOf(pick(VIEWERS).name);
+  const p = SD.state.player(key);
+  return { name: key, display: (p && p.displayName) || key, sendAs: true };
+}
 const SOURCES = ['twitch', 'twitch', 'twitch', 'bridge', 'sim'];
 
 function pick(arr) { return arr[rng.int(arr.length)]; }
@@ -133,7 +150,7 @@ function runnerArg() {
   ]);
 }
 function viewerArg() {
-  return weighted([[5, pick(VIEWERS).name], [1, 'Streamer'], [2, pick(['nobody', '@', 'Zoe', 'spam', 'mothmom'])], [1, pick(JUNK)]]);
+  return weighted([[5, pick(VIEWERS).name], [1, pick(VIEWERS).display || 'Streamer'], [1, 'Streamer'], [2, pick(['nobody', '@', 'Zoe', 'spam', 'mothmom'])], [1, pick(JUNK)]]);
 }
 
 // A chat line for `v`. Mostly real commands, some aliases, unknown commands and plain chat.
@@ -268,12 +285,18 @@ function checkState(where) {
     ok(!names[k], 'runner: unique names', where + ' ' + r.name);
     names[k] = true;
     if (!r.retired) active++;
-    if (r.owner) {
-      const ok2 = SD.players.keyOf(r.owner);
-      ok(!owners[ok2], 'players: one runner per viewer', where + ' ' + r.owner + ' owns ' + (owners[ok2] || '') + ' and ' + r.name);
-      owners[ok2] = r.name;
-      const p = st.players[ok2];
-      if (p) ok(p.runnerId === r.id, 'players: runner.owner <-> player.runnerId agree', where + ' ' + r.name + ' owner ' + r.owner + ' runnerId ' + p.runnerId);
+    if (r.owner || r.ownerKey) {
+      const k2 = r.ownerKey;
+      ownerChecks++;
+      ok(typeof k2 === 'string' && !!k2 && !!r.owner, 'runners: owner label <-> ownerKey both set', where + ' ' + r.name + ' ' + r.owner + ' / ' + k2);
+      ok(!owners[k2], 'players: one runner per viewer', where + ' ' + k2 + ' owns ' + (owners[k2] || '') + ' and ' + r.name);
+      owners[k2] = r.name;
+      const p = Object.prototype.hasOwnProperty.call(st.players, k2) ? st.players[k2] : null;
+      if (ok(!!p, 'players: every owned runner belongs to a player (no orphans)', where + ' ' + r.name + ' ownerKey ' + k2 + ' label ' + r.owner)) {
+        ok(p.runnerId === r.id, 'players: runner.ownerKey <-> player.runnerId agree', where + ' ' + r.name + ' owner ' + k2 + ' runnerId ' + p.runnerId);
+        ok(r.owner === p.displayName, "runners: the owner label is the owner's display name", where + ' ' + r.name + ' ' + r.owner + ' / ' + p.displayName);
+        if (p.displayName.toLowerCase() !== k2) distinctOwnerChecks++;
+      }
     }
   });
   ok(active <= C.RUNNERS.MAX_ACTIVE, 'runners: at most MAX_ACTIVE active', where + ' ' + active);
@@ -282,12 +305,22 @@ function checkState(where) {
   Object.keys(st.players).forEach(function (k) {
     const p = st.players[k];
     ok(p.username === k, 'players: keyed by username', where + ' ' + k);
+    ok(!SD.players.isReservedKey(k), 'identity: no reserved key is a player', where + ' ' + k);
+    if (p.runnerId != null) {
+      runnerIdChecks++;
+      const mine = SD.state.runnerById(p.runnerId, st);
+      ok(!!mine && !mine.retired && mine.ownerKey === k, 'players: player.runnerId points at a runner that player owns',
+        where + ' ' + k + ' runnerId ' + p.runnerId + ' ownerKey ' + (mine && mine.ownerKey));
+    }
     ok(Number.isInteger(p.spiritPoints) && p.spiritPoints >= 0, 'players: SP is an integer >= 0', where + ' ' + k + ' ' + p.spiritPoints);
     ok(SD.players.STAT_KEYS.every(function (s) { return p.stats[s] >= 0 && p.lifetime[s] >= 0; }), 'players: stats >= 0', where + ' ' + k);
     const expect = (spBase[k] || 0) + p.stats.spEarnedTotal - p.stats.spSpentTotal;
     ok(p.spiritPoints === expect, 'players: SP ledger (start + earned - spent = balance)', where + ' ' + k + ' balance ' + p.spiritPoints + ' expected ' + expect +
       ' (start ' + (spBase[k] || 0) + ', earned ' + p.stats.spEarnedTotal + ', spent ' + p.stats.spSpentTotal + ')');
   });
+
+  ok(!Object.keys(st.hype.contributions).some(SD.players.isReservedKey), 'identity: no hype credit for a reserved key', where);
+  ok(!st.achievements.unlocked.some(function (a) { return SD.players.isReservedKey(a.username); }), 'identity: no achievement for a reserved key', where);
 
   // bets
   const betBy = {};
@@ -415,6 +448,9 @@ function tally(res) {
 }
 
 let commandsRun = 0;
+let spoofs = 0;
+let sendAsLines = 0, sendAsOk = 0;
+let ownerChecks = 0, runnerIdChecks = 0, distinctOwnerChecks = 0;
 let lockedAttempts = 0;
 let createdOk = 0;
 function send(v, text) {
@@ -423,13 +459,13 @@ function send(v, text) {
   const raceBefore = st.currentRace ? st.currentRace.record.id + ':' + st.currentRace.status : null;
   const dayEventBefore = st.season.activeDayEvent;
   const errsBefore = consoleErrors.length;
-  const source = v.admin ? 'admin' : pick(SOURCES);
-  const isMod = !!v.isMod || !!v.admin;
+  const source = v.admin || v.sendAs ? 'admin' : pick(SOURCES);
+  const isMod = !!v.isMod || !!v.admin || !!v.sendAs;
   const parsed = SD.commands.parse(text);
   const def = parsed ? SD.commands.get(parsed.name) : null;
   let res;
   try {
-    res = SD.processCommand(v.name, text, { source: source, isMod: isMod, displayName: v.name });
+    res = SD.processCommand(v.name, text, { source: source, isMod: isMod, displayName: v.display || v.name });
   } catch (e) {
     ok(false, 'pipeline: no exception escapes processCommand', text + ' -> ' + (e && e.stack ? e.stack.split('\n').slice(0, 3).join(' | ') : e));
     return null;
@@ -441,6 +477,18 @@ function send(v, text) {
   ok(!/Something went wrong/.test(res.message), 'pipeline: no handler crashed', where + ' -> ' + res.message);
   ok(consoleErrors.length === errsBefore, 'pipeline: no console.error', where + ' -> ' + consoleErrors.slice(errsBefore).join(' || ').slice(0, 300));
   if (def && def.name === 'create' && res.ok) createdOk++;
+  if (v.spoof) {
+    spoofs++;
+    ok(!res.ok && res.reserved === true && !res.isCommand, 'identity: a reserved key from ' + source + ' is refused', where + ' -> ' + res.message);
+  }
+  if (v.admin && res.ok && def && (def.requiresPlayer || def.requiresRunner || def.name === 'join')) {
+    ok(false, 'identity: the streamer console never plays', where + ' -> ' + res.message);
+  }
+  if (v.sendAs) {
+    sendAsLines++;
+    ok(!res.reserved, 'identity: SEND AS a viewer login is never treated as the console', where + ' -> ' + res.message);
+    if (res.ok && def && (def.requiresPlayer || def.requiresRunner || def.name === 'join')) sendAsOk++;
+  }
 
   // race lock
   const after = S();
@@ -635,7 +683,7 @@ while (S().season.number < TARGET_SEASON && steps < MAX_STEPS) {
   const st = S();
   if (!seasonSeen[st.season.number]) { seasonSeen[st.season.number] = true; console.log('  season ' + st.season.number + ' begins at step ' + steps + ' (' + commandsRun + ' commands so far)'); }
   if (chance(S().currentRace ? 0.5 : 0.25)) director();
-  const v = chance(0.04) ? STREAMER : pick(VIEWERS);
+  const v = chance(0.04) ? STREAMER : (chance(0.01) ? SPOOF : (chance(0.05) ? sendAsActor() : pick(VIEWERS)));
   const text = lineFor(v);
   if (chance(0.04)) {
     // spam burst: the same line 5-12 times within a second
@@ -666,6 +714,10 @@ ok(steps < MAX_STEPS, 'the fuzzed game reaches Season ' + TARGET_SEASON + ' by p
 ok(st.season.history.length >= SEASONS, 'season history has ' + SEASONS + ' entries', st.season.history.length);
 ok(createdOk > 0, '!create succeeded at least once', createdOk);
 ok(lockedAttempts > 0, 'mid-race locked commands were attempted', lockedAttempts);
+ok(ownerChecks > 0 && runnerIdChecks > 0, 'the owner <-> runnerId invariant actually ran (both directions)', ownerChecks + ' / ' + runnerIdChecks);
+ok(distinctOwnerChecks > 0, 'viewers whose display name is not their login owned runners', distinctOwnerChecks);
+ok(spoofs > 0, 'spoofed #streamer lines were sent', spoofs);
+ok(sendAsOk > 0, 'SEND AS (source admin, a viewer login) ran player commands successfully', sendAsOk + ' of ' + sendAsLines);
 ok(consoleErrors.length === 0, 'no console.error during the whole run', consoleErrors.slice(0, 3).join(' || '));
 
 console.log('\nCommand-outcome histogram (' + commandsRun + ' commands):');
@@ -676,6 +728,7 @@ Object.keys(hist).sort(function (a, b) { return hist[b].total - hist[a].total ||
 });
 console.log('\nRaces finished ' + racesFinished + ', aborted ' + racesAborted + ', pauses ' + pauses + ', manual next days ' + nextDays +
   ', settings changes ' + settingsChanges + ', admin spawns ' + spawns + ', reloads ' + reloads + ' (' + reloadsMidRace + ' mid-race), season resets ' + seasonResets + ', !create ok ' + createdOk + ', locked attempts ' + lockedAttempts +
+  ', spoofed console lines ' + spoofs + ', SEND AS lines ' + sendAsLines + ' (' + sendAsOk + ' player commands ok), owner checks ' + ownerChecks + ' (' + distinctOwnerChecks + ' by non-case-variant names), runnerId checks ' + runnerIdChecks +
   ', export/import round trips ' + roundTrips + ', read-model checks ' + readChecks + ', active runners ' + SD.state.activeRunners(st).length + ', players ' + Object.keys(st.players).length);
 console.log('Reached Season ' + TARGET_SEASON + ' by playing after ' + steps + ' steps (' + SEASONS + ' seasons of ' + SD.CONFIG.SEASON.DAYS + ' days, ' + racesFinished + ' races finished), then RESET SEASON -> Season ' + st.season.number + '. ' + ((Date.now() - t0) / 1000).toFixed(1) + ' s');
 

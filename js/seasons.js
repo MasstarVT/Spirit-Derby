@@ -104,7 +104,7 @@
     const table = state.runners.filter(function (r) { return r.record && r.record.races > 0; }).map(function (r) {
       return {
         runnerId: r.id, name: r.name, emoji: r.emoji, badgeColor: r.badgeColor, ribbonColor: r.ribbonColor || null,
-        owner: r.owner || null, wins: r.record.wins || 0, races: r.record.races || 0, podiums: r.record.podiums || 0,
+        owner: r.ownerKey ? (r.owner || r.ownerKey) : null, ownerKey: r.ownerKey || null, wins: r.record.wins || 0, races: r.record.races || 0, podiums: r.record.podiums || 0,
         xp: Math.round(r.totalXp || 0), level: r.level, bestTimeSec: r.record.bestTimeSec
       };
     });
@@ -121,9 +121,13 @@
       if (earned > 0 && (!mvp || earned > mvp.sp)) mvp = { player: p, sp: earned };
     });
 
+    // Top hype: viewers only (a contribution key with no player never wins the card). The console's
+    // pre-schema-3 credit under 'streamer' is dropped by persistence MIGRATIONS[3]; new console
+    // actions ('#streamer') earn no credit at all (SD.hype.add).
     let topHype = null;
     Object.keys(state.hype.contributions || {}).sort().forEach(function (u) {
       const v = state.hype.contributions[u];
+      if (!(state.players && Object.prototype.hasOwnProperty.call(state.players, u))) return;
       if (v > 0 && (!topHype || v > topHype.hype)) topHype = { username: u, displayName: displayOf(state, u), hype: v };
     });
 
@@ -161,6 +165,7 @@
       championWins: champ ? champ.wins : 0,
       championXp: champ ? champ.xp : 0,
       championOwner: champ ? champ.owner : null,
+      championOwnerKey: champ ? champ.ownerKey : null,
       mvpUsername: mvp ? (mvp.player.displayName || mvp.player.username) : null,
       mvpKey: mvp ? mvp.player.username : null,
       mvpSpEarned: mvp ? mvp.sp : 0,
@@ -194,6 +199,7 @@
       championEmoji: sum.championEmoji,
       championWins: sum.championWins,
       championOwner: sum.championOwner,
+      championOwnerKey: sum.championOwnerKey,
       mvpUsername: sum.mvpUsername,
       mvpSpEarned: sum.mvpSpEarned,
       totalRaces: sum.totalRaces,
@@ -201,7 +207,7 @@
       topHypeContributor: sum.topHypeContributor,
       achievementsCount: sum.achievementsCount,
       runnerTable: sum.runnerTable.slice(0, CFG.SEASON.HISTORY_TABLE_N || 10).map(function (r) {
-        return { rank: r.rank, runnerId: r.runnerId, name: r.name, emoji: r.emoji, wins: r.wins, races: r.races, podiums: r.podiums, xp: r.xp, owner: r.owner };
+        return { rank: r.rank, runnerId: r.runnerId, name: r.name, emoji: r.emoji, wins: r.wins, races: r.races, podiums: r.podiums, xp: r.xp, owner: r.owner, ownerKey: r.ownerKey || null };
       })
     });
 
@@ -224,6 +230,7 @@
       r.fatigue = CFG.CONDITION.START_FATIGUE;
       r.mood = CFG.MOOD.DEFAULT;
       r.owner = null;
+      r.ownerKey = null;
       r.claimedAt = null;
       r.record = SD.runners.freshRecord();
       r.trainStreak = { stat: null, count: 0 };

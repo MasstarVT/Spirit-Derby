@@ -42,14 +42,13 @@
     return P() ? P().keyOf(name) : String(name == null ? '' : name).trim().replace(/^@+/, '').toLowerCase();
   }
 
-  // A player by username key or display name (runner.owner and race-event names store display names).
+  // A player by login key only. Display names are presentation: matching them would credit the
+  // wrong viewer (a bridge viewer showing someone else's login as their name), and ownership is
+  // keyed by login (runner.ownerKey, entrant.ownerKeyAtRace). Reserved actor keys ('#streamer')
+  // are never players, so the streamer's console earns nothing here.
   function playerByName(state, name) {
     if (!P() || name == null || name === '') return null;
-    const p = P().get(state, name);
-    if (p) return p;
-    const all = P().all(state);
-    for (let i = 0; i < all.length; i++) if (all[i].displayName === name) return all[i];
-    return null;
+    return P().get(state, name);
   }
 
   function store(state) {
@@ -206,7 +205,8 @@
       const x = { recordId: rec.id };
       const photo = !!(rec.summary && rec.summary.photoFinish);
       rec.results.forEach(function (res) {
-        const owner = res.ownerAtRace ? playerByName(state, res.ownerAtRace) : null;
+        const ownerKey = P().resultOwnerKey(rec, res);
+        const owner = ownerKey ? playerByName(state, ownerKey) : null;
         if (!owner) return;
         const u = owner.username;
         if (res.place === 1) {
@@ -223,8 +223,10 @@
         if (photo && res.place <= 2) out.push(unlock(state, u, 'photoFinish', x));
       });
       (rec.events || []).forEach(function (ev) {
-        if (ev.kind === 'chat' && ev.data && ev.data.type === 'sabotage' && ev.data.backfire && ev.data.by) {
-          out.push(unlock(state, ev.data.by, 'karma', x));
+        // data.by is the display name the commentary shows; data.byKey the saboteur's login (records
+        // from before review batch 2 only have data.by, which is then read as a login).
+        if (ev.kind === 'chat' && ev.data && ev.data.type === 'sabotage' && ev.data.backfire && (ev.data.byKey || ev.data.by)) {
+          out.push(unlock(state, ev.data.byKey || ev.data.by, 'karma', x));
         }
       });
       return out.concat(CHECKS.betResolved(state, { bets: rec.bets, recordId: rec.id }));
@@ -232,14 +234,15 @@
 
     season: function (state, c) {
       const s = c.summary;
-      if (!s || !s.championOwner) return [];
-      return [unlock(state, s.championOwner, 'seasonChampion')];
+      const k = s ? (s.championOwnerKey || (s.championOwner ? keyOf(s.championOwner) : null)) : null;
+      if (!k) return [];
+      return [unlock(state, k, 'seasonChampion')];
     },
 
     levelup: function (state, c) {
       const r = c && c.runnerId ? SD.state.runnerById(c.runnerId, state) : null;
-      if (!r || !r.owner || r.level < (trig('doubleDigits').levelMin || 10)) return [];
-      return [unlock(state, r.owner, 'doubleDigits')];
+      if (!r || !r.ownerKey || r.level < (trig('doubleDigits').levelMin || 10)) return [];
+      return [unlock(state, r.ownerKey, 'doubleDigits')];
     },
 
     sp: function (state, c) {
@@ -341,7 +344,7 @@
     on(E.SEASON_STARTED, function () {
       const sum = endedSummary;
       endedSummary = null;
-      if (sum && sum.championOwner) run('season', { summary: sum });
+      if (sum && (sum.championOwnerKey || sum.championOwner)) run('season', { summary: sum });
     });
     on(E.RUNNER_LEVELUP, function (p) { if (p && p.level >= (trig('doubleDigits').levelMin || 10)) run('levelup', p); });
     // The listeners below pre-check so a no-op never opens a mutation (no extra state:changed / save).
