@@ -189,8 +189,14 @@ section('A. M1 fixture: load, migrate, play, round trip');
   const json = P.exportJSON();
   const imp = P.importJSON(json);
   ok(imp.ok, 'importJSON of the export succeeds');
-  const d1 = sameState(JSON.parse(json), SD.state.get());
-  ok(!d1, 'export -> import is lossless (except the "Save imported." log line)', d1);
+  // Review batch 5: an export leaves out meta.seedSalt (the import draws a new salt), so the salt is
+  // compared separately and everything else must match.
+  ok(!('seedSalt' in JSON.parse(json).meta), 'the export does not carry meta.seedSalt');
+  ok(Number.isInteger(SD.state.get().meta.seedSalt), 'the imported game has a seed salt again');
+  const importedNoSalt = JSON.parse(JSON.stringify(SD.state.get()));
+  delete importedNoSalt.meta.seedSalt;
+  const d1 = sameState(JSON.parse(json), importedNoSalt);
+  ok(!d1, 'export -> import is lossless (except the "Save imported." log line and the new seed salt)', d1);
   // save -> load
   P.save();
   const again = P.load();
@@ -368,7 +374,8 @@ section('E. Backup key');
   ok(/"schemaVersion":99/.test(fakeStorage.getItem(P.BACKUP_KEY)), 'and backed up');
 
   boot(SD.state.create({ seedSalt: 31 }));
-  const current = P.exportJSON();
+  // The backup is the full local state (salt included: it never leaves this PC), not an export.
+  const current = JSON.stringify(SD.state.get());
   const imp = P.importJSON(JSON.stringify(SD.state.create({ seedSalt: 32 })));
   ok(imp.ok, 'import ok');
   eq(fakeStorage.getItem(P.BACKUP_KEY), current, 'IMPORT JSON backs up the game it replaces');

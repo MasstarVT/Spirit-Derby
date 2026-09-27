@@ -208,6 +208,24 @@
     }
   }
 
+  // ------------------------------------------------------------------ entropy (review batch 5)
+  // The core never touches crypto: it asks SD.entropy.next() for fresh randomness (the seed salt of
+  // a new game, a new salt on every load / import and race start, and each training / !create / day
+  // roll). Installed here, before boot creates or loads the game. crypto.getRandomValues works on
+  // file:// and in OBS; the Math.random fallback (very old browsers only) is weaker but still keeps
+  // the salt from being a hash of the creation time.
+  function installEntropy() {
+    if (!SD.entropy || typeof SD.entropy.set !== 'function') return;
+    const c = typeof crypto !== 'undefined' ? crypto : (window.crypto || window.msCrypto);
+    if (c && typeof c.getRandomValues === 'function') {
+      const buf = new Uint32Array(1);
+      SD.entropy.set(function () { c.getRandomValues(buf); return buf[0]; });
+    } else {
+      SD.entropy.set(function () { return ((Math.random() * 4294967296) ^ Date.now()) >>> 0; });
+    }
+  }
+  installEntropy();
+
   // ------------------------------------------------------------------ boot
   function boot() {
     if (!SD.ui.dom) { bootError(new Error('js/ui/dom.js did not load.')); return; }

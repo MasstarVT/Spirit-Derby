@@ -168,9 +168,11 @@
     // Hand out any remainder to the most-favoured stats that are still under cap.
     const order = STATS.map(function (_, i) { return i; }).sort(function (a, b) { return w[b] - w[a]; });
     let rem = total - vals.reduce(function (a, b) { return a + b; }, 0);
-    let guard = 0;
+    // Review batch 5: a separate index, so the first point goes to order[0] (the loop used to start
+    // at order[1], and the most-favoured stat never got one). No rng draws change.
+    let guard = 0, j = 0;
     while (rem > 0 && guard++ < 1000) {
-      const i = order[guard % order.length];
+      const i = order[j++ % order.length];
       if (vals[i] < cap) { vals[i]++; rem--; }
     }
     const stats = {};

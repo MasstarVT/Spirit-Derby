@@ -51,7 +51,14 @@
     opts = opts || {};
     const CFG = SD.CONFIG;
     const now = SD.clock.now();
-    const salt = opts.seedSalt != null ? (Number(opts.seedSalt) >>> 0) : SD.rng.hash('spirit-derby:' + now);
+    // Review batch 5: the salt comes from SD.entropy (crypto in the browser) when a source is
+    // installed; only Node / the tests (no source) fall back to the old creation-time hash.
+    let salt;
+    if (opts.seedSalt != null) salt = Number(opts.seedSalt) >>> 0;
+    else {
+      const e = SD.entropy ? SD.entropy.next() : null;
+      salt = e != null ? e : SD.rng.hash('spirit-derby:' + now);
+    }
     const st = {
       schemaVersion: SD.persistence ? SD.persistence.SCHEMA_VERSION : 1,
       meta: { createdAt: now, updatedAt: now, raceCounter: 0, seedSalt: salt, runnerCounter: 0, actionCounter: 0, betCounter: 0 },
@@ -83,6 +90,20 @@
       st.season.activeDayEvent = ev ? ev.id : null;
     }
     return st;
+  }
+
+  // Review batch 5: mix a fresh SD.entropy value into st.meta.seedSalt so every later race seed
+  // (and the next paddock) is independent of anything seen or saved before: called by
+  // persistence.load / importJSON (a rolled-back save cannot replay races the audience watched)
+  // and by game.startRace (one race's seed, e.g. in a pasted COPY LAST RACE JSON, says nothing
+  // about the next). new = (seedFrom(old, 'resalt', tag) + entropy) >>> 0, uniform when the
+  // entropy is. Without an entropy source (Node / tests) nothing changes and it returns false.
+  function resalt(st, tag) {
+    if (!st || !st.meta || !SD.entropy) return false;
+    const e = SD.entropy.next();
+    if (e == null) return false;
+    st.meta.seedSalt = (SD.rng.seedFrom(Number(st.meta.seedSalt) >>> 0, 'resalt', tag == null ? '' : tag) + e) >>> 0;
+    return true;
   }
 
   function get() { return current; }
@@ -206,6 +227,7 @@
   SD.state = {
     create: create,
     defaultSettings: defaultSettings,
+    resalt: resalt,
     get: get,
     set: set,
     mutate: mutate,

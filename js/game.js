@@ -31,10 +31,16 @@
     return result;
   }
 
-  // Deterministic per-action randomness (seedSalt + action counter): no Math.random.
+  // Per-action randomness (seedSalt + action counter): no Math.random. Review batch 5: when an
+  // SD.entropy source is installed (the browser), a fresh value is added to the seed, so training
+  // crits / fails, !create rolls and day events can be neither predicted from the counter nor
+  // replayed by a rolled-back save. Without one (Node / tests) it is deterministic as before.
+  // Call it only once the action is certain to happen (refusals must not advance the counter).
   function actionRng(s, tag) {
     s.meta.actionCounter = (s.meta.actionCounter || 0) + 1;
-    return SD.rng.create(SD.rng.seedFrom(s.meta.seedSalt, tag, s.meta.actionCounter));
+    const seed = SD.rng.seedFrom(s.meta.seedSalt, tag, s.meta.actionCounter);
+    const e = SD.entropy ? SD.entropy.next() : null;
+    return SD.rng.create(e == null ? seed : (seed + e) >>> 0);
   }
 
   // Accepts a runner id ('r03') or a name query ('moss').
@@ -74,17 +80,27 @@
     return { ok: true };
   }
 
-  // Seed for a race number: seedFrom(seedSalt, season, day, raceCounter), or the
-  // debug override when settings.debug && settings.seedOverride is set.
-  function resolveSeed(s, override, counter) {
+  // A fixed seed: an explicit startRace({ seed }) or the debug override (settings.debug &&
+  // settings.seedOverride); null when the race seed is the normal salted one.
+  function fixedSeed(s, override) {
     if (override != null && override !== '' && isFinite(Number(override))) return Number(override) >>> 0;
     if (s.settings.debug && s.settings.seedOverride != null && s.settings.seedOverride !== '' &&
         isFinite(Number(s.settings.seedOverride))) {
       return Number(s.settings.seedOverride) >>> 0;
     }
-    return SD.rng.seedFrom(s.meta.seedSalt, s.season.number, s.season.day, counter);
+    return null;
   }
 
+  // Field seed for a race number: seedFrom(seedSalt, season, day, raceCounter), or a fixed seed.
+  // It draws the field and the lane order, which the paddock shows before bets close. The race
+  // itself runs on the gate seed (see startRace), which adds fresh entropy when a source exists.
+  function resolveSeed(s, override, counter) {
+    const fixed = fixedSeed(s, override);
+    return fixed != null ? fixed : SD.rng.seedFrom(s.meta.seedSalt, s.season.number, s.season.day, counter);
+  }
+
+  // The next race's field seed (what the paddock preview draws from). With an SD.entropy source the
+  // race itself runs on a gate seed that adds fresh entropy at startRace, so this is not record.seed.
   function seedForRace() {
     const s = cur();
     return s ? resolveSeed(s, null, s.meta.raceCounter + 1) : 0;
@@ -157,9 +173,20 @@
 
     return commit('race:start', function (st, emit) {
       st.meta.raceCounter += 1;
-      const seed = resolveSeed(st, opts.seed, st.meta.raceCounter);
-      const fieldRng = SD.rng.create(SD.rng.seedFrom(seed, 'field'));
+      const fixed = fixedSeed(st, opts.seed) != null;
+      const fieldSeed = resolveSeed(st, opts.seed, st.meta.raceCounter);
+      const fieldRng = SD.rng.create(SD.rng.seedFrom(fieldSeed, 'field'));
       const field = fieldRng.shuffle(SD.race.selectField(st, count, fieldRng)); // shuffle = lane draw
+      // Review batch 5 (fix round 1): the paddock shows this field and lane order before bets close,
+      // and for a big field that is enough to brute-force fieldSeed over all 2^32 values. So the race
+      // does not run on fieldSeed: the gate seed adds a fresh SD.entropy value drawn now, after bets
+      // have closed, and the gate moods, the track name and the simulation all come from it. The
+      // record stores the gate seed, so REPLAY LAST RACE and COPY LAST RACE JSON still reproduce the
+      // race. Without an entropy source (Node / tests), or with a fixed seed (debug override, explicit
+      // opts.seed), the gate seed is fieldSeed and every draw is exactly as before.
+      const gateEntropy = fixed || !SD.entropy ? null : SD.entropy.next();
+      const seed = gateEntropy == null ? fieldSeed : (fieldSeed + gateEntropy) >>> 0;
+      const gateRng = gateEntropy == null ? fieldRng : SD.rng.create(SD.rng.seedFrom(seed, 'gate'));
       const hype = st.hype.value;
 
       // Crowd energy rubs off on the runners before the gates open. The gate mood lives on the race
@@ -168,8 +195,8 @@
       const H = C.HYPE, M = SD.CONFIG.MOOD;
       const gateField = field.map(function (r) {
         let mood = null;
-        if (hype >= H.AWAKENED && fieldRng.chance(M.CHAOTIC_RACE_CHANCE)) mood = 'Chaotic';
-        else if (hype >= H.FERAL && fieldRng.chance(M.FIRED_UP_RACE_CHANCE)) mood = 'Fired Up';
+        if (hype >= H.AWAKENED && gateRng.chance(M.CHAOTIC_RACE_CHANCE)) mood = 'Chaotic';
+        else if (hype >= H.FERAL && gateRng.chance(M.FIRED_UP_RACE_CHANCE)) mood = 'Fired Up';
         return mood && mood !== r.mood ? Object.assign({}, r, { mood: mood }) : r;
       });
 
@@ -205,7 +232,7 @@
       });
       const active = SD.state.activeRunners(st);
       const rosterAvgLevel = active.reduce(function (a, r) { return a + r.level; }, 0) / Math.max(1, active.length);
-      const trackName = fieldRng.pick(SD.DATA.TRACK_NAMES);
+      const trackName = gateRng.pick(SD.DATA.TRACK_NAMES);
       const indexInDay = st.season.raceIndexInDay + 1;
       const record = SD.race.simulate({
         id: 's' + st.season.number + 'd' + st.season.day + 'r' + indexInDay + '-' + st.meta.raceCounter,
@@ -224,6 +251,9 @@
         rosterAvgLevel: rosterAvgLevel
       });
       st.currentRace = { record: record, status: 'countdown', startedAt: SD.clock.now() };
+      // Review batch 5: fresh entropy for every later race (no-op without an SD.entropy source), so
+      // this record's seed - shown in debug and COPY LAST RACE JSON - predicts nothing after it.
+      SD.state.resalt(st, 'race:' + st.meta.raceCounter);
       // Bets on runners that did not make the field (or that are odds-on at the gate) are refunded; the
       // rest are locked in at min(quoted, gate odds). They count (stats, hype, High Roller) only when the
       // race finishes and they are settled, so an aborted or interrupted race counts nothing.
@@ -443,6 +473,10 @@
     if (!SD.training.normalizeStat(stat)) {
       return fail('Unknown stat "' + (stat == null ? '' : stat) + '". Try speed, stamina, power, wisdom or luck.');
     }
+    // Review batch 5: every refusal (too tired, stat maxed) is decided before the commit, so a refused
+    // train draws no action RNG (a spammed refusal cannot steer the next roll) and emits nothing.
+    const refused = SD.training.refusal(runner, stat);
+    if (refused) return refused;
     let res;
     commit('runner:train', function (st, emit) {
       res = SD.training.train(st, runner, stat, { rng: actionRng(st, 'train'), by: by });

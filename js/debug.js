@@ -32,6 +32,9 @@
   }
 
   // The record plus a small header so a pasted bug report says which build / save produced it.
+  // Safe to share (review batch 5): it holds that race's own seed (so it can be replayed) but never
+  // meta.seedSalt, and with an SD.entropy source (the browser) the salt is re-drawn at every race
+  // start, so the seed of this race predicts nothing about the next one.
   function lastRaceJSON(pretty) {
     const rec = lastRace();
     if (!rec) return '';

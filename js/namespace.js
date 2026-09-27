@@ -29,6 +29,29 @@
   };
 
   // ---------------------------------------------------------------------------
+  // Injectable entropy (review batch 5). Core code never touches crypto or Math.random: it asks
+  // SD.entropy.next(), which returns a uint32 from the installed source, or null when none is
+  // installed. The browser boot (js/main.js) installs crypto.getRandomValues; Node and the test
+  // suites install nothing, so every seed stays reproducible there. With a source installed the
+  // seed salt is drawn from it (state.create), re-drawn on every load / import and at every race
+  // start (SD.state.resalt), and each per-action roll (training, !create, day events) mixes in a
+  // fresh value, so no race or roll can be predicted from saved or previously seen data.
+  // SD.entropy.set(fn) installs fn() -> number (only its low 32 bits are used); set(null) / reset()
+  // removes it. A source that throws or returns a non-number counts as "no entropy" for that call.
+  let entropyFn = null;
+  SD.entropy = {
+    next: function () {
+      if (!entropyFn) return null;
+      let v;
+      try { v = entropyFn(); } catch (e) { return null; }
+      return typeof v === 'number' && isFinite(v) ? (v >>> 0) : null;
+    },
+    set: function (fn) { entropyFn = typeof fn === 'function' ? fn : null; },
+    reset: function () { entropyFn = null; },
+    available: function () { return !!entropyFn; }
+  };
+
+  // ---------------------------------------------------------------------------
   // Small pure helpers used across core and UI.
   // ---------------------------------------------------------------------------
   function clamp(v, lo, hi) {

@@ -16,6 +16,8 @@
  *  - reconcileRoster(state) (M6) spawns SD.DATA.ROSTER entries a saved game does not have yet
  *    (the roster is data-driven: add a runner to data.js and existing saves pick it up).
  *  - Every successful save emits state:saved { at, bytes, stats } (admin SAVE indicator).
+ *  - Review batch 5: load() / importJSON() re-salt meta.seedSalt from SD.entropy (no replayed races
+ *    after a rollback); exportJSON() leaves the salt out; the debug seed override is never saved.
  */
 (function (SD) {
   'use strict';
@@ -121,6 +123,14 @@
     try { SD.bus.emit(SD.EVENTS.STATE_SAVED, { at: lastSavedAt, bytes: lastBytes, stats: stats() }); } catch (e) { /* never break a save */ }
   }
 
+  // What save() writes (review batch 5): the state without the debug seed override. A fixed seed
+  // is a testing tool for this browser session only; saved, it came back on every reload and kept
+  // replaying the same races on stream. Returns st itself when there is nothing to leave out.
+  function forStorage(st) {
+    if (!isObj(st.settings) || st.settings.seedOverride == null) return st;
+    return Object.assign({}, st, { settings: Object.assign({}, st.settings, { seedOverride: null }) });
+  }
+
   // Write the current state now. Returns true on success.
   function save() {
     const st = SD.state && SD.state.get();
@@ -129,14 +139,14 @@
     trimHistory(st);
     let json;
     try {
-      json = JSON.stringify(st);
+      json = JSON.stringify(forStorage(st));
       writeRaw(KEY, json);
     } catch (e) {
       // Most likely a quota error: keep only 2 full race logs and retry once.
       lastError = e;
       try {
         trimHistory(st, 2);
-        json = JSON.stringify(st);
+        json = JSON.stringify(forStorage(st));
         writeRaw(KEY, json);
       } catch (e2) {
         lastError = e2;
@@ -628,23 +638,42 @@
     }
     const rosterAdded = lastRosterAdded.slice();
     recoverInterruptedRace(st);
+    freshSeeds(st, 'load');
     return { state: st, fromStorage: true, migratedFrom: v.version < SCHEMA_VERSION ? v.version : null, rosterAdded: rosterAdded };
+  }
+
+  // Review batch 5, on every load and import: new entropy in the seed salt (SD.state.resalt; a no-op
+  // without an SD.entropy source), so a save that was rolled back - an older export imported, a
+  // stale second window, a reload after failed autosaves - never replays races or rolls the audience
+  // already saw. Past RaceRecords keep their own seeds, so they still replay exactly. A debug seed
+  // override stored by an older build (v1.0.0 saved it) is dropped, with a log line.
+  function freshSeeds(st, tag) {
+    SD.state.resalt(st, tag);
+    if (isObj(st.settings) && st.settings.seedOverride != null) {
+      pushLog(st, 'system', 'The debug seed override (' + st.settings.seedOverride + ') was cleared: a fixed seed only lasts until the page reloads.', 'warn');
+      st.settings.seedOverride = null;
+    }
   }
 
   // The bridge URL is exported with any relay token hidden (?token=…): an import never applies it
   // (see keepLocalConnections), and a shared export must not leak the streamer's relay token.
+  // Review batch 5: an export never carries meta.seedSalt (the secret every upcoming race seed is
+  // drawn from; importJSON gives the game a new one) or the debug seed override, so sharing an
+  // export (a bug report, a backup posted in Discord) reveals nothing about future races.
   function exportJSON() {
     const st = SD.state && SD.state.get();
     if (!st) return '';
-    const br = isObj(st.settings) && isObj(st.settings.bridge) ? st.settings.bridge : null;
+    const out = Object.assign({}, forStorage(st));
+    if (isObj(st.meta)) {
+      out.meta = Object.assign({}, st.meta);
+      delete out.meta.seedSalt;
+    }
+    const br = isObj(out.settings) && isObj(out.settings.bridge) ? out.settings.bridge : null;
     if (br && typeof br.url === 'string') {
       const url = SD.util.redactSecrets(br.url);
-      if (url !== br.url) {
-        const settings = Object.assign({}, st.settings, { bridge: Object.assign({}, br, { url: url }) });
-        return JSON.stringify(Object.assign({}, st, { settings: settings }));
-      }
+      if (url !== br.url) out.settings = Object.assign({}, out.settings, { bridge: Object.assign({}, br, { url: url }) });
     }
-    return JSON.stringify(st);
+    return JSON.stringify(out);
   }
 
   // Suggested download name, e.g. spirit-derby-s1-d3.json
@@ -677,6 +706,7 @@
     } catch (e) { /* ignore */ }
     const ignoredConnection = keepLocalConnections(st, cur, parsed);
     recoverInterruptedRace(st);
+    freshSeeds(st, 'import');
     pushLog(st, 'system', 'Save imported.', 'info');
     SD.state.set(st);
     save(true);

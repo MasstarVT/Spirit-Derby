@@ -57,27 +57,39 @@
   // train(state, runner, stat, { rng, by })
   // -> { ok, outcome, stat, gain, energyCost, message, hype, sp, xp, levelUps, conditionChanged, moodChanged }
   // ---------------------------------------------------------------------------
-  function train(state, runner, stat, opts) {
-    opts = opts || {};
-    const TR = T();
-    const CFG = SD.CONFIG;
+  // Why train() would refuse this runner / stat right now ({ ok:false, message }), or null when it
+  // would go ahead. Review batch 5: SD.game.trainRunner checks this BEFORE its commit, so a refused
+  // train (maxed stat, too little energy) changes nothing: no action-RNG draw, no state:changed.
+  function refusal(runner, stat) {
     if (!runner) return { ok: false, message: 'That runner does not exist.' };
     if (runner.retired) return { ok: false, message: runner.name + ' has retired from racing.' };
     const key = normalizeStat(stat);
     if (!key) return { ok: false, message: 'Unknown stat "' + (stat == null ? '' : stat) + '". Try speed, stamina, power, wisdom or luck.' };
+    const name = runner.name;
+    if (runner.energy < T().MIN_ENERGY) {
+      return { ok: false, message: name + ' is too exhausted to train (energy ' + Math.floor(runner.energy) + '). Try !rest ' + name + '.' };
+    }
+    const cap = SD.runners.statCap(runner.level);
+    if (runner.stats[key] >= cap) {
+      return { ok: false, message: name + "'s " + SD.DATA.STAT_LABELS[key] + ' is maxed at ' + cap + ' for level ' + runner.level + '. Race to level up and raise the cap!' };
+    }
+    return null;
+  }
+
+  function train(state, runner, stat, opts) {
+    opts = opts || {};
+    const TR = T();
+    const CFG = SD.CONFIG;
+    const no = refusal(runner, stat);
+    if (no) return no;
+    const key = normalizeStat(stat);
     const rng = opts.rng;
     if (!rng || typeof rng.float !== 'function') return { ok: false, message: 'Training needs a random source (internal error).' };
     const label = SD.DATA.STAT_LABELS[key];
     const name = runner.name;
     const energyBefore = runner.energy;
-    if (energyBefore < TR.MIN_ENERGY) {
-      return { ok: false, message: name + ' is too exhausted to train (energy ' + Math.floor(energyBefore) + '). Try !rest ' + name + '.' };
-    }
     const cap = SD.runners.statCap(runner.level);
     const cur = runner.stats[key];
-    if (cur >= cap) {
-      return { ok: false, message: name + "'s " + label + ' is maxed at ' + cap + ' for level ' + runner.level + '. Race to level up and raise the cap!' };
-    }
 
     const hype = state && state.hype ? state.hype.value : 0;
     const mood = SD.DATA.MOODS[runner.mood] || {};
@@ -271,6 +283,7 @@
 
   SD.training = {
     train: train,
+    refusal: refusal,
     rest: rest,
     tickClock: tickClock,
     chances: chances,

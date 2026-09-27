@@ -68,6 +68,13 @@
         let html;
         if (!live && idx >= racesPerDay) html = 'RACES <b>' + racesPerDay + '/' + racesPerDay + '</b> · DAY COMPLETE';
         else html = 'RACE <b>' + Math.min(idx + 1, racesPerDay) + '/' + racesPerDay + '</b>' + (live ? ' · LIVE' : ' · NEXT UP');
+        // Review batch 5: a debug seed override replays the same race every time, so it is shown
+        // here, on stream too (overlay mode), for as long as it is active (it is never saved).
+        const st = state.settings || {};
+        if (st.debug && st.seedOverride != null) {
+          html += ' · <span class="hdr-fixedseed" title="Debug seed override ' + dom.esc(st.seedOverride) +
+            ': every race uses the same seed. Clear it in the admin Debug section.">FIXED<span class="hdr-fixedseed__more"> SEED</span></span>';
+        }
         if (r.race.innerHTML !== html) r.race.innerHTML = html;
         r.race.classList.toggle('hdr-season__race--live', live);
       }

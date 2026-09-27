@@ -526,6 +526,11 @@ do **not** share a live game:
   profile, so they do not even see each other's saves. To move a game between them, use
   **Streamer Controls → Save → EXPORT JSON / IMPORT JSON**. The import keeps the receiving
   side's own Twitch and bridge settings, so set up the connection once in each place.
+  After moving a game this way, **play on in the copy you imported into only**: close the old
+  copy, or leave it alone. The two copies would otherwise race on from the same saved game with
+  different results, and whichever saves last wins. (Every load and import draws new race seeds, so an
+  older copy never replays races chat already watched; an export also leaves the secret seed salt
+  out, so it is safe to share in a bug report.)
 
 Recommended setups:
 

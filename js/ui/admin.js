@@ -8,7 +8,8 @@
  * The DOM is built once in init(); render(state) only syncs values/enabled states and
  * never overwrites a control that currently has focus.
  * M6: the seed override is settings.seedOverride (applied while Debug mode is on, so the paddock
- * preview, !race and START RACE agree); REPLAY shows the hash or an "older engine" note; COPY LAST
+ * preview, !race and START RACE agree; review batch 5: never saved, so a reload clears it, and the
+ * header shows FIXED SEED while it is active); REPLAY shows the hash or an "older engine" note; COPY LAST
  * RACE JSON (SD.debug.lastRaceJSON, clipboard with a textarea fallback); SAVE shows
  * "autosave ● 2 s ago · 41 KB" from SD.persistence.stats() and flashes "SAVED ✓" on state:saved;
  * the footer shows the build / save schema / race engine versions.
@@ -500,7 +501,7 @@
       const cur = dom.settings().seedOverride;
       if (seed === (cur == null ? null : cur)) return;
       const r = this.call('updateSettings', [{ seedOverride: seed }]);
-      if (r.ok && seed != null) dom.toast('Seed override ' + seed + ': every race uses it while Debug mode is on.', 'info');
+      if (r.ok && seed != null) dom.toast('Seed override ' + seed + ': every race uses it while Debug mode is on (until you clear it or reload the page).', 'info');
       dom.schedule(this);
     },
 
@@ -707,7 +708,8 @@
         r.replay.className = 'adm-note adm-replay' + (this.replayOk === true ? ' adm-ok' : this.replayOk === false ? ' adm-bad' : '');
       }
 
-      // Seed override: saved in settings.seedOverride, applied by startRace / previewField while Debug is on.
+      // Seed override: settings.seedOverride (never saved: a reload clears it), applied by startRace /
+      // previewField while Debug is on.
       const override = settings.seedOverride;
       if (r.seed) {
         r.seed.disabled = !debug;
@@ -720,7 +722,7 @@
       if (r.btnClearSeed) r.btnClearSeed.disabled = override == null && !(r.seed && r.seed.value);
       if (r.seedNote) {
         const note = !debug ? 'Tick Debug mode to use a fixed seed.'
-          : (override != null ? 'Active: every START RACE / !race uses seed ' + override + ' (the paddock preview matches). Clear to go back to normal seeds.'
+          : (override != null ? 'Active: every START RACE / !race uses seed ' + override + ' (the paddock preview matches; the header shows FIXED SEED). Clear it or reload the page to go back to normal seeds.'
             : 'Empty = normal seeds. Type a number (or 0x hex, or any text) and press Enter.');
         if (r.seedNote.textContent !== note) r.seedNote.textContent = note;
         r.seedNote.classList.toggle('adm-ok', debug && override != null);

@@ -1249,8 +1249,13 @@
     return record;
   }
   // Hex FNV-1a over results + total ticks + event digest. Robust to tick stripping.
+  // Review batch 5: results[].levelUps is hashed as 0, the value simulate() hashes: finishRace fills
+  // it in afterwards (the results modal shows it), and it is an outcome of applying the race, not of
+  // the race itself. So hashRecord(storedRecord) === storedRecord.hash, also for records stored by
+  // older builds, and every hash simulate() produces is unchanged.
+  function levelUpsAsZero(key, value) { return key === 'levelUps' ? 0 : value; }
   function hashRecord(record) {
-    const res = JSON.stringify(record.results || []);
+    const res = JSON.stringify(record.results || [], levelUpsAsZero);
     const ev = (record.events || []).map(function (e) { return e.tick + e.kind + (e.runnerId || ''); }).join(',');
     const h = SD.rng.hash(res + '|' + record.totalTicks + '|' + ev);
     return ('00000000' + h.toString(16)).slice(-8);

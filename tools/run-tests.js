@@ -30,6 +30,10 @@
  *                bets settled at min(quoted, gate odds), hype-aware odds, bets counted when settled, profit-only
  *                SP earned, exact odds display, no gate moods after an abort, !bet / !ribbon / !snack / !race /
  *                !rest / !sabotage fixes, snack counter reset at season rollover)
+ *   rng          tools/rng-test.js (review batch 5: SD.entropy, unpredictable race seeds (salt re-drawn at every
+ *                race start, load and import; a leaked race seed predicts nothing), no seed salt / seed override
+ *                in EXPORT JSON, no replayed races after a save rollback, refused trainings draw no action RNG,
+ *                the seed override is never saved, hashRecord(stored) === hash, rollStats remainder order)
  *   runners      tools/runners-test.js (M6 !create, admin SPAWN RUNNER, MAX_ACTIVE, SD.debug)
  *   fuzz         tools/fuzz-test.js (M6 seeded 3-season fuzz: 17 viewers spamming every command, random race
  *                starts / pauses / ends / aborts / reloads, invariants after every command and race)
@@ -51,6 +55,7 @@ const SUITES = [
   { name: 'identity', file: 'identity-test.js', args: VERBOSE ? ['--verbose'] : [] },
   { name: 'protokeys', file: 'protokeys-test.js', args: VERBOSE ? ['--verbose'] : [] },
   { name: 'economy', file: 'economy-test.js', args: VERBOSE ? ['--verbose'] : [] },
+  { name: 'rng', file: 'rng-test.js', args: VERBOSE ? ['--verbose'] : [] },
   { name: 'runners', file: 'runners-test.js', args: VERBOSE ? ['--verbose'] : [] },
   { name: 'fuzz', file: 'fuzz-test.js', args: VERBOSE ? ['--verbose'] : [] }
 ];

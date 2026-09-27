@@ -693,7 +693,9 @@
 
       const hypeBefore = S.hype.value;
       const res = SD.game.trainRunner(runner.id, stat, ctx.username);
-      if (!res || !res.ok) return { ok: false, message: (res && res.message) || 'Training did not happen.', severity: 'bad' };
+      // A refused train changed nothing (review batch 5: SD.game.trainRunner refuses before its commit),
+      // so it is thrown as a CommandError: the command's own mutate emits no state:changed / save either.
+      if (!res || !res.ok) throw new CommandError((res && res.message) || 'Training did not happen.', { severity: 'bad' });
       P().recordAction(S, ctx.username, runner.id, 'train');
       const hypeDelta = U.round1(S.hype.value - hypeBefore);
       P().addHypeContribution(S, ctx.username, hypeDelta);
