@@ -2,7 +2,8 @@
  * RaceRecord → animation frames. No DOM access: it only reads SD.state / SD.CONFIG,
  * drives a requestAnimationFrame loop (timer fallback while the tab is hidden) and
  * emits race:* events on SD.bus. It never mutates game state except the contracted
- * SD.game.setRaceStatus('running') call when the countdown ends.
+ * SD.game.setRaceStatus('running') call when the countdown ends (or END skips it), and, since
+ * review batch 9, SD.game.resumeRace() when finish() runs on a race the core still has paused.
  *
  * Emits: race:countdown { secondsLeft }            3, 2, 1 then 0 (= GO)
  *        race:frame { tickFloat, tick, phase, distance, totalTicks, runners:[{ id, lane, d, progress, rank, v, st, fx }], finished:[ids], leaderD, recordId }
@@ -98,17 +99,31 @@
   function onRaf() { rafId = 0; if (timerId) { clearTimeout(timerId); timerId = 0; } step(); }
   function onTimer() { timerId = 0; if (rafId && hasRaf) { cancelAnimationFrame(rafId); rafId = 0; } step(); }
 
+  // Review batch 9 (ui-track#1): a hidden page's timers do not run every 100 ms. Browsers wake them
+  // about once a second, and Chrome's intensive throttling (hidden for 5+ minutes) about once a
+  // minute. Clamping each wake-up to 100 ms made a hidden race run at 10% speed (or 0.2%), and
+  // training / bets stayed locked for minutes or hours. While hidden, playback now advances by the
+  // real elapsed time (up to CONFIG.PLAYBACK.HIDDEN_MAX_DT_MS, a cap for suspend / resume), in
+  // sub-steps no longer than a visible frame, so every tick, event and finish is still emitted in order.
   function step() {
     const t = now();
     let dt = (t - lastTs) / 1000;
     lastTs = t;
     if (!(dt > 0)) dt = 0;
-    // Clamp: CONFIG.PLAYBACK.MAX_FRAME_DT_MS (100 ms) while hidden (timer-driven),
-    // 250 ms otherwise (absorbs a janky frame without teleporting runners).
-    dt = Math.min(dt, isHidden() ? num(pcfg().MAX_FRAME_DT_MS, 100) / 1000 : 0.25);
-    if (active()) {
-      try { advance(dt); } catch (e) { console.error('[playback] step failed', e); }
-    }
+    // Visible (rAF-driven): CONFIG.PLAYBACK.MAX_FRAME_DT_MS (250 ms) absorbs a janky frame without
+    // teleporting runners. Hidden (timer-driven): the real elapsed time, capped.
+    const frameCap = Math.max(0.01, num(pcfg().MAX_FRAME_DT_MS, 250) / 1000);
+    dt = Math.min(dt, isHidden() ? Math.max(frameCap, num(pcfg().HIDDEN_MAX_DT_MS, 90000) / 1000) : frameCap);
+    const r0 = rec;
+    try {
+      // A race:playbackDone listener may start the next race: never spend the old race's time on it.
+      while (active() && rec === r0) {
+        const d = Math.min(dt, frameCap);
+        dt -= d;
+        advance(d, dt > 0);                    // only the last sub-step emits race:frame
+        if (!(dt > 0)) break;
+      }
+    } catch (e) { console.error('[playback] step failed', e); }
     scheduleNext();
   }
 
@@ -124,7 +139,8 @@
     return Math.max(0.25, v);
   }
 
-  function advance(dt) {
+  /** quiet: an intermediate sub-step of a long (hidden-page) step - no race:frame, the last one sends it. */
+  function advance(dt, quiet) {
     if (mode === 'countdown') {
       if (cdShown === null) {                   // first frame: show "3" and the start line
         cdShown = Math.max(1, Math.ceil(cdLeft));
@@ -147,13 +163,13 @@
       const phase = tickAt(Math.floor(cursor)).phase;
       cursor = Math.min(L, cursor + dt * tps(phase));
       processTo(Math.floor(cursor));
-      emitFrame();
+      if (!quiet) emitFrame();
       if (cursor >= L) enterHold();
       return;
     }
     if (mode === 'hold') {
       holdLeft -= dt;
-      emitFrame();
+      if (!quiet) emitFrame();
       if (holdLeft <= 0) {
         mode = 'done';
         cancelLoop();
@@ -168,6 +184,15 @@
       const st = s && s.currentRace && s.currentRace.status;
       if (st === 'countdown' && SD.game && typeof SD.game.setRaceStatus === 'function') SD.game.setRaceStatus('running');
     } catch (e) { console.error('[playback] setRaceStatus failed', e); }
+  }
+
+  // The core still says 'paused' while playback runs again (a direct finish() call): resume it too.
+  function resumeCore() {
+    try {
+      const s = SD.state && SD.state.get && SD.state.get();
+      const st = s && s.currentRace && s.currentRace.status;
+      if (st === 'paused' && SD.game && typeof SD.game.resumeRace === 'function') SD.game.resumeRace();
+    } catch (e) { console.error('[playback] resumeRace failed', e); }
   }
 
   function goRunning() {
@@ -336,12 +361,25 @@
   }
 
   /** Jump to the last tick, emit everything not yet emitted, then playbackDone after the hold. */
+  // Review batch 9: END while paused resumes (ui-track#5: paused in the finish hold, END used to do
+  // nothing, so the race never resolved until Space), and END during the countdown moves the race's
+  // status to 'running' like seek() does (ui-track#8: it stayed 'countdown' through the hold).
+  // SD.game.endRace() resumes a paused race itself; resumeCore() covers a direct finish() call.
   function finish() {
-    if (!rec || mode === 'idle' || mode === 'hold' || mode === 'done') return;
-    paused = false;
+    if (!rec || mode === 'idle' || mode === 'done') return;
+    const wasPaused = paused;
+    if (paused) {
+      paused = false;
+      resumeCore();
+    }
+    if (mode === 'hold') {                    // already at the line: just let the hold run out
+      if (wasPaused) { lastTs = now(); scheduleNext(); }
+      return;
+    }
     if (mode === 'loaded' || mode === 'countdown') {
       emit(N.countdown, { secondsLeft: 0, skipped: true });
       mode = 'running';
+      setStatusRunning();
     }
     cursor = lastTick();
     enterHold();

@@ -42,6 +42,10 @@
  *                finishRace cannot apply, bestTimes, non-string runner ids, lanes / distance, retired runners'
  *                refunds; IMPORT runs boot's post-load routine; runtime maps reset; state.set() depth; boot
  *                order; bootRecovery)
+ *   ui           tools/ui-test.js (review batch 9: the real UI modules and main.js boot on a fake DOM - hidden-page
+ *                playback speed, END while paused / in the countdown, the final view behind a results modal
+ *                that never auto-closes, 9-10 runner fields, season summary vs the next race, modal focus,
+ *                Tab containment, tab arrow keys, reduced motion, backer lines, toast priority)
  *   runners     tools/runners-test.js (M6 !create, admin SPAWN RUNNER, MAX_ACTIVE, SD.debug)
  *   hygiene      tools/hygiene-test.js (review batch 8: retire / rename / delete a runner and remove a viewer,
  *                demo bots on '~' keys and their clean-up, bots stopped by RESET ALL / IMPORT / live chat,
@@ -70,6 +74,7 @@ const SUITES = [
   { name: 'rng', file: 'rng-test.js', args: VERBOSE ? ['--verbose'] : [] },
   { name: 'durability', file: 'durability-test.js', args: VERBOSE ? ['--verbose'] : [] },
   { name: 'import', file: 'import-test.js', args: VERBOSE ? ['--verbose'] : [] },
+  { name: 'ui', file: 'ui-test.js', args: VERBOSE ? ['--verbose'] : [] },
   { name: 'runners', file: 'runners-test.js', args: VERBOSE ? ['--verbose'] : [] },
   { name: 'hygiene', file: 'hygiene-test.js', args: VERBOSE ? ['--verbose'] : [] },
   { name: 'fuzz', file: 'fuzz-test.js', args: VERBOSE ? ['--verbose'] : [] }

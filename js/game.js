@@ -394,6 +394,9 @@
     const s = cur();
     if (!s || !s.currentRace) return fail('No race to end.');
     const recordId = s.currentRace.record.id;
+    // Review batch 9 (ui-track#5): END on a paused race resumes it first (status back from 'paused',
+    // race:resumed), so playback paused in the finish hold runs out and the PAUSED overlay goes.
+    if (s.currentRace.status === 'paused') resumeRace();
     SD.bus.emit(SD.EVENTS.RACE_END_REQUESTED, { recordId: recordId });
     if (!SD.playback) {
       const after = cur();

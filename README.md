@@ -125,7 +125,7 @@ Keep the stats summing to 200 (each at most 64) and reuse an ability id from `AB
 
 ## Races
 
-- **Distances:** 1200, 1600, 2000 and 2400 m (admin **Distance**, or `!race 2000`). 4–8 runners from the drawer (2–10 through `SD.game.updateSettings`). Owned runners get priority for the field; then the most rested. Lanes are drawn at random, and the paddock shows the exact field before the gate.
+- **Distances:** 1200, 1600, 2000 and 2400 m (admin **Distance**, or `!race 2000`). 4–8 runners from the drawer (2–10 through `SD.game.updateSettings`; 9 and 10 runners get slimmer lanes and position rows so the whole field fits a 1080p overlay). Owned runners get priority for the field; then the most rested. Lanes are drawn at random, and the paddock shows the exact field before the gate.
 - **Phases** (by each runner's own progress): Start (<5%) · Early Pace (<30%) · Mid Race (<65%) · Final Turn (<85%) · Final Stretch · Finish. Each phase weighs the stats differently: Power at the start, Speed and Wisdom mid race, Speed and Power in the stretch. Stamina is a pool that only bites in long races.
 - **What decides a race**, roughly in order: stats (10 phase-weighted points ≈ 5% speed), a hidden per-race form and in-race swings (Wisdom calms both), condition and energy, style and ability, then events and chat effects. The best-form identical clone still only wins about 40% of the time.
 - **Race events** (16, max 6 per race, 12 on *chaos*; no runner gets two bad ones within 30 ticks): Sudden Rain · Forest Shortcut · Loose Shoe · Cryptid Crossing · Audience Frenzy · Butterfly Distraction · Snack Break · Unknown Creature Appears · Mysterious Fog (hides positions) · Suspicious Mushroom · Forest Wind (hits the leader) · Lucky Acorn · Firefly Trail (lifts the last runner) · Tangled Vines · Owl's Advice · Puddle Jump.
@@ -168,7 +168,7 @@ A day has 3 races and a season has 7 days. With **Auto-advance day** on, the day
 
 The drawer footer shows the build: `Spirit Derby v1.0.0 · save schema v4 · race engine v2`.
 
-**Keyboard:** **`** controls · **O** overlay mode · **Space** pause / resume · **Esc** closes the results, the season summary or the drawer.
+**Keyboard:** **`** controls · **O** overlay mode · **Space** pause / resume · **Esc** closes the results, the season summary or the drawer · **← / →** (and **Home / End**) switch the sidebar tabs. While the results or the season summary is open, **Tab** stays inside it and **`** / **O** / Space-as-pause do nothing (Space or Enter presses its focused Continue). A modal that opens while you are typing in the chat or SEND AS box leaves your cursor there. With *reduce motion* set in the OS, every looping animation (hype pulse, blinking dots, the final-stretch pill …) stops.
 
 **Overlay mode** (`?overlay=1` or **O**) hides the sidebar, the drawer, the roster's TRAIN / REST controls, the streamer hint and the debug HUD, widens the track and shows command replies as toasts: at most 4 on screen, 1 new reply per second, and the oldest waiting reply is dropped during a raid. For OBS, add a Browser Source at 1920×1080 with `file:///…/index.html?overlay=1&twitch=yourchannel`, and turn **Shutdown source when not visible** off. [docs/INTEGRATION.md](docs/INTEGRATION.md) covers two-instance setups.
 

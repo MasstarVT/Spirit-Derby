@@ -340,7 +340,8 @@
   // At most CONFIG.UI.TOAST_MAX on screen; the rest wait in a queue (other toasts before command
   // replies). Reply toasts ({ reply:true }, overlay mode) show at most REPLY_TOASTS_PER_S per second
   // and at most REPLY_QUEUE_MAX wait (the oldest waiting reply is dropped), so a raid cannot flood
-  // the stream. An important toast arriving while the strip is full pushes out the oldest reply.
+  // the stream. An important toast arriving while the strip is full pushes out the oldest reply and
+  // takes its slot (review batch 9); over TOAST_QUEUE_MAX the oldest waiting reply is dropped first.
   const toastQ = { queue: [], visible: [], lastReplyAt: 0, timer: 0, dropped: 0 };
   function toastCfg(k, d) { const v = Number(cfg('UI.' + k, d)); return isFinite(v) && v > 0 ? v : d; }
 
@@ -405,19 +406,29 @@
     ]);
     const item = { node: node, reply: !!opts.reply, ms: num(opts.ms, sev === 'epic' ? 6000 : 4500), timer: 0, gone: false };
     const max = toastCfg('TOAST_MAX', 4);
-    if (!item.reply && toastQ.visible.length >= max) {
-      // Make room for something important: the oldest reply toast leaves early.
-      const oldReply = toastQ.visible.filter(function (x) { return x.reply; })[0];
-      if (oldReply) hideToast(oldReply);
-    }
+    // Review batch 9 (ui-admin-chat-dom#4): queue the item BEFORE pushing a reply out. hideToast()
+    // pumps at once, and a reply waiting in the queue used to take the freed slot, so the important
+    // toast waited behind a full strip again.
     toastQ.queue.push(item);
     if (item.reply) {
       const waiting = toastQ.queue.filter(function (x) { return x.reply; });
       const cap = toastCfg('REPLY_QUEUE_MAX', 6);
       if (waiting.length > cap) { toastQ.queue.splice(toastQ.queue.indexOf(waiting[0]), 1); toastQ.dropped++; }
     }
+    // Over TOAST_QUEUE_MAX: the oldest waiting reply goes first, an important toast only when no reply waits.
     const qmax = toastCfg('TOAST_QUEUE_MAX', 12);
-    while (toastQ.queue.length > qmax) { toastQ.queue.shift(); toastQ.dropped++; }
+    while (toastQ.queue.length > qmax) {
+      let drop = 0;
+      for (let i = 0; i < toastQ.queue.length; i++) if (toastQ.queue[i].reply) { drop = i; break; }
+      toastQ.queue.splice(drop, 1);
+      toastQ.dropped++;
+    }
+    if (!item.reply && toastQ.visible.length >= max && toastQ.queue.indexOf(item) >= 0) {
+      // Make room for something important: the oldest reply toast leaves early (pumpToasts shows
+      // the first waiting non-reply in its place).
+      const oldReply = toastQ.visible.filter(function (x) { return x.reply; })[0];
+      if (oldReply) hideToast(oldReply);
+    }
     pumpToasts();
     return node;
   }
@@ -459,6 +470,67 @@
     return false;
   }
 
+  // ---------------------------------------------------------------- modal focus (review batch 9)
+  /** True for an element the user types into (INPUT / TEXTAREA / SELECT / contenteditable). */
+  function isEditable(node) {
+    return !!node && ((typeof node.tagName === 'string' && /^(INPUT|TEXTAREA|SELECT)$/.test(node.tagName)) || !!node.isContentEditable);
+  }
+
+  const FOCUSABLE = 'button, [href], input, select, textarea, [tabindex]';
+  function focusables(root) {
+    if (!root || typeof root.querySelectorAll !== 'function') return [];
+    return Array.prototype.slice.call(root.querySelectorAll(FOCUSABLE)).filter(function (n) {
+      return !n.disabled && !n.hidden && n.getAttribute('tabindex') !== '-1' && !(n.closest && n.closest('[hidden]'));
+    });
+  }
+
+  /**
+   * A modal (results, season summary) opened by itself (race:finished, season:ended) takes focus only
+   * when the streamer is not typing (ui-panels-boot#2): stealing it from the chat / SEND AS input
+   * turned the rest of the typed text into shortcuts ('o' = overlay, Space = Continue).
+   * Returns the element that had focus (to give it back on close).
+   */
+  function modalFocus(root, target) {
+    const had = typeof document !== 'undefined' ? document.activeElement : null;
+    if (!isEditable(had) && target && typeof target.focus === 'function') {
+      try { target.focus({ preventScroll: true }); } catch (e) { target.focus(); }
+    }
+    return had;
+  }
+
+  /** On close: give focus back only if it is still inside the closing modal (or nowhere). */
+  function modalRestore(root, had) {
+    if (typeof document === 'undefined') return;
+    const cur = document.activeElement;
+    const inside = !cur || cur === document.body || (root && typeof root.contains === 'function' && root.contains(cur));
+    if (!inside || !had || typeof had.focus !== 'function' || !document.body.contains(had)) return;
+    try { had.focus({ preventScroll: true }); } catch (e) { /* ignore */ }
+  }
+
+  /**
+   * aria-modal focus containment (ui-panels-boot#7): Tab / Shift+Tab cycle inside root. Focus
+   * outside the dialog (the streamer was typing when it opened) moves into it on the first Tab.
+   * Returns true when it handled (and cancelled) the key.
+   */
+  function trapTab(e, root) {
+    if (!e || e.key !== 'Tab' || !root) return false;
+    const list = focusables(root);
+    const cur = document.activeElement;
+    let next = null;
+    if (!list.length) next = null;
+    else if (!root.contains(cur)) next = e.shiftKey ? list[list.length - 1] : list[0];
+    else {
+      const i = list.indexOf(cur);
+      if (e.shiftKey && i <= 0) next = list[list.length - 1];
+      else if (!e.shiftKey && i === list.length - 1) next = list[0];
+      else if (i < 0) next = list[0];
+      else return false;                       // a move inside the dialog: the browser does it
+    }
+    e.preventDefault();
+    if (next) { try { next.focus({ preventScroll: true }); } catch (x) { next.focus(); } }
+    return true;
+  }
+
   /** Hand the viewer a text file (EXPORT JSON, the held-save and backup downloads). */
   function download(name, text, type) {
     const blob = new Blob([String(text)], { type: type || 'application/json' });
@@ -474,6 +546,7 @@
     $: $, $$: $$, el: el, esc: esc, fmt: fmt, schedule: schedule, toast: toast, toastStats: toastStats, prefs: prefs,
     refs: refs, ev: ev, on: on, emit: emit, state: state, settings: settings, debugOn: debugOn, cfg: cfg,
     clamp: clamp, num: num, safeColor: safeColor, safeUrl: safeUrl, runnerVars: runnerVars, badgeHTML: badgeHTML,
-    isRaceLocked: isRaceLocked, confirmClick: confirmClick, info: info, flush: flush, download: download
+    isRaceLocked: isRaceLocked, confirmClick: confirmClick, info: info, flush: flush, download: download,
+    isEditable: isEditable, focusables: focusables, modalFocus: modalFocus, modalRestore: modalRestore, trapTab: trapTab
   };
 })(globalThis.SD = globalThis.SD || {});

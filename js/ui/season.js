@@ -1,7 +1,9 @@
 /* SPIRIT DERBY — ui/season.js
  * Season summary modal (M5): shown on season:ended (automatic after the last day, or admin
  * RESET SEASON). If the race results modal is open (the season ended with that race), the
- * summary waits for 'ui:resultsClosed'. Styled like the results modal: champion runner, MVP
+ * summary waits for 'ui:resultsClosed'; since review batch 9 it also waits while a race is live
+ * (the next race started from the results), and results.show() defers an open summary.
+ * Styled like the results modal: champion runner, MVP
  * (most SP earned), biggest upset, top hype contributor, achievements unlocked and the
  * per-runner win table, plus what the new season resets. Continue / Esc / backdrop close it.
  * Auto-close after 2 × settings.resultsAutoCloseMs (0 = never).
@@ -35,6 +37,7 @@
     tickTimer: 0,
     closeAt: 0,
     lastFocus: null,
+    current: null,
 
     init: function (root) {
       const self = this;
@@ -45,6 +48,11 @@
       });
       this.offs.push(dom.on('SEASON_ENDED', function (p) { self.enqueue(p && p.summary); }));
       this.offs.push(dom.on('ui:resultsClosed', function () { self.pump(); }));
+      // Review batch 9 (ui-panels-boot#1): a summary never opens while a race is live (pump waits), so it
+      // is pumped again once the race is over: after its results close (above), or after an abort. On
+      // race:finished the pump runs a moment later, when main.js has opened that race's results.
+      this.offs.push(dom.on('RACE_ABORTED', function () { self.pump(); }));
+      this.offs.push(dom.on('RACE_FINISHED', function () { setTimeout(function () { self.pump(); }, 0); }));
     },
 
     render: function () { /* built per season in show() */ },
@@ -76,23 +84,43 @@
       this.pump();
     },
 
-    /** Show the next queued summary unless a modal is already up (race results first). */
+    /**
+     * Show the next queued summary unless a modal is already up (race results first) or a race is
+     * live. Review batch 9 (ui-panels-boot#1): starting the next race closes the results, and the
+     * summary queued behind them used to open at once and cover the new race and its results.
+     */
     pump: function () {
       if (this.open || !this.queue.length) return;
       if (SD.ui.results && typeof SD.ui.results.isOpen === 'function' && SD.ui.results.isOpen()) return;
+      const st = dom.state();
+      if (st && st.currentRace) return;
       this.show(this.queue.shift());
+    },
+
+    /** Review batch 9: hide an open summary and put it back at the front of the queue (results.show). */
+    defer: function () {
+      if (!this.open) return false;
+      const cur = this.current;
+      this.clearTimers();
+      this.open = false;
+      this.current = null;
+      this.lastFocus = null;
+      this.root.hidden = true;
+      this.root.innerHTML = '';
+      if (cur) this.queue.unshift(cur);
+      return true;
     },
 
     show: function (summary) {
       if (!this.root || !summary) return;
       const self = this;
       this.clearTimers();
-      this.lastFocus = document.activeElement;
       this.root.innerHTML = this.html(summary);
       this.root.hidden = false;
       this.open = true;
-      const btn = this.root.querySelector('.results__foot .btn');
-      if (btn) { try { btn.focus({ preventScroll: true }); } catch (e) { btn.focus(); } }
+      this.current = summary;
+      // Review batch 9 (ui-panels-boot#2): no focus grab while the streamer types in an input.
+      this.lastFocus = dom.modalFocus(this.root, this.root.querySelector('.results__foot .btn'));
 
       const s = dom.settings();
       let base = Number(s.resultsAutoCloseMs);
@@ -116,11 +144,12 @@
       if (!this.open) return;
       this.clearTimers();
       this.open = false;
+      this.current = null;
+      const had = this.lastFocus;
+      this.lastFocus = null;
+      dom.modalRestore(this.root, had);
       this.root.hidden = true;
       this.root.innerHTML = '';
-      if (this.lastFocus && typeof this.lastFocus.focus === 'function' && document.body.contains(this.lastFocus)) {
-        try { this.lastFocus.focus({ preventScroll: true }); } catch (e) { /* ignore */ }
-      }
       dom.emit('ui:seasonClosed', {});
       this.pump();
     },

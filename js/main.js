@@ -171,6 +171,26 @@
     return true;
   }
 
+  // Review batch 9 (ui-panels-boot#6): the tabs use a roving tabindex (only the selected one is in the
+  // Tab order), so the arrow keys move between the enabled tabs and select them; Home / End jump to
+  // the first / last one (the WAI-ARIA tabs pattern, automatic activation).
+  function onTabKey(e) {
+    if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey) return;
+    const step = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -1, ArrowDown: 1, Home: 'first', End: 'last' }[e.key];
+    if (!step) return;
+    const cur = e.target && e.target.closest ? e.target.closest('[data-tab]') : null;
+    if (!cur) return;
+    const tabs = Array.prototype.slice.call(document.querySelectorAll('.tabs [data-tab]')).filter(function (x) { return !x.disabled; });
+    if (!tabs.length) return;
+    let i = tabs.indexOf(cur);
+    if (step === 'first') i = 0;
+    else if (step === 'last') i = tabs.length - 1;
+    else i = ((i < 0 ? 0 : i + step) + tabs.length) % tabs.length;
+    e.preventDefault();
+    const next = tabs[i];
+    if (selectTab(next.getAttribute('data-tab')) && typeof next.focus === 'function') next.focus();
+  }
+
   function renderAll() {
     if (!SD.ui.dom) return;
     panels.forEach(function (p) { SD.ui.dom.schedule(p); });
@@ -196,19 +216,36 @@
   }
 
   // ------------------------------------------------------------------ keyboard
+  // The open modal (results or season summary; results.show() defers a showing summary, so at most one is open).
+  function openModal() {
+    if (SD.ui.results && SD.ui.results.isOpen && SD.ui.results.isOpen()) return SD.ui.results;
+    if (SD.ui.season && SD.ui.season.isOpen && SD.ui.season.isOpen()) return SD.ui.season;
+    return null;
+  }
+
   function onKey(e) {
     if (e.defaultPrevented) return;
     const t = e.target;
     const typing = !!t && (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable);
+    const modal = openModal();
 
     if (e.key === 'Escape') {
-      if (SD.ui.results && SD.ui.results.isOpen && SD.ui.results.isOpen()) { SD.ui.results.close(); e.preventDefault(); return; }
-      if (SD.ui.season && SD.ui.season.isOpen && SD.ui.season.isOpen()) { SD.ui.season.close(); e.preventDefault(); return; }
+      if (modal) { modal.close(); e.preventDefault(); return; }
       if (document.body.classList.contains('sd-admin-open')) { setAdmin(false); e.preventDefault(); return; }
       if (typing && t.blur) t.blur();
       return;
     }
+    // Review batch 9 (ui-panels-boot#7): the modals are aria-modal, so Tab / Shift+Tab stay inside them
+    // (not inert on the page behind: that would pull focus out of an input the streamer is typing in).
+    if (e.key === 'Tab') {
+      if (modal && modal.root && SD.ui.dom.trapTab) SD.ui.dom.trapTab(e, modal.root);
+      return;
+    }
     if (typing || e.ctrlKey || e.metaKey || e.altKey) return;
+    // Review batch 9 (ui-panels-boot#2): while a modal is up the single-key shortcuts (O, backtick, Space
+    // as pause) are off, so stray typing never flips overlay mode or the drawer; Space / Enter still
+    // press the modal's focused Continue button (the browser's own click).
+    if (modal) return;
 
     if (e.key === '`' || e.code === 'Backquote') {
       e.preventDefault();
@@ -544,10 +581,11 @@
     // Starting the next race while the previous results are still up closes them.
     // A season summary that was already showing closes too; one still queued behind the results
     // modal appears when the results close, so it is never lost.
+    // Review batch 9 (ui-panels-boot#1): the summary queued behind the results no longer opens when they
+    // close here (season.pump() waits while a race is live); it shows after this race's results.
     dom.on('RACE_STARTED', function () {
-      const seasonOpen = !!(SD.ui.season && SD.ui.season.isOpen && SD.ui.season.isOpen());
       if (SD.ui.results && SD.ui.results.isOpen && SD.ui.results.isOpen()) SD.ui.results.close();
-      if (seasonOpen) SD.ui.season.close();
+      if (SD.ui.season && SD.ui.season.isOpen && SD.ui.season.isOpen()) SD.ui.season.close();
     });
     dom.on('STATE_LOADED', renderAll);
     // Review batch 8 (gap1#6): a new game (RESET ALL, IMPORT, RESTORE BACKUP, TAKE OVER) closes the old
@@ -572,6 +610,7 @@
         const tab = e.target.closest('[data-tab]');
         if (tab && !tab.disabled) selectTab(tab.getAttribute('data-tab'));
       });
+      tablist.addEventListener('keydown', onTabKey);
     }
 
     // 6. keyboard shortcuts

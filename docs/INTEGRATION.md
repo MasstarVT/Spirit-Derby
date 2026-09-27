@@ -549,7 +549,9 @@ Recommended setups:
   (`…/index.html?overlay=1&twitch=yourchannel`). Drive it through **Interact**.
 - **Browser window + Window Capture:** run the game in a normal browser window, connect chat there,
   press **O** for the overlay layout while live, and capture the window in OBS. Only close Streamer
-  Controls before you go live.
+  Controls before you go live. A race keeps its normal pace when the window is minimised or covered
+  (the browser then wakes the page only once a second, or once a minute after five minutes, and the
+  race catches up at each wake-up), so results, payouts and training are never held up.
 
 **Before going live in a window you tested in:** the demo bots of the Chat tab play in the same game
 under their own `~` profiles (`~foxfan` …, which no Twitch login can be, so a viewer called foxfan

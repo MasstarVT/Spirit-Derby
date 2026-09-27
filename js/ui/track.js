@@ -674,10 +674,22 @@
       this.setPhase('DONE');
       if (this.fogOn) this.endFog();
       // Released by the results modal closing (ui:resultsClosed); fallback timer otherwise.
+      // Review batch 9 (ui-track#4): resultsAutoCloseMs 0 means the modal never closes by itself, and it
+      // was read as 25 s (0 || 25000), so the paddock replaced the final positions behind the open modal
+      // after 30 s. The delay now follows results.js (settings, then CONFIG.UI.RESULTS_AUTO_CLOSE_MS),
+      // and the fallback never releases while the results modal is still open.
       const hasResults = !!(SD.ui.results && document.getElementById('results'));
-      const ms = hasResults ? (Number(dom.settings().resultsAutoCloseMs) || 25000) + 5000 : 5000;
+      let auto = Number(dom.settings().resultsAutoCloseMs);
+      if (!isFinite(auto)) auto = Number(dom.cfg('UI.RESULTS_AUTO_CLOSE_MS', 25000));
+      if (!isFinite(auto)) auto = 25000;
+      const ms = hasResults ? (auto > 0 ? auto : 25000) + 5000 : 5000;
       clearTimeout(this.holdTimer);
-      this.holdTimer = setTimeout(function () { self.releaseFinal(); }, ms);
+      this.holdTimer = setTimeout(function () {
+        self.holdTimer = 0;
+        const res = SD.ui.results;
+        if (res && typeof res.isOpen === 'function' && res.isOpen()) return;   // ui:resultsClosed releases it
+        self.releaseFinal();
+      }, ms);
     },
 
     releaseFinal: function () {
@@ -738,7 +750,7 @@
       const racesPerDay = Number(season.racesPerDay) || 3;
       const idx = Number(season.raceIndexInDay) || 0;
       const dist = Number(s.distance) || 1200;
-      const count = dom.clamp(Number(s.runnerCount) || 4, 2, 8);
+      const count = dom.clamp(Number(s.runnerCount) || 4, 2, Number(dom.cfg('RACE.MAX_RUNNERS', 10)) || 10);   // review batch 9: 9-10 too
       const rows = this.previewField(state, count);
       const dayDone = idx >= racesPerDay;
       // M5: open bets (count + total) in the status pill; per-runner bets and queued chat effects on the cards.

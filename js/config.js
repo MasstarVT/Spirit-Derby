@@ -361,7 +361,11 @@
     PLAYBACK: {
       TPS: { START: 3, EARLY: 5, MID: 6, FINAL_TURN: 7, FINAL_STRETCH: 9, FINISH: 9 },
       COUNTDOWN_S: 3,
-      MAX_FRAME_DT_MS: 100,
+      // Review batch 9 (ui-track#1): MAX_FRAME_DT_MS is the visible (rAF) frame clamp and the size of
+      // a playback sub-step (was 100 = the hidden-page clamp, which slowed hidden races to 10% speed);
+      // a hidden page advances by the real elapsed time, up to HIDDEN_MAX_DT_MS (suspend / resume cap).
+      MAX_FRAME_DT_MS: 250,
+      HIDDEN_MAX_DT_MS: 90000,
       FINISH_HOLD_MS: 1500    // pause on the final frame before race:playbackDone
     },
 

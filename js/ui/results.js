@@ -65,13 +65,15 @@
       const rec = payload.record || payload;
       const res = (Array.isArray(payload.results) && payload.results.length ? payload.results : rec.results) || [];
       this.clearTimers();
-      this.lastFocus = document.activeElement;
+      // Review batch 9: a season summary still showing steps back into its queue (ui-panels-boot#1),
+      // so the two modals never stack; it comes back when these results close.
+      if (SD.ui.season && typeof SD.ui.season.defer === 'function') SD.ui.season.defer();
       this.root.innerHTML = this.html(rec, res, payload);
       this.root.hidden = false;
       this.open = true;
 
-      const btn = this.root.querySelector('.results__foot .btn');
-      if (btn) { try { btn.focus({ preventScroll: true }); } catch (e) { btn.focus(); } }
+      // Review batch 9 (ui-panels-boot#2): no focus grab while the streamer types in an input.
+      this.lastFocus = dom.modalFocus(this.root, this.root.querySelector('.results__foot .btn'));
 
       const s = dom.settings();
       let ms = Number(s.resultsAutoCloseMs);
@@ -96,11 +98,11 @@
       if (!this.open) return;
       this.clearTimers();
       this.open = false;
+      const had = this.lastFocus;
+      this.lastFocus = null;
+      dom.modalRestore(this.root, had);        // before emptying it: is focus still inside?
       this.root.hidden = true;
       this.root.innerHTML = '';
-      if (this.lastFocus && typeof this.lastFocus.focus === 'function' && document.body.contains(this.lastFocus)) {
-        try { this.lastFocus.focus({ preventScroll: true }); } catch (e) { /* ignore */ }
-      }
       dom.emit('ui:resultsClosed', {});
     },
 
@@ -126,6 +128,19 @@
         'Season ' + (rec.season || '?') + ' · Day ' + (rec.day || '?') + (Number(rec.indexInDay) >= 1 ? ' · Race ' + rec.indexInDay : '')]
         .filter(Boolean).join(' · ');
 
+      // Review batch 9 (ui-panels-boot#8): backer SP comes from what was actually paid
+      // (payload.payouts, role 'backer'), not result.spBacker, which every runner has.
+      const backers = {};
+      (Array.isArray(payload && payload.payouts) ? payload.payouts : []).forEach(function (p) {
+        if (!p || p.role !== 'backer' || p.runnerId == null) return;
+        const k = String(p.runnerId);
+        const b = Object.prototype.hasOwnProperty.call(backers, k) ? backers[k] : (backers[k] = { n: 0, total: 0, amounts: {} });
+        const amt = Number(p.amount) || 0;
+        b.n++;
+        b.total += amt;
+        b.amounts[amt] = 1;
+      });
+
       const rows = sorted.map(function (r) {
         const e = entrants[r.runnerId] || { name: r.runnerId };
         const place = Number(r.place) || 0;
@@ -142,7 +157,12 @@
         let sp;
         if (owner) sp = '<span class="gain">+' + esc(fmt.int(r.spOwner || 0)) + '</span> <span class="c-dim">→ ' + esc(owner) + '</span>';
         else sp = '<span class="c-dim">no owner</span>';
-        if (Number(r.spBacker) > 0) sp += '<div class="c-dim">+' + esc(fmt.int(r.spBacker)) + ' to backers</div>';
+        const bk = Object.prototype.hasOwnProperty.call(backers, String(r.runnerId)) ? backers[String(r.runnerId)] : null;
+        if (bk && bk.total > 0) {
+          const same = Object.keys(bk.amounts).length === 1;
+          sp += '<div class="c-dim">+' + esc(fmt.int(same ? bk.total / bk.n : bk.total)) + (same && bk.n > 1 ? ' each' : '') +
+            ' to ' + esc(fmt.int(bk.n)) + ' backer' + (bk.n === 1 ? '' : 's') + '</div>';
+        }
 
         const changes = r.statChanges || {};
         const statTxt = Object.keys(changes).filter(function (k) { return Number(changes[k]); }).map(function (k) {

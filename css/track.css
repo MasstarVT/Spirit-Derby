@@ -178,6 +178,20 @@
 .track[data-n="3"] .sprite__emoji,
 .track[data-n="4"] .sprite__emoji,
 .track[data-n="5"] .sprite__emoji { font-size: 48px; }
+/* Review batch 9 (ui-track#6): 9-10 runners (CONFIG.RACE.MAX_RUNNERS, updateSettings / an imported
+   save) fit the positions column and the lanes at 1920x1080: shorter rows, smaller sprites and
+   badges, no owner line at any height. */
+.track[data-n="9"],
+.track[data-n="10"] { --pos-h: 40px; --sw: 44px; }
+.track[data-n="9"] { --pos-h: 44px; }
+.track[data-n="9"] .lane__owner,
+.track[data-n="10"] .lane__owner { display: none; }
+.track[data-n="9"] .lane__info .badge,
+.track[data-n="10"] .lane__info .badge { width: 32px; height: 32px; font-size: 18px; }
+.track[data-n="9"] .sprite__emoji,
+.track[data-n="10"] .sprite__emoji { font-size: 32px; }
+.track[data-n="9"] .pos-item .badge,
+.track[data-n="10"] .pos-item .badge { width: 28px; height: 28px; font-size: 16px; }
 @media (max-height: 1000px) {
   .track[data-n="7"] .lane__owner,
   .track[data-n="8"] .lane__owner { display: none; }

@@ -392,12 +392,28 @@ select.field { padding-right: 4px; }
 }
 
 /* Reduced motion: stop decorative loops only. Banners/toasts keep their (short) entrances
-   because their keyframes end hidden and must play to be seen at all. */
+   because their keyframes end hidden and must play to be seen at all.
+   Review batch 9 (ui-panels-boot#5): every infinite loop is listed (tools/ui-test.js checks it). The
+   hype meter's pulse is on .hype__bar (.hype__fill has no animation, only a width transition). */
 @media (prefers-reduced-motion: reduce) {
   .sprite__bob,
   .lane__bg,
   .track__fog,
-  .hype__fill { animation: none !important; }
+  .hype__bar,
+  .btn--armed,
+  .btn--armed:hover:not(:disabled),
+  .track__phase[data-phase="FINAL_STRETCH"],
+  .track__phase[data-phase="FINISH"],
+  .track__paused,
+  .paddock__status::before,
+  .lane.fx-ability .sprite::before,
+  .lane.fx-awakened .sprite::before,
+  .conn-dot[data-status="connecting"],
+  .conn-dot[data-status="reconnecting"],
+  .int-pill[data-state="connecting"],
+  .int-pill[data-state="reconnecting"],
+  .log__row--live .log__time,
+  .adm-save--pending .adm-save__dot { animation: none !important; }
 }
 
 /* M5: header "SEASON n" pop when a new season starts */
