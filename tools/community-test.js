@@ -460,9 +460,13 @@ section('!ribbon: named colours, #hex, off, same colour, needs a runner');
   const off = say('Ribbons', '!ribbon off');
   eq([off.ok, M.ribbonColor, player('ribbons').spiritPoints], [true, null, 0], '!ribbon off removes it for free');
   M.ribbonColor = '#4fd1c5';
-  const st = SD.game.startRace();
-  const ent = st.record.entrants.filter(function (e) { return e.runnerId === M.id; })[0];
-  ok(!ent || ent.ribbonColor === '#4fd1c5', 'the race entrant carries the ribbon colour');
+  // Review batch 10 (tools-tests#12): a field of every runner, so Moss is always in it, and the
+  // precondition is asserted (the check used to pass without looking when Moss missed the field).
+  const st = SD.game.startRace({ runnerCount: SD.CONFIG.RACE.MAX_RUNNERS });
+  ok(st.ok, 'the ribbon race starts', st.message);
+  const ent = st.ok ? st.record.entrants.filter(function (e) { return e.runnerId === M.id; })[0] : null;
+  ok(!!ent, 'the ribbon runner is in the field');
+  eq(ent && ent.ribbonColor, '#4fd1c5', 'the race entrant carries the ribbon colour');
   const locked = say('Ribbons', '!ribbon gold');
   eq(locked.locked, true, '!ribbon is locked during a race');
   SD.game.endRace();

@@ -17,6 +17,10 @@
  *   J  '+N to backers' only for runners someone actually backed (ui-panels-boot#8)
  *   K  an important toast on a full strip takes the slot a reply leaves; queue trimming drops replies
  *      first (ui-admin-chat-dom#4)
+ *   L  review batch 10 (ui-track#7): the playback state machine - pause in the countdown keeps the
+ *      seconds left, pause while running keeps the cursor (no jump, no lost or repeated tick), END while
+ *      running, abort in the countdown / running / paused never emits race:playbackDone, and
+ *      race:playbackDone fires exactly once per race
  *
  *   node tools/ui-test.js [--verbose]
  * Runs the real js/ui/dom.js, playback.js, track.js, results.js, season.js and js/main.js (boot) on a
@@ -352,10 +356,28 @@ section('A. Hidden page: playback at real speed (ui-track#1)');
       wall: (T - t0) / 1000, lastTick: rec.ticks.length - 1, events: rec.events.length, finishers: rec.results.length,
       ticks: ticks.list.map(function (p) { return p.tick; }), evCount: evs.n, finCount: fins.n,
       evInOrder: evs.list.every(function (e, i) { return i === 0 || Number(e.tick) >= Number(evs.list[i - 1].tick); }),
-      finished: !S().currentRace, lockedAt60: lockedAt60
+      finished: !S().currentRace, lockedAt60: lockedAt60, est: playSeconds(rec)
     };
     setHidden(false);
     return out;
+  }
+  // The record's own nominal running time (sum of 1 / ticks-per-second over its ticks, as playback.js
+  // paces it): each race here has a fresh entropy seed, so two races differ in length by a second or
+  // more. Comparing wall - est keeps the check about the hidden-tab stepping, not the seed.
+  function playSeconds(rec) {
+    const P = SD.CONFIG.PLAYBACK || {};
+    const table = Object.assign({ START: 3, EARLY: 5, MID: 6, FINAL_TURN: 7, FINAL_STRETCH: 9 }, P.TPS || {});
+    const set = S().settings || {};
+    let secs = 0;
+    for (let k = 0; k < rec.ticks.length - 1; k++) {
+      const ph = rec.ticks[k].phase;
+      let v = Number(table[ph]);
+      if (!isFinite(v)) v = ph === 'FINISH' ? Number(table.FINAL_STRETCH) || 14 : 8;
+      v *= Number(set.playbackSpeed) || 1;
+      if (ph === 'FINAL_STRETCH' || ph === 'FINISH') v *= Number(set.finalStretchSpeedup) || 1;
+      secs += 1 / Math.max(0.25, v);
+    }
+    return secs;
   }
 
   const vis = race('visible');
@@ -374,7 +396,8 @@ section('A. Hidden page: playback at real speed (ui-track#1)');
   });
   // Hidden pages: timers wake about once a second -> the race takes about as long as a visible one
   // (it took 10x longer: every wake-up advanced 100 ms).
-  ok(Math.abs(h1.wall - vis.wall) <= 3, 'hidden with 1 s timers: about the visible duration (not 10x)', { visible: vis.wall, hidden: h1.wall });
+  ok(Math.abs((h1.wall - h1.est) - (vis.wall - vis.est)) <= 3, 'hidden with 1 s timers: about the visible duration (not 10x), each measured against its own record',
+    { visible: vis.wall, visibleNominal: vis.est, hidden: h1.wall, hiddenNominal: h1.est });
   // Intensive throttling (one wake-up a minute): done at the first or second wake-up, not after hours.
   ok(h60.wall <= 125, 'hidden with 1 min timers: done within two wake-ups', h60.wall);
   ok(h60.lockedAt60 === false || h60.wall <= 60 || h60.wall <= 125, 'hidden with 1 min timers: training unlocks within minutes', h60);
@@ -857,6 +880,99 @@ section('K. Important toasts take the slot a reply leaves (ui-admin-chat-dom#4)'
   run(250000);
   ok(firstQueued.parentNode !== null || firstQueued.classList.contains('toast--out'), 'the queued important toast was shown, not dropped by the reply flood');
   void root;
+})();
+
+// =============================================================================
+section('L. Playback state machine: pause / resume / END / abort (review batch 10, ui-track#7)');
+// =============================================================================
+(function () {
+  const ticks = counter(EV.RACE_TICK || 'race:tick');
+  const cds = counter(EV.RACE_COUNTDOWN || 'race:countdown');
+  const done = counter(EV.RACE_PLAYBACK_DONE || 'race:playbackDone');
+  const aborted = counter(EV.RACE_ABORTED || 'race:aborted');
+  function fresh() {
+    settle();
+    rest();
+    ticks.n = 0; ticks.list = []; cds.n = 0; cds.list = []; done.n = 0; aborted.n = 0;
+    const st = SD.game.startRace();
+    ok(st.ok, 'race starts', st.message);
+    return st;
+  }
+
+  // 1. Pause during the countdown: it stays where it was, then finishes the seconds that were left.
+  fresh();
+  run(1000);
+  eq(pb.getMode(), 'countdown', 'countdown running');
+  const cdBefore = cds.n;
+  ok(SD.game.pauseRace().ok, 'pause in the countdown');
+  run(10000);
+  ok(pb.getMode() === 'countdown' && pb.isPaused() && S().currentRace.status === 'paused', 'still in the countdown, paused, after 10 s');
+  eq(cds.n, cdBefore, 'no countdown numbers while paused');
+  eq(pb.currentTick(), 0, 'the cursor did not move');
+  ok(SD.game.resumeRace().ok, 'resume');
+  const t0 = T;
+  run(10000, function () { return pb.getMode() === 'running'; });
+  const left = (T - t0) / 1000;
+  ok(left > 1.6 && left < 2.4, 'the countdown finishes the ~2 s that were left (not restarted, not skipped)', left);
+  eq(S().currentRace.status, 'running', 'the core status went to running when it ended');
+  run(300000, function () { return done.n > 0; });
+  run(60000);
+  eq(done.n, 1, 'race:playbackDone exactly once');
+  ok(!S().currentRace, 'the race was applied');
+  const last = ticks.list.length ? ticks.list[ticks.list.length - 1].tick : -1;
+  eq(ticks.list.map(function (p) { return p.tick; }), Array.from({ length: last + 1 }, function (_, i) { return i; }), 'every tick emitted once, in order, across the pause');
+
+  // 2. Pause while running: the cursor stays put, and resuming continues from there (no jump).
+  fresh();
+  run(300000, function () { return pb.getMode() === 'running' && pb.currentTick() > 20; });
+  ok(SD.game.pauseRace().ok, 'pause while running');
+  const c0 = pb.currentTick();
+  const n0 = ticks.n;
+  run(15000);
+  eq(pb.currentTick(), c0, 'the cursor does not move while paused');
+  eq(ticks.n, n0, 'no ticks while paused');
+  ok(SD.game.resumeRace().ok, 'resume');
+  run(1000);
+  const moved = pb.currentTick() - c0;
+  ok(moved > 0 && moved < 15, 'after resume it continues from the same place (about 1 s of ticks, not the 15 s paused)', moved);
+  run(300000, function () { return done.n > 0; });
+  run(60000);
+  eq(done.n, 1, 'race:playbackDone exactly once');
+  const last2 = ticks.list[ticks.list.length - 1].tick;
+  eq(ticks.list.map(function (p) { return p.tick; }), Array.from({ length: last2 + 1 }, function (_, i) { return i; }), 'no tick lost or repeated across the pause');
+
+  // 3. END while running (not paused): straight to the hold, then done once.
+  fresh();
+  run(300000, function () { return pb.getMode() === 'running' && pb.currentTick() > 10; });
+  const recEnd = pb.getRecord();
+  const lastRecTick = recEnd.ticks.length - 1;
+  ok(pb.currentTick() < lastRecTick - 10, 'END is pressed well before the last tick', pb.currentTick() + ' of ' + lastRecTick);
+  ok(SD.game.endRace().ok, 'END while running');
+  eq(pb.getMode(), 'hold', 'END jumps to the finish hold');
+  run(10000);
+  ok(done.n === 1 && !S().currentRace, 'resolved: playbackDone once, race applied');
+  eq(ticks.list[ticks.list.length - 1].tick, lastRecTick, "END emitted up to the record's last tick");
+  eq(ticks.list.length, lastRecTick + 1, 'END emitted every remaining tick (one per record tick)');
+  eq(ticks.list.map(function (p) { return p.tick; }), Array.from({ length: lastRecTick + 1 }, function (_, i) { return i; }), 'END: every tick emitted once, in order');
+
+  // 4. Abort (countdown, running, paused): playback stops and never reports playbackDone.
+  [['in the countdown', function () { run(500); }],
+    ['while running', function () { run(300000, function () { return pb.getMode() === 'running' && pb.currentTick() > 5; }); }],
+    ['while paused', function () { run(300000, function () { return pb.getMode() === 'running'; }); SD.game.pauseRace(); }]
+  ].forEach(function (c) {
+    fresh();
+    c[1]();
+    const ab = SD.game.abortRace();
+    ok(ab.ok, 'abort ' + c[0], ab.message);
+    eq(aborted.n, 1, 'abort ' + c[0] + ': race:aborted once');
+    eq(pb.getMode(), 'idle', 'abort ' + c[0] + ': playback stopped');
+    ok(!S().currentRace, 'abort ' + c[0] + ': no race left');
+    const tn = ticks.n;
+    SD.bus.emit(EV.RACE_RESUMED || 'race:resumed', {});      // a stray resume does not restart it
+    run(120000);
+    eq(done.n, 0, 'abort ' + c[0] + ': no race:playbackDone, ever');
+    eq(ticks.n, tn, 'abort ' + c[0] + ': no ticks after the abort');
+  });
 })();
 
 console.log('\n' + (failed ? 'FAILED: ' : 'OK: ') + passed + ' passed, ' + failed + ' failed');

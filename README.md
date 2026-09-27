@@ -16,13 +16,13 @@ Version **1.0.0** · [Architecture](docs/ARCHITECTURE.md) · [Twitch / Mix It Up
 
 1. Viewers **`!join`** (200 SP) and **`!claim`** one of 10 runners, or **`!create`** their own once every runner has an owner.
 2. Between races, chat **trains** (`!train speed`), **rests**, **cheers**, **snacks**, **boosts**, **sabotages** and **bets** on the next field. Every action has a small cost and a visible effect.
-3. The streamer starts the race (admin **START RACE**, or a mod types `!race`). It is simulated up front from one seed, then played back in about 20–40 s with phases, abilities, random forest events and chat effects.
+3. The streamer starts the race (admin **START RACE**, or a mod types `!race`). It is simulated up front from one seed, then played back in about 30 s (1200 m) to 55 s (2400 m) with phases, abilities, random forest events and chat effects.
 4. Results pay owners, backers and winning bets, give XP and level-ups, and update six leaderboards. Three races make a day and seven days make a season, which ends with a summary (champion, MVP, biggest upset). Then everyone starts fresh with a small carry-over.
 
 ## Quick start
 
 - **Play:** double-click `index.html` (Chrome, Edge or Firefox). Everything runs from `file://`, and the game autosaves in the browser.
-- **Or serve it:** `node tools/serve.js` (optional; any static server works), then open <http://localhost:8090> (`node tools/serve.js 3000` picks another port).
+- **Or serve it:** `node tools/serve.js` (optional; any static server works), then open <http://localhost:8090> (`node tools/serve.js 3000` picks another port). It serves the project folder to this computer only; `node tools/serve.js 8090 --lan` (or `SD_SERVE_HOST=0.0.0.0`) lets other devices on your network in. It never serves dot-folders such as `.git`, or anything outside the project folder.
 - **Try it alone:** open the **Chat** tab and switch on **🤖 Demo bots**. Six fictional viewers join, train, bet and cheer (the header shows **🤖 DEMO BOTS** while they play). Press **`** (backtick) for the streamer controls and hit **▶ START RACE**.
 - **Before going live:** switch the demo bots off. Their profiles and the runners they made leave the game when they stop, and they also stop by themselves on RESET ALL, IMPORT, overlay mode and when Twitch chat or the bridge connects (they cannot be switched on while either is connected). For a clean first season, use **RESET ALL** (the old game is kept as the backup; RESTORE BACKUP brings it back).
 - **Go live:** press **O** for overlay mode, or load `index.html?overlay=1` as an OBS browser source (1920×1080). Add `&twitch=yourchannel` to read your chat. Details are in [docs/INTEGRATION.md](docs/INTEGRATION.md).
@@ -37,7 +37,7 @@ Version **1.0.0** · [Architecture](docs/ARCHITECTURE.md) · [Twitch / Mix It Up
 | **Paddock** (no race) | The exact next field in lane order with odds, condition, energy and owner · chips for open bets, queued boosts, sabotages and cheers · the season's leader |
 | **Roster strip** | One card per runner: stats vs cap, energy, XP, mood, condition, record, owner, ability (hover for details) · local TRAIN / REST controls for the streamer |
 | **Sidebar** | **Chat** (simulated chat: speak as any viewer with `@login: !cmd`, demo bots) · **Boards** (six leaderboards, season or all-time, and past seasons) · **Log** (everything that happened) |
-| **Modals** | Race results (places, times, XP, SP, stat gains, abilities, bets, achievements) · season summary |
+| **Modals** | Race results (places, times, XP, SP, stat gains, abilities, bets, achievements; they close by themselves after 25 s, `settings.resultsAutoCloseMs`, 0 = only on Continue, set with `SD.game.updateSettings({ resultsAutoCloseMs })`) · season summary |
 | **Toasts** | Achievements, level-ups, streamer messages; in overlay mode also every command reply (queued, max 4 visible, max 1 new reply per second) |
 
 ## Viewer commands
@@ -131,11 +131,11 @@ Keep the stats summing to 200 (each at most 64) and reuse an ability id from `AB
 - **Race events** (16, max 6 per race, 12 on *chaos*; no runner gets two bad ones within 30 ticks): Sudden Rain · Forest Shortcut · Loose Shoe · Cryptid Crossing · Audience Frenzy · Butterfly Distraction · Snack Break · Unknown Creature Appears · Mysterious Fog (hides positions) · Suspicious Mushroom · Forest Wind (hits the leader) · Lucky Acorn · Firefly Trail (lifts the last runner) · Tangled Vines · Owl's Advice · Puddle Jump.
 - **Day events** (one per day, header badge): Clear Skies · Fog of the Hollow (Wisdom ×1.5) · Harvest Festival (payouts ×1.5) · Cryptid Season (events ×1.5) · Still Morning (steadier form) · Wisp Migration (crits ×1.5) · Moonlit Glade (bigger stamina pools).
 - **Flags:** a *photo finish* (winning margin under 0.4 m) and an *upset* (winner at 10× or more) each add hype and get a banner.
-- Playback is presentation only: speed ramps up by phase, and the final stretch plays faster (`finalStretchSpeedup`). With the default settings a race lasts roughly 20 s (1200 m) to 40 s (2400 m) including the countdown.
+- Playback is presentation only: speed ramps up by phase, and the final stretch plays faster (`finalStretchSpeedup`). With the default settings (final-stretch speedup 1.25, playback speed 1) a race lasts about 30 s at 1200 m, 38 s at 1600 m, 46 s at 2000 m and 55 s at 2400 m, including the 3 s countdown and the finish hold.
 
 ## Hype
 
-The crowd meter runs from 0 to 120. Cheers +3, training +1 (a crit +10), bets +1 (when the race settles the bet, so it counts toward the next race), level-ups +8, a backfired sabotage +5, and each race moment (finish, photo finish, upset, Forest Awakened) +15; resting costs 5. It is scaled by **Tuning → Hype multiplier**. After each race it keeps 40%; after 5 idle minutes it loses 1 every 2 minutes.
+The crowd meter runs from 0 to 120. Cheers +3, training +1 (a crit +10), bets +1 (when the race settles the bet, so it counts toward the next race), level-ups +8, and each race moment (finish, photo finish, upset, Forest Awakened) +15; resting costs 5. (A backfired sabotage gives no hype: it only speeds up the runner it was aimed at.) It is scaled by **Tuning → Hype multiplier**. After each race it keeps 40%; after 5 idle minutes it loses 1 every 2 minutes.
 
 | Threshold | Banner | Effect |
 |---|---|---|
@@ -158,11 +158,11 @@ A day has 3 races and a season has 7 days. With **Auto-advance day** on, the day
 | Section | Controls |
 |---|---|
 | 🏁 Race | **START RACE** · **END RACE** (plays the result out instantly) · **PAUSE / RESUME** · distance · number of runners |
-| 🌲 World | day event picker + **TRIGGER EVENT** · **ADD HYPE +25** · name + **SPAWN RUNNER** · **NEXT DAY** · **RESET DAY** · **RESET SEASON** (summary + rollover) · **RESET ALL** (new game; the old one is kept as the backup) |
+| 🌲 World | day event picker + **TRIGGER EVENT** · **ADD HYPE +25** (`HYPE.GAINS.admin`) · name + **SPAWN RUNNER** · **NEXT DAY** · **RESET DAY** · **RESET SEASON** (summary + rollover) · **RESET ALL** (new game; the old one is kept as the backup) |
 | 🛡 Runners & viewers | for names that should not be on stream: pick a runner, then **RENAME** (same rules as `!create`), **RETIRE RUNNER** (stops racing, leaves chat lookups; its record stays) or **DELETE RUNNER** (created runners only; gone from the game and the boards). Pick a viewer, then **REMOVE VIEWER** (profile, SP and achievements gone, their runner free again). Bets and paid boosts / sabotages on a retired or deleted runner are refunded, and the old name is replaced in the log and in season summaries, the one of the season in progress included (race records keep it). Not while a race is running |
 | 🎛 Tuning | event frequency (none / low / normal / high / chaos) · hype multiplier · playback speed · final-stretch speedup · user cooldown · open training · allow `!create` · auto-advance day |
 | 🐞 Debug | debug mode (hidden events such as wild rolls in the ticker, a HUD on the track with tick / fps / seed / hash / wild rolls, a perf + fatigue table, error toasts) · **seed override** (every race uses it while debug is on; the paddock matches; the header shows **FIXED SEED**, also on stream, and it is never saved, so a reload clears it) · **REPLAY LAST RACE** (re-simulates and compares hashes; races from an older engine are flagged as such) · **COPY LAST RACE JSON** for bug reports |
-| 💾 Save | **EXPORT JSON** / **IMPORT JSON** · `autosave ● 2 s ago · 41 KB` with a *SAVED ✓* flash · counts and storage type · **Save now** |
+| 💾 Save | **EXPORT JSON** / **IMPORT JSON** · `autosave ● 2 s ago · 41 KB` with a *SAVED ✓* flash · counts and storage type · **Save now** · **RESTORE BACKUP** (swaps the game with the one before the last import, restore or upgrade) · **⬇ RESCUE COPY** / **✕ DELETE RESCUE COPY** (only when a save this version could not load was kept) |
 | 💬 Send as | run any command as the streamer (mod and read-only commands) or as a recent viewer: viewers are listed by display name and addressed by login, and your choice stays selected (no cooldowns) |
 | 📡 Twitch & bridge | read-only Twitch chat and the local bridge: connect, auto-connect, live status |
 
@@ -178,14 +178,15 @@ The drawer footer shows the build: `Spirit Derby v1.0.0 · save schema v4 · rac
 
 **Fair races:** the paddock shows the next field and its lanes before bets close, but the race itself (gate moods, track and result) runs on a fresh value from the browser's secure random generator, drawn when the gates open, after bets have closed. So nothing chat can see beforehand (the paddock, earlier races, COPY LAST RACE JSON or an exported save) tells anyone who will win. The seed salt behind the paddock draw is also re-drawn at every race start and every time a save is loaded or imported, and EXPORT JSON leaves it out, so going back to an older save (IMPORT of an earlier export, an old copy of the game) does not replay races chat has already watched. Past races keep their own seeds, so REPLAY LAST RACE still reproduces them. (With the debug seed override on, every race is fixed and predictable; the header then shows FIXED SEED.)
 
-**Tuning beyond the sliders:** every number lives in `SD.CONFIG` (`js/config.js`). The ones worth touching first:
+**Tuning beyond the sliders:** every number lives in `SD.CONFIG` (`js/config.js`). The ones worth touching first are below. Five values are **copied into the save when a game is created**, so an edit only reaches new games (after **RESET ALL**, or in a browser with no save): `SEASON.RACES_PER_DAY`, `SEASON.DAYS`, `COOLDOWNS.USER_S`, `HYPE.MAX` (the hype cap) and `UI.RESULTS_AUTO_CLOSE_MS` (how long the results card stays up). For the running game use **Tuning → User cooldown**, or `SD.game.updateSettings({ resultsAutoCloseMs: 10000 })` in the console for the results card; RESET SEASON keeps the day and season length and the hype cap. The other rows in the table are read live, after a reload.
 
 | Constant | Default | Meaning |
 |---|---|---|
-| `SEASON.RACES_PER_DAY` / `SEASON.DAYS` | 3 / 7 | length of a day and a season |
+| `SEASON.RACES_PER_DAY` / `SEASON.DAYS` | 3 / 7 | length of a day and a season (new games only, see above) |
 | `ECONOMY.JOIN_SP`, `DAILY_SP`, `BET_MIN` / `BET_MAX`, `BOOST_COST`, `SNACK_COST`, `SABOTAGE_COST`, `RIBBON_COST` | 200, 50, 10 / 250, 40, 25, 60, 100 | the SP economy |
-| `COOLDOWNS.USER_S` / `CHEER_S` / `SABOTAGE_S` / `ERROR_S` | 10 / 30 / 600 / 30 | chat cooldowns (seconds); `ERROR_S` applies after a command fails with an internal error |
-| `HYPE.GAINS`, `HYPE.AFTER_RACE_KEEP` | see file, 0.4 | hype per action, post-race decay |
+| `COOLDOWNS.USER_S` / `CHEER_S` / `SABOTAGE_S` / `ERROR_S` | 10 / 30 / 600 / 30 | chat cooldowns (seconds; `USER_S` for new games only, see above); `ERROR_S` applies after a command fails with an internal error |
+| `HYPE.GAINS.cheer` / `bet` / `admin`, `HYPE.AFTER_RACE_KEEP` | 3 / 1 / 25, 0.4 | hype per cheer, per settled bet and per ADD HYPE press; post-race decay. Training, resting, level-up and race-moment hype live with their rules: `TRAINING.REWARDS.*.hype`, `TRAINING.REST.HYPE`, `PROGRESSION.LEVELUP_HYPE`, `RESULTS.MAJOR_HYPE` |
+| `TRAINING.REWARDS`, `TRAINING.FAIL` | SP 5 / 15, fail 5% + 15% below 30 energy + 15% below 15 | training SP / XP / hype per outcome; fail chances and their energy thresholds (`LOW30_BELOW`, `LOW15_BELOW`) |
 | `RUNNERS.MAX_ACTIVE`, `CREATE_NAME_MIN` / `MAX` | 24, 3 / 20 | roster cap, `!create` names |
 | `UI.TOAST_MAX`, `REPLY_TOASTS_PER_S`, `REPLY_QUEUE_MAX` | 4, 1, 6 | overlay toast flood control |
 | `PLAYBACK.TPS`, `COUNTDOWN_S` | per phase, 3 | how fast races play back |
@@ -220,14 +221,14 @@ Classic `<script>` files on one `globalThis.SD` namespace (no modules, so it run
 
 ## Testing
 
-`node tools/run-tests.js` runs every suite as a child process and exits non-zero on any failure (`--verbose` prints every assertion).
+`node tools/run-tests.js` runs every suite as a child process and exits non-zero on any failure (`--verbose` prints every assertion). A suite that has not finished after 5 minutes (`--timeout <seconds>` to change it) is stopped and reported as failed, with the output it printed. Every suite except `durability` (which runs several copies of the core side by side in `vm` contexts, with only `Math.random` trapped) loads the core through `tools/load-core.js`, which makes the determinism rules of the core (no `Date`, timers, `window`, `document`, `crypto` or `Math.random`) fail loudly; its static scan covers the same core files that `durability` runs.
 
 | Suite | File | Covers |
 |---|---|---|
 | balance | `balance-test.js` | determinism, no NaN, win-rate bands per runner / style / distance, odds calibration, stat / condition / mood sensitivity |
 | race | `race-test.js` | abilities, the 16 events, hype tiers, chat effects in races, photo finish / upset, replay, day events, playback length |
 | parser | `parser-test.js` | command parsing, aliases, the pipeline (permissions, race lock, cooldowns), players |
-| progression | `progression-test.js` | XP / level-ups, leaderboards, `!lb` / `!rank` |
+| progression | `progression-test.js` | XP / level-ups, leaderboards, `!lb` / `!rank`, tunables read from `SD.CONFIG` (training fail thresholds, stat floors, hype gains) |
 | integration | `integration-test.js` | Twitch IRC parsing and adapter, the bridge (no network) |
 | community | `community-test.js` | betting, boost / snack / sabotage / ribbon, mod commands, achievements, seasons |
 | persistence | `persistence-test.js` | an M1 save (`tools/fixtures/save-m1.json`) migrating and playing on, a v2 save with display-name owners (`tools/fixtures/save-v2-display-names.json`) upgrading through schema 3 (to schema 4 since review batch 6), normalize, roster reconciliation, interrupted races, backups, history trimming, UI prefs |
@@ -236,10 +237,13 @@ Classic `<script>` files on one `globalThis.SD` namespace (no modules, so it run
 | economy | `economy-test.js` | odds never above the fair price minus the house edge, bets settled at min(quote, gate odds), hype-aware odds, bets counted when settled, profit-only SP earned, mid-race cheers, gate moods after an abort, `!bet` / `!ribbon` / `!snack` / `!race` / `!rest` / `!sabotage` fixes, the snack reset at season rollover |
 | durability | `durability-test.js` | slim race history and the schema 4 upgrade, the save size budget under a Chrome-like storage quota, visible save failures and retries, no saves for read-only chat / idle clock / mid-race, one saving window (read-only second window, TAKE OVER, stale locks), held unreadable / newer saves, checked backups and RESTORE BACKUP, pruning drive-by viewers, `!rank` ranking |
 | import | `import-test.js` | hardened IMPORT: broken finished races refunded (and good ones applied at once), best-time / runner-id / lane / distance repairs, retired runners' refunds, runtime maps reset on IMPORT and RESET ALL, boot order and the boot recovery buttons |
+| ui | `ui-test.js` | the real UI and boot on a fake DOM: hidden-page playback speed, the playback state machine (pause / resume keep the countdown and position, END from the countdown, running, paused and the finish hold, abort never reports playback done, every tick once), the final view behind the results, 9–10 runner fields, the season summary vs the next race, modal focus and Tab, tab arrow keys, reduced motion, backer lines, toast priority |
+| escape | `escape-test.js` | the whole page (`index.html`, every UI script, `main.js`) on a fake DOM that parses every `innerHTML`, fed hostile display names, logins, chat text, runner names, colours, avatar URLs, an edited save and every HTML builder's fields: no markup, event handler, style `url(` or `javascript:` URL gets through; `esc` / `safeColor` / `safeUrl` |
+| tooling | `tooling-test.js` | the test harness itself: `load-core.js` traps `Date`, timers, `window` / `document` / `localStorage`, `crypto` and `Math.random` in core files; `run-tests.js` kills a suite that hangs; `serve.js` is local-only, survives bad URLs and serves nothing outside the project folder or in dot-folders |
 | rng | `rng-test.js` | unpredictable race seeds (secure random salt re-drawn at every race start, load and import; a leaked race seed predicts nothing; the race runs on fresh gate entropy, so brute-forcing the paddock's seed predicts no result), no seed salt or seed override in EXPORT JSON, no replayed races after a save rollback, refused trainings draw no randomness, `hashRecord` of a stored race, `rollStats` remainder order |
-| runners | `runners-test.js` | `!create` rules and replies, SPAWN RUNNER, the runner cap, `SD.debug` |
+| runners | `runners-test.js` | `!create` rules and replies, SPAWN RUNNER, the runner cap, `SD.debug` (including `/g` filters for `bus.wildcard`) |
 | hygiene | `hygiene-test.js` | retire / rename / delete a runner and remove a viewer, demo bots on their own `~` profiles and their clean-up (RESET ALL, IMPORT, live chat, after a race), the confirm delay, the RESET ALL backup, NEXT DAY debounce, stale season summaries, `!create` name rules and the `!bet` / `!train` parsers |
-| fuzz | `fuzz-test.js` | 17 seeded viewers (three with display names that are not their login, plus the logins `constructor` and `__proto__`) spamming every command (hostile arguments, spam bursts, mid-race attempts, non-mod mod commands, reloads) over 3 full seasons, with invariants checked after every command and race |
+| fuzz | `fuzz-test.js` | 17 seeded viewers (three with display names that are not their login, plus the logins `constructor` and `__proto__`) spamming every command (hostile arguments, spam bursts, mid-race attempts, non-mod mod commands, reloads) over 3 full seasons, with RESET SEASON mid-season and the streamer's admin actions (settings, day event, clock, spawn, hype, EXPORT → IMPORT) during races; invariants are checked after every command and race |
 
 Useful flags:
 
@@ -269,7 +273,7 @@ js/                     core, DOM-free (loads in Node)
   ui/                   browser panels: dom, playback, header, track, results, season, roster, chat, leaderboards, eventlog, admin
   integrations/         twitch.js (read-only IRC), bridge.js (local WebSocket relay)
   main.js               boot
-tools/                  load-core.js · run-tests.js · *-test.js suites · serve.js · fixtures/save-m1.json
+tools/                  load-core.js · run-tests.js · *-test.js suites · serve.js · fixtures/ (save-m1.json, save-v2-display-names.json)
 docs/                   ARCHITECTURE.md (API contract) · INTEGRATION.md (Twitch, Mix It Up, OBS)
 ```
 
@@ -280,7 +284,7 @@ docs/                   ARCHITECTURE.md (API contract) · INTEGRATION.md (Twitch
 - Channel-point redemptions through the bridge (for example a free boost).
 - Team events and relay races; rival pairs with their own banter; a hall of fame for retired runners.
 - A second track layout per distance and weather that lasts a whole day.
-- Localisation: every reply is one string in `js/commands.js` and `js/data.js`.
+- Localisation: reply and log text is English strings in several core files: `js/commands.js`, `js/data.js` (flavour text), `js/betting.js`, `js/training.js`, `js/players.js`, `js/game.js`, `js/runners.js` (the `!create` name rules), `js/seasons.js`, `js/achievements.js`, `js/leaderboards.js` (board names and the `!lb` lines), `js/race.js` (race event and ability commentary in the event log and ticker) and `js/persistence.js` (the saving-window notices and save-recovery log lines), plus the UI panels. A string table would be the first step.
 
 ## Licence
 

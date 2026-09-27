@@ -282,7 +282,7 @@
     const ring = safeColor(r.ribbonColor);
     const url = safeUrl(r.avatarUrl);
     const inner = url ? '<img src="' + esc(url) + '" alt="">' : esc(r.emoji || '🐾');
-    return '<span class="badge' + (ring ? ' badge--ribbon' : '') + (cls ? ' ' + cls : '') +
+    return '<span class="badge' + (ring ? ' badge--ribbon' : '') + (cls ? ' ' + esc(cls) : '') +
       '" style="' + esc(runnerVars(r)) + '" aria-hidden="true">' + inner + '</span>';
   }
 

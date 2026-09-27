@@ -248,7 +248,12 @@
       FERAL_MULT: 1.05,        // hype >= 50
       CRIT: { BASE: 0.08, PER_LUCK: 0.0015, PER_WIS: 0.001, AWAKENED: 0.05, MAX: 0.35, GAIN_MULT: 2 },
       FAIL: {
-        BASE: 0.05, LOW30: 0.15, LOW15: 0.15, TIRED: 0.05, EXHAUSTED: 0.15, MAX: 0.60,
+        BASE: 0.05,
+        // Review batch 10 (runners-data#8): the energy thresholds are tunables too (they were hard-coded
+        // in training.chances). LOW30 is added when the energy before training is below LOW30_BELOW,
+        // LOW15 (on top) below LOW15_BELOW.
+        LOW30: 0.15, LOW30_BELOW: 30, LOW15: 0.15, LOW15_BELOW: 15,
+        TIRED: 0.05, EXHAUSTED: 0.15, MAX: 0.60,
         EXTRA_FATIGUE: 8, NERVOUS_P: 0.4
       },
       FATIGUE: 5,              // per train
@@ -290,7 +295,9 @@
       XP_BASE: 60, XP_PER_LEVEL: 20,         // xpToNext = 60 + 20 * (level - 1)
       LEVELUP_STAT_BONUS: 1,
       LEVELUP_HYPE: 8,
-      STAT_TOTAL: 200                        // random/custom runners
+      STAT_TOTAL: 200,                       // random/custom runners
+      RANDOM_STAT_FLOOR: 20,                 // review batch 10: each stat of a random/custom runner starts here
+      DEFAULT_STAT: 30                       // review batch 10: a stat a roster / spawn entry leaves out
     },
 
     // -------------------------------------------------------------------------
@@ -298,7 +305,9 @@
     // -------------------------------------------------------------------------
     ECONOMY: {
       JOIN_SP: 200, DAILY_SP: 50,
-      TRAIN_SP: 5, TRAIN_CRIT_SP: 15, CHEER_SP: 2,
+      // Training SP is TRAINING.REWARDS.normal.sp / crit.sp (review batch 10: the unused TRAIN_SP /
+      // TRAIN_CRIT_SP duplicates were removed).
+      CHEER_SP: 2,
       BET_MIN: 10, BET_MAX: 250,
       SABOTAGE_COST: 60, BOOST_COST: 40, SNACK_COST: 25, SNACK_ENERGY: 10, SNACKS_PER_DAY: 2,
       RIBBON_COST: 100,
@@ -333,7 +342,11 @@
     // -------------------------------------------------------------------------
     HYPE: {
       MAX: 120,
-      GAINS: { train: 1, cheer: 3, crit: 10, levelUp: 8, bet: 1, backfire: 5, major: 15, rest: -5, admin: 25 },
+      // Hype per action. Review batch 10 (runners-data#6): only the gains read from here are listed. The
+      // others live next to the rule they belong to: training TRAINING.REWARDS.normal.hype / crit.hype,
+      // resting TRAINING.REST.HYPE, level-ups PROGRESSION.LEVELUP_HYPE, race moments RESULTS.MAJOR_HYPE.
+      // A backfired sabotage adds no hype (it only helps the runner).
+      GAINS: { cheer: 3, bet: 1, admin: 25 },   // admin = the drawer's ADD HYPE button
       AFTER_RACE_KEEP: 0.4,     // hype = floor(hype * 0.4) after a race
       IDLE_AFTER_MS: 5 * 60 * 1000,
       IDLE_STEP_MS: 2 * 60 * 1000 // -1 per 2 idle minutes

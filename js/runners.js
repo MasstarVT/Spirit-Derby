@@ -96,7 +96,7 @@
   // Build a complete Runner object from partial fields.
   function baseRunner(o) {
     const stats = {};
-    STATS.forEach(function (k) { stats[k] = U.clamp(Math.round(Number(o.stats && o.stats[k]) || 30), 1, statCap(1)); });
+    STATS.forEach(function (k) { stats[k] = U.clamp(Math.round(Number(o.stats && o.stats[k]) || SD.CONFIG.PROGRESSION.DEFAULT_STAT), 1, statCap(1)); });
     const r = {
       id: o.id,
       rosterKey: o.rosterKey || null,
@@ -159,7 +159,7 @@
 
   // Distribute `total` stat points by species bias with some randomness.
   function rollStats(rng, bias, total) {
-    const floor = 20;
+    const floor = SD.CONFIG.PROGRESSION.RANDOM_STAT_FLOOR;
     const cap = statCap(1);
     const w = STATS.map(function (k) { return (bias && bias[k] || 1) * (0.75 + 0.5 * rng.float()); });
     const sumW = w.reduce(function (a, b) { return a + b; }, 0);

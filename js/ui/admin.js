@@ -42,6 +42,14 @@
   // One-click actions a double-click must not run twice (review batch 8, lifecycle-concurrency#6).
   const DEBOUNCED = { start: 1, nextday: 1, spawn: 1, hype: 1, trigger: 1 };
 
+  // Review batch 10 (runners-data#6): ADD HYPE uses CONFIG.HYPE.GAINS.admin (it was a hard-coded 25).
+  // 25 only when the key is missing or not a number; 0 turns the button off (it is disabled).
+  function adminHype() {
+    const raw = SD.CONFIG && SD.CONFIG.HYPE && SD.CONFIG.HYPE.GAINS ? SD.CONFIG.HYPE.GAINS.admin : undefined;
+    return typeof raw === 'number' && isFinite(raw) ? raw : 25;
+  }
+  function adminHypeLabel() { return '🔥 ADD HYPE +' + adminHype(); }
+
   function opt(v, label) { return '<option value="' + esc(v) + '">' + esc(label) + '</option>'; }
 
   // SEND AS label for a player key: the display name, plus the login when the two differ by more than case.
@@ -94,7 +102,7 @@
             '<select id="adm-event" class="field" data-ref="eventSel"></select></div>' +
           '<div class="adm-row adm-row--2">' +
             '<button type="button" class="btn btn--primary" data-act="trigger" data-ref="btnTrigger">🎲 TRIGGER EVENT</button>' +
-            '<button type="button" class="btn" data-act="hype">🔥 ADD HYPE +25</button>' +
+            '<button type="button" class="btn" data-act="hype" data-ref="btnHype"' + (adminHype() === 0 ? ' disabled' : '') + '>' + esc(adminHypeLabel()) + '</button>' +
           '</div>' +
           '<div class="adm-row">' +
             '<input type="text" class="field" data-ref="spawnName" placeholder="New runner name (optional)" maxlength="24" style="flex:1 1 180px" aria-label="New runner name">' +
@@ -439,10 +447,13 @@
           }
           break;
         }
-        case 'hype':
-          r = this.call('addHype', [25, BY]);
-          if (r.ok) dom.toast('🔥 Hype +25', 'good');
+        case 'hype': {
+          const amount = adminHype();          // read once: the call and the toast always agree
+          if (amount === 0) { dom.toast('ADD HYPE is off (CONFIG.HYPE.GAINS.admin is 0).', 'bad'); break; }
+          r = this.call('addHype', [amount, BY]);
+          if (r.ok) dom.toast('🔥 Hype +' + amount, 'good');
           break;
+        }
         case 'spawn': {
           const input = this.refs.spawnName;
           const name = input ? input.value.trim() : '';
@@ -805,6 +816,12 @@
       ['btnNextDay', 'btnResetDay', 'btnResetSeason', 'btnResetAll', 'btnImport', 'btnTrigger'].forEach(function (k) {
         if (r[k]) r[k].disabled = !!cr;
       });
+      // ADD HYPE follows a live CONFIG.HYPE.GAINS.admin edit (label and amount agree; 0 disables it).
+      if (r.btnHype) {
+        const hl = adminHypeLabel();
+        if (r.btnHype.textContent !== hl) r.btnHype.textContent = hl;
+        r.btnHype.disabled = adminHype() === 0;
+      }
       if (r.btnNextDay && r.btnNextDay.dataset.armed !== '1') {
         const label = this.nextDayEndsSeason() ? '☀ NEXT DAY (ends season)' : '☀ NEXT DAY';
         if (r.btnNextDay.textContent !== label) r.btnNextDay.textContent = label;

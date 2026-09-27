@@ -365,6 +365,60 @@ section('a finished race updates the boards (claimed winner)');
 }
 
 // -----------------------------------------------------------------------------
+section('review batch 10: every tunable is read from SD.CONFIG (runners-data#6, runners-data#8)');
+// -----------------------------------------------------------------------------
+{
+  fresh();
+  const C = SD.CONFIG;
+  const TR = C.TRAINING;
+  // Training fail chance: the low-energy thresholds are CONFIG.TRAINING.FAIL.LOW30_BELOW / LOW15_BELOW.
+  const r = JSON.parse(JSON.stringify(S().runners[0]));
+  r.mood = 'Happy';
+  r.condition = 'Good';
+  const failAt = function (energy) { r.energy = energy; return SD.util.round2(SD.training.chances(S(), r).failP); };
+  const base = SD.util.round2(TR.FAIL.BASE + (SD.DATA.MOODS.Happy.trainFail || 0));
+  eq([failAt(35), failAt(29), failAt(14)], [base, SD.util.round2(base + TR.FAIL.LOW30), SD.util.round2(base + TR.FAIL.LOW30 + TR.FAIL.LOW15)],
+    'default thresholds: +LOW30 below 30, +LOW15 more below 15');
+  const saved = [TR.FAIL.LOW30_BELOW, TR.FAIL.LOW15_BELOW];
+  TR.FAIL.LOW30_BELOW = 40;
+  TR.FAIL.LOW15_BELOW = 20;
+  try {
+    eq([failAt(41), failAt(35), failAt(19)], [base, SD.util.round2(base + TR.FAIL.LOW30), SD.util.round2(base + TR.FAIL.LOW30 + TR.FAIL.LOW15)],
+      'moved thresholds (40 / 20) move the fail-chance steps');
+  } finally {
+    TR.FAIL.LOW30_BELOW = saved[0];
+    TR.FAIL.LOW15_BELOW = saved[1];
+  }
+
+  // Random / custom runners: every stat starts at PROGRESSION.RANDOM_STAT_FLOOR.
+  const floor0 = C.PROGRESSION.RANDOM_STAT_FLOOR;
+  const rng = SD.rng.create(4242);
+  const low = [];
+  for (let i = 0; i < 40; i++) {
+    const st = SD.runners.rollStats(rng, null, C.PROGRESSION.STAT_TOTAL);
+    Object.keys(st).forEach(function (k) { low.push(st[k]); });
+  }
+  ok(Math.min.apply(null, low) >= floor0, 'rolled stats never go below RANDOM_STAT_FLOOR (' + floor0 + ')', Math.min.apply(null, low));
+  C.PROGRESSION.RANDOM_STAT_FLOOR = 35;
+  try {
+    const st = SD.runners.rollStats(SD.rng.create(7), null, C.PROGRESSION.STAT_TOTAL);
+    ok(Object.keys(st).every(function (k) { return st[k] >= 35; }), 'RANDOM_STAT_FLOOR 35: every rolled stat is at least 35', st);
+  } finally {
+    C.PROGRESSION.RANDOM_STAT_FLOOR = floor0;
+  }
+  // A roster entry without stats gets PROGRESSION.DEFAULT_STAT.
+  const bare = SD.runners.spawnFromRoster({ key: 'bare', name: 'Bare Runner', style: 'paceChaser' }, 40);
+  ok(['speed', 'stamina', 'power', 'wisdom', 'luck'].every(function (k) { return bare.stats[k] === C.PROGRESSION.DEFAULT_STAT; }),
+    'a missing stat defaults to PROGRESSION.DEFAULT_STAT', bare.stats);
+
+  // No dead keys: HYPE.GAINS holds only the gains read from it; training SP comes from TRAINING.REWARDS.
+  eq(Object.keys(C.HYPE.GAINS).sort(), ['admin', 'bet', 'cheer'], 'HYPE.GAINS lists only cheer, bet and admin (the others live with their rules)');
+  ok(!('TRAIN_SP' in C.ECONOMY) && !('TRAIN_CRIT_SP' in C.ECONOMY), 'ECONOMY has no unused TRAIN_SP / TRAIN_CRIT_SP');
+  const src = require('fs').readFileSync(require('path').join(__dirname, '..', 'js', 'ui', 'admin.js'), 'utf8');
+  ok(/HYPE\.GAINS\.admin/.test(src) && !/addHype', \[25,/.test(src), 'ADD HYPE in the admin drawer reads CONFIG.HYPE.GAINS.admin');
+}
+
+// -----------------------------------------------------------------------------
 console.log('\n' + (failed ? 'FAILED' : 'OK') + ': ' + passed + ' passed, ' + failed + ' failed');
 if (failed) {
   failures.forEach(function (f) { console.log('  - ' + f); });

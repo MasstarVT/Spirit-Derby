@@ -243,7 +243,7 @@ section('!train');
   eq(moss.stats.speed - before.speed, tr.gain, 'gain matches the effect');
   eq(Math.round((before.energy - moss.energy) * 100) / 100, SD.CONFIG.TRAINING.ENERGY_COST, 'energy -12');
   const spGain = player('foxfan').spiritPoints - before.sp;
-  eq(spGain, tr.outcome === 'crit' ? SD.CONFIG.ECONOMY.TRAIN_CRIT_SP : SD.CONFIG.ECONOMY.TRAIN_SP, 'SP +5 (or +15 on a crit)');
+  eq(spGain, SD.CONFIG.TRAINING.REWARDS[tr.outcome].sp, 'SP +5 (or +15 on a crit) from TRAINING.REWARDS');
   const moodHype = SD.DATA.MOODS.Happy.hypeMult;
   const expectHype = SD.util.round1(SD.CONFIG.TRAINING.REWARDS[tr.outcome].hype * moodHype);
   eq(SD.util.round1(S().hype.value - before.hype), expectHype, 'hype +1 (x Happy mood 1.2) on a normal session');
@@ -493,8 +493,16 @@ section('!status / !inspect / !race / !event / !help');
   has(i1.message, 'Unclaimed', 'inspect shows the owner (none)');
   const i2 = say('FoxFan', '!i');
   has(i2.message, 'Owner: FoxFan', '!inspect with no args shows your own runner');
+  // Review batch 10 (tools-tests#12): the precondition is asserted, so the odds check can never pass
+  // without looking; a runner outside the field gets no odds line.
   const inField = SD.game.previewField().filter(function (r) { return r.id === vc.id; }).length > 0;
-  if (inField) has(i2.message, 'Next race odds', 'inspect shows next-race odds for a runner in the field');
+  ok(inField, "precondition: FoxFan's runner is in the previewed field");
+  has(i2.message, 'Next race odds', 'inspect shows next-race odds for a runner in the field');
+  const outside = SD.state.activeRunners(S()).filter(function (r) {
+    return !SD.game.previewField().some(function (f) { return f.id === r.id; });
+  })[0];
+  ok(!!outside, 'precondition: some runner is outside the previewed field');
+  ok(outside && say('Lurker', '!inspect ' + outside.id).message.indexOf('Next race odds') < 0, 'inspect shows no next-race odds for a runner outside the field');
   has(say('Lurker', '!inspect').message, 'Usage', '!inspect without a runner shows usage');
   has(say('Lurker', '!event').message, 'Clear Skies', '!event shows the day event');
   has(say('Lurker', '!race').message, 'Next up', '!race shows the next race');

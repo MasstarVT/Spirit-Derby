@@ -92,7 +92,10 @@
   function wildcard(on, filter) {
     const want = on === undefined ? !unsub : !!on;
     if (unsub) { unsub(); unsub = null; }
-    filterRe = filter ? (filter instanceof RegExp ? filter : new RegExp(String(filter))) : null;
+    // Review batch 10 (director-state#11): a copy without the g / y flags. test() on a global or sticky
+    // RegExp is stateful (lastIndex), so every other matching event was dropped.
+    filterRe = filter ? (filter instanceof RegExp ? new RegExp(filter.source, filter.flags.replace(/[gy]/g, ''))
+      : new RegExp(String(filter))) : null;
     if (want && SD.bus) {
       unsub = SD.bus.wildcard(function (name, payload) {
         if (filterRe ? !filterRe.test(name) : NOISY.test(name)) return;

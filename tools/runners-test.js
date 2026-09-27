@@ -182,14 +182,12 @@ section('create: success');
   ok(race.ok && race.record.entrants.some(function (e) { return e.runnerId === rn.id; }), 'the created runner makes the field', race.message);
   SD.game.endRace();
   ok(SD.state.runnerById(rn.id).record.races === 1, 'and finishes a race');
+  // Review batch 10 (tools-tests#12): the second race is a precondition, not an optional branch.
   const lock = SD.game.startRace();
-  if (lock.ok) {
-    const lr = say('Nobody1', '!join') && say('Nobody1', '!create Lichen Leap');
-    ok(!lr.ok && /a race is running/.test(lr.message), '!create is locked during a race', lr.message);
-    SD.game.abortRace();
-  } else {
-    ok(true, '(no second race today)');
-  }
+  ok(lock.ok, 'precondition: a second race starts', lock.message);
+  const lr = say('Nobody1', '!join') && say('Nobody1', '!create Lichen Leap');
+  ok(!lr.ok && /a race is running/.test(lr.message), '!create is locked during a race', lr.message);
+  if (lock.ok) SD.game.abortRace();
 })();
 
 // =============================================================================
@@ -273,6 +271,22 @@ section('SD.debug');
     console.log = realLog;
   }
   eq(logs.map(function (l) { return l.split(' ')[1]; }), ['test:event', 'race:frame'], 'noisy race:frame skipped by default; a filter picks events');
+
+  // Review batch 10 (director-state#11): a global / sticky RegExp filter logs every matching event
+  // (test() on a /g regex is stateful, and every other match used to be dropped).
+  [/bet/g, /bet/y, /BET/gi].forEach(function (re) {
+    const got = [];
+    console.log = function () { got.push(Array.prototype.slice.call(arguments).join(' ')); };
+    try {
+      SD.debug.bus.wildcard(true, re);
+      ['bet:placed', 'bet:resolved', 'bet:placed', 'bet:resolved', 'race:started'].forEach(function (n) { SD.bus.emit(n, {}); });
+      SD.debug.bus.wildcard(false);
+    } finally {
+      console.log = realLog;
+    }
+    eq(got.map(function (l) { return l.split(' ')[1]; }), ['bet:placed', 'bet:resolved', 'bet:placed', 'bet:resolved'], 'wildcard filter ' + re + ' logs all 4 bet events');
+    eq(re.lastIndex, 0, 'the caller\'s RegExp ' + re + ' is left untouched');
+  });
 })();
 
 if (TRANSCRIPT) {

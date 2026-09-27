@@ -47,7 +47,7 @@
     const critP = Math.min(TR.CRIT.MAX, TR.CRIT.BASE + TR.CRIT.PER_LUCK * runner.stats.luck +
       TR.CRIT.PER_WIS * runner.stats.wisdom + (mood.trainCrit || 0) +
       (hype >= SD.CONFIG.RACE.HYPE.AWAKENED ? TR.CRIT.AWAKENED : 0));
-    const failP = Math.min(TR.FAIL.MAX, TR.FAIL.BASE + (e < 30 ? TR.FAIL.LOW30 : 0) + (e < 15 ? TR.FAIL.LOW15 : 0) +
+    const failP = Math.min(TR.FAIL.MAX, TR.FAIL.BASE + (e < TR.FAIL.LOW30_BELOW ? TR.FAIL.LOW30 : 0) + (e < TR.FAIL.LOW15_BELOW ? TR.FAIL.LOW15 : 0) +
       (runner.condition === 'Tired' ? TR.FAIL.TIRED : 0) + (runner.condition === 'Exhausted' ? TR.FAIL.EXHAUSTED : 0) +
       (mood.trainFail || 0));
     return { critP: critP, failP: failP };

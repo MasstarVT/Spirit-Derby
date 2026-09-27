@@ -6,7 +6,10 @@
  * valid, invalid and hostile arguments, unknown runners, spam bursts, mid-race attempts, mod
  * commands from non-mods, !bet all, !create - across 3 full seasons, while races start at
  * random moments and are sometimes paused, resumed, ended or aborted through SD.game, days are
- * skipped, settings change and the clock jumps.
+ * skipped, settings change and the clock jumps. Review batch 10 (tools-tests#10): RESET SEASON also
+ * happens mid-season, and the streamer's admin actions (settings, day event, clock + tickClock, spawn,
+ * hype, a refused RESET SEASON / NEXT DAY, EXPORT -> IMPORT) also happen while a race is on: the race
+ * on the track must not change, and an imported copy of a live race cancels it with bets refunded once.
  *
  * After EVERY command it asserts:
  *   - no exception escaped processCommand, no handler crashed ("Something went wrong"), no
@@ -50,7 +53,12 @@ function argVal(name, dflt) {
 const VERBOSE = argv.indexOf('--verbose') >= 0;
 const SEED = Number(argVal('--seed', 20260924)) >>> 0;
 const SEASONS = Math.max(1, Number(argVal('--seasons', 3)) | 0);
-const TARGET_SEASON = SEASONS + 1;
+// A mid-season RESET SEASON (review batch 10) skips the rest of that season: the target moves one
+// season on, so SEASONS seasons are still played in full.
+let TARGET_SEASON = SEASONS + 1;
+// The season in which the forced mid-season reset and the forced mid-race import happen: season 2, or
+// season 1 with --seasons 1 (so every --seasons value exercises both).
+const FORCE_SEASON = Math.min(2, SEASONS);
 const MAX_STEPS = 200000;
 
 // -----------------------------------------------------------------------------
@@ -383,7 +391,10 @@ function checkState(where) {
   const CH = C.RACE.CHAT;
   ok(Object.keys(boosts).every(function (id) { return boosts[id] <= CH.MAX_BOOSTS_PER_RUNNER; }), 'raceEffects: boost cap per runner', where);
   ok(Object.keys(sabs).every(function (id) { return sabs[id] <= CH.MAX_SABOTAGE_PER_TARGET; }), 'raceEffects: sabotage cap per target', where);
-  ok(sabTotal <= CH.MAX_SABOTAGE_PER_RACE, 'raceEffects: sabotage cap per race', where + ' ' + sabTotal);
+  // Review batch 10: the queue itself may hold more than MAX_SABOTAGE_PER_RACE pebbles (by design since review
+  // batch 4: a pebble on a runner outside the next field does not count, and the field changes with rests,
+  // runnerCount, spawns ...). The per-race cap is checked where it applies: the pebbles a race takes at the gate.
+  ok(sabTotal <= CH.MAX_SABOTAGE_PER_TARGET * Math.max(1, st.runners.length), 'raceEffects: sabotage queue bounded by the per-target cap', where + ' ' + sabTotal);
 }
 
 // First differing path between two JSON values.
@@ -579,7 +590,7 @@ function afterRace(where) {
 
 // "Reload the page": flush the save, load it back like main.js does, re-init the director. A race
 // in progress is interrupted: its bets are refunded and its paid chat effects go back in the queue.
-let reloads = 0, reloadsMidRace = 0, seasonResets = 0;
+let reloads = 0, reloadsMidRace = 0, seasonResets = 0, midSeasonResets = 0;
 function reload(where) {
   const st = S();
   const midRace = !!st.currentRace;
@@ -603,15 +614,85 @@ function reload(where) {
   checkState(where + ' reload');
 }
 
+// Admin actions the streamer can take with or without a race (review batch 10, tools-tests#10: the
+// drawer, the console and main.js's 30 s tickClock all run while a race is on).
+let midRaceAdmin = 0, midRaceImports = 0;
+function adminAction(act, where) {
+  if (act === 'settings') {
+    const patch = pick([
+      { openTraining: chance(0.7) }, { allowCreate: chance(0.75) }, { userCooldownS: pick([0, 2, 5, 10, 15]) },
+      { hypeMultiplier: pick([0, 0.5, 1, 1.5, 3]) }, { runnerCount: 2 + rng.int(9) }, { distance: pick([1200, 1600, 2000, 2400, 999]) },
+      { eventFrequency: pick(['none', 'low', 'normal', 'high', 'chaos', 'bogus']) }, { autoAdvanceDay: chance(0.8) },
+      { debug: chance(0.5) }, { seedOverride: pick([null, 12345, 'abc']) }, { bogusKey: 1 }, { distance: 'NaN', runnerCount: 'x' },
+      { twitch: { channel: '#Some_Chan!!', enabled: 'yes' } }, { bridge: { url: 'http://nope' } }, { resultsAutoCloseMs: -5 }
+    ]);
+    SD.game.updateSettings(patch);
+    settingsChanges++;
+    return 'settings ' + JSON.stringify(patch);
+  } else if (act === 'spawn') {
+    const res = SD.game.spawnRunner(chance(0.5) ? { name: pick(CREATE_NAMES) } : {});
+    if (res && res.id) spawns++;
+    else ok(res && res.ok === false && /full/.test(res.message), 'director: spawn only refused when the paddock is full', where + ' ' + JSON.stringify(res));
+    return 'spawn';
+  } else if (act === 'hype') {
+    SD.game.addHype(pick([25, -10, 60, 120, -500]), 'streamer');
+    return 'hype';
+  } else if (act === 'dayEvent') {
+    SD.game.triggerDayEvent(chance(0.5) ? pick(SD.DATA.DAY_EVENTS).id : (chance(0.5) ? 'bogus' : undefined));
+    return 'day event';
+  } else if (act === 'clock') {
+    advance(pick([60000, 5 * 60000, 20 * 60000, 45 * 60000]));
+    SD.game.tickClock();
+    return 'clock';
+  }
+  return act;
+}
+
+// EXPORT JSON -> IMPORT while a race is running: the imported copy never keeps a live race. It is
+// cancelled like a reload: open bets refunded exactly once, the race's paid chat effects queued again.
+function roundTripMidRace(where) {
+  const st = S();
+  if (!st.currentRace) return;
+  const spBefore = Object.keys(st.players).reduce(function (a, k) { return a + st.players[k].spiritPoints; }, 0);
+  const staked = st.bets.reduce(function (a, b) { return a + b.amount; }, 0);
+  const effects = st.raceEffects.length + (st.currentRace.record.inputs ? (st.currentRace.record.inputs.raceEffects || []).length : 0);
+  let json;
+  try { json = SD.persistence.exportJSON(); } catch (e) { ok(false, 'import mid-race: state is JSON-serialisable', where + ' ' + e.message); return; }
+  const res = SD.persistence.importJSON(json);
+  if (!ok(res && res.ok, 'import mid-race: import of an export succeeds', where + ' ' + (res && res.error))) return;
+  const now = S();
+  ok(now.currentRace === null, 'import mid-race: the imported copy has no live race', where + ' ' + (now.currentRace && now.currentRace.status));
+  const spAfter = Object.keys(now.players).reduce(function (a, k) { return a + now.players[k].spiritPoints; }, 0);
+  ok(spAfter === spBefore + staked && now.bets.length === 0, 'import mid-race: open bets are refunded exactly once',
+    where + ' SP ' + spBefore + ' + staked ' + staked + ' -> ' + spAfter + ', bets left ' + now.bets.length);
+  ok(now.raceEffects.length === effects, 'import mid-race: the paid chat effects of the race are queued again', where + ' ' + effects + ' -> ' + now.raceEffects.length);
+  midRaceImports++;
+  racesAborted++;
+  afterRace(where + ' import mid-race');
+}
+
+function raceSignature(st) {
+  const cr = st.currentRace;
+  if (!cr) return null;
+  const r = cr.record;
+  return JSON.stringify([r.id, r.hash, r.seed, r.distance, r.results.map(function (x) { return x.runnerId + ':' + x.place; }),
+    r.entrants.map(function (e) { return e.runnerId + ':' + e.odds + ':' + e.lane; }), (st.bets || []).map(function (b) { return b.id + ':' + b.odds; })]);
+}
+
 function director() {
   const st = S();
   const cr = st.currentRace;
   const where = 'director S' + st.season.number + 'D' + st.season.day;
   if (!cr) {
-    const act = weighted([
+    let act = weighted([
       [10, 'start'], [72, 'none'], [1.2, 'nextDay'], [0.5, 'resetDay'], [4, 'settings'], [0.25, 'spawn'], [2, 'hype'],
-      [2, 'dayEvent'], [6, 'clock'], [1, 'reload']
+      [2, 'dayEvent'], [6, 'clock'], [1, 'reload'], [0.3, 'resetSeason']
     ]);
+    // At least one mid-season RESET SEASON on every seed: in FORCE_SEASON (2, or 1 with --seasons 1), once
+    // bets or queued effects are open (day 5 at the latest).
+    const forceReset = !midSeasonResets && st.season.number === FORCE_SEASON && st.season.day >= 3 &&
+      (st.bets.length > 0 || st.raceEffects.length > 0 || st.season.day >= 5);
+    if (forceReset) act = 'resetSeason';
     if (act === 'start') {
       const opts = {};
       if (chance(0.6)) opts.distance = pick(SD.CONFIG.RACE.DISTANCES);
@@ -625,6 +706,9 @@ function director() {
         ok(lanes === preview, 'race: the paddock preview is the real field (same runners, same lanes)', where + ' ' + preview + ' vs ' + lanes);
       }
       if (res.ok) {
+        const used = (res.record.inputs && res.record.inputs.raceEffects) || [];
+        const pebbles = used.reduce(function (a, e) { return a + (e && e.type === 'sabotage' ? Math.max(1, Number(e.count) || 1) : 0); }, 0);
+        ok(pebbles <= SD.CONFIG.RACE.CHAT.MAX_SABOTAGE_PER_RACE, 'race: at most MAX_SABOTAGE_PER_RACE pebbles are taken at the gate', where + ' ' + pebbles);
         const inField = {};
         res.record.entrants.forEach(function (e) { inField[e.runnerId] = true; });
         ok(!S().raceEffects.some(function (e) { return inField[e.runnerId]; }), 'race: queued effects of the field are consumed at the gate', where);
@@ -639,39 +723,19 @@ function director() {
     } else if (act === 'resetDay') {
       SD.game.resetDay();
       checkState(where + ' resetDay');
-    } else if (act === 'settings') {
-      const patch = pick([
-        { openTraining: chance(0.7) }, { allowCreate: chance(0.75) }, { userCooldownS: pick([0, 2, 5, 10, 15]) },
-        { hypeMultiplier: pick([0, 0.5, 1, 1.5, 3]) }, { runnerCount: 2 + rng.int(9) }, { distance: pick([1200, 1600, 2000, 2400, 999]) },
-        { eventFrequency: pick(['none', 'low', 'normal', 'high', 'chaos', 'bogus']) }, { autoAdvanceDay: chance(0.8) },
-        { debug: chance(0.5) }, { seedOverride: pick([null, 12345, 'abc']) }, { bogusKey: 1 }, { distance: 'NaN', runnerCount: 'x' },
-        { twitch: { channel: '#Some_Chan!!', enabled: 'yes' } }, { bridge: { url: 'http://nope' } }, { resultsAutoCloseMs: -5 }
-      ]);
-      SD.game.updateSettings(patch);
-      settingsChanges++;
-      checkState(where + ' settings ' + JSON.stringify(patch));
-    } else if (act === 'spawn') {
-      const res = SD.game.spawnRunner(chance(0.5) ? { name: pick(CREATE_NAMES) } : {});
-      if (res && res.id) spawns++;
-      else ok(res && res.ok === false && /full/.test(res.message), 'director: spawn only refused when the paddock is full', where + ' ' + JSON.stringify(res));
-      checkState(where + ' spawn');
-    } else if (act === 'hype') {
-      SD.game.addHype(pick([25, -10, 60, 120, -500]), 'streamer');
-      checkState(where + ' hype');
-    } else if (act === 'dayEvent') {
-      SD.game.triggerDayEvent(chance(0.5) ? pick(SD.DATA.DAY_EVENTS).id : (chance(0.5) ? 'bogus' : undefined));
-      checkState(where + ' day event');
-    } else if (act === 'clock') {
-      advance(pick([60000, 5 * 60000, 20 * 60000, 45 * 60000]));
-      SD.game.tickClock();
-      checkState(where + ' clock');
+    } else if (act === 'settings' || act === 'spawn' || act === 'hype' || act === 'dayEvent' || act === 'clock') {
+      checkState(where + ' ' + adminAction(act, where));
     } else if (act === 'reload') {
       reload(where);
     } else if (act === 'resetSeason') {
       const res = SD.game.resetSeason();
-      ok(res.ok && res.summary && S().season.day === 1 && S().bets.length === 0, 'director: RESET SEASON archives and restarts', where + ' ' + res.message);
+      ok(res.ok && res.summary && S().season.day === 1 && S().season.racesRun === 0 && S().bets.length === 0 && S().raceEffects.length === 0,
+        'director: RESET SEASON mid-season archives and restarts (bets and queued effects refunded)', where + ' ' + res.message);
       seasonResets++;
+      midSeasonResets++;
+      TARGET_SEASON++;
       checkState(where + ' resetSeason');
+      afterRace(where + ' resetSeason');
     }
     // Days with autoAdvanceDay off would never end on their own.
     if (!S().currentRace && S().settings.autoAdvanceDay === false && S().season.raceIndexInDay >= S().season.racesPerDay && chance(0.3)) {
@@ -681,9 +745,28 @@ function director() {
     return;
   }
   // A race is on: flip countdown -> running (playback), pause / resume, reload, finish or abort.
-  const act = weighted([[cr.status === 'countdown' ? 25 : 0, 'go'], [6, 'pause'], [cr.status === 'paused' ? 20 : 0, 'resume'],
-    [3, 'reload'], [30, 'end'], [3, 'abort'], [30, 'none']]);
-  if (act === 'go') SD.game.setRaceStatus('running');
+  let act = weighted([[cr.status === 'countdown' ? 25 : 0, 'go'], [6, 'pause'], [cr.status === 'paused' ? 20 : 0, 'resume'],
+    [3, 'reload'], [30, 'end'], [3, 'abort'], [30, 'none'],
+    [4, 'settings'], [1, 'spawn'], [3, 'hype'], [4, 'dayEvent'], [5, 'clock'], [1, 'resetSeason'], [1, 'nextDay'], [2.5, 'import']]);
+  if (!midRaceImports && st.season.number >= FORCE_SEASON && (st.bets.length > 0 || cr.status === 'running')) act = 'import';   // on every seed
+  if (act === 'settings' || act === 'spawn' || act === 'hype' || act === 'dayEvent' || act === 'clock' || act === 'resetSeason' || act === 'nextDay') {
+    // An admin action during a race never changes the race on the track (its record, field, odds or
+    // the bets on it) or its status; RESET SEASON / NEXT DAY are refused.
+    const sig = raceSignature(S());
+    const status = cr.status;
+    let what = act;
+    if (act === 'resetSeason' || act === 'nextDay') {
+      const res = act === 'resetSeason' ? SD.game.resetSeason() : SD.game.nextDay();
+      ok(res && res.ok === false, 'director: ' + act + ' is refused during a race', where + ' ' + (res && res.message));
+    } else {
+      what = adminAction(act, where);
+    }
+    midRaceAdmin++;
+    ok(raceSignature(S()) === sig && S().currentRace.status === status, 'director: a mid-race admin action leaves the race alone', where + ' ' + what);
+  } else if (act === 'import') {
+    roundTripMidRace(where);
+    return;
+  } else if (act === 'go') SD.game.setRaceStatus('running');
   else if (act === 'pause' && cr.status !== 'paused') { SD.game.pauseRace(); pauses++; }
   else if (act === 'resume') SD.game.resumeRace();
   else if (act === 'reload') reload(where + ' mid-race');
@@ -738,13 +821,16 @@ if (S().currentRace) SD.game.endRace();
 // -----------------------------------------------------------------------------
 const st = S();
 ok(steps < MAX_STEPS, 'the fuzzed game reaches Season ' + TARGET_SEASON + ' by playing', 'season ' + st.season.number + ' after ' + steps + ' steps');
-ok(st.season.history.length >= SEASONS, 'season history has ' + SEASONS + ' entries', st.season.history.length);
+ok(st.season.history.length >= SEASONS + midSeasonResets, 'season history has an entry per season played or reset', st.season.history.length);
 ok(createdOk > 0, '!create succeeded at least once', createdOk);
 ok(lockedAttempts > 0, 'mid-race locked commands were attempted', lockedAttempts);
 ok(ownerChecks > 0 && runnerIdChecks > 0, 'the owner <-> runnerId invariant actually ran (both directions)', ownerChecks + ' / ' + runnerIdChecks);
 ok(distinctOwnerChecks > 0, 'viewers whose display name is not their login owned runners', distinctOwnerChecks);
 ok(spoofs > 0, 'spoofed #streamer lines were sent', spoofs);
 ok(sendAsOk > 0, 'SEND AS (source admin, a viewer login) ran player commands successfully', sendAsOk + ' of ' + sendAsLines);
+ok(midSeasonResets > 0, 'RESET SEASON was fuzzed mid-season (not only the final reset)', midSeasonResets);
+ok(midRaceAdmin > 0, 'admin actions were fuzzed during races', midRaceAdmin);
+ok(midRaceImports > 0, 'EXPORT -> IMPORT was fuzzed during races', midRaceImports);
 ok(consoleErrors.length === 0, 'no console.error during the whole run', consoleErrors.slice(0, 3).join(' || '));
 
 console.log('\nCommand-outcome histogram (' + commandsRun + ' commands):');
@@ -754,7 +840,7 @@ Object.keys(hist).sort(function (a, b) { return hist[b].total - hist[a].total ||
   console.log('  ' + k.padEnd(14) + cols.map(function (c) { return String(hist[k][c]).padStart(9); }).join(''));
 });
 console.log('\nRaces finished ' + racesFinished + ', aborted ' + racesAborted + ', pauses ' + pauses + ', manual next days ' + nextDays +
-  ', settings changes ' + settingsChanges + ', admin spawns ' + spawns + ', reloads ' + reloads + ' (' + reloadsMidRace + ' mid-race), season resets ' + seasonResets + ', !create ok ' + createdOk + ', locked attempts ' + lockedAttempts +
+  ', settings changes ' + settingsChanges + ', admin spawns ' + spawns + ', reloads ' + reloads + ' (' + reloadsMidRace + ' mid-race), season resets ' + seasonResets + ' (' + midSeasonResets + ' mid-season), mid-race admin actions ' + midRaceAdmin + ', mid-race imports ' + midRaceImports + ', !create ok ' + createdOk + ', locked attempts ' + lockedAttempts +
   ', spoofed console lines ' + spoofs + ', SEND AS lines ' + sendAsLines + ' (' + sendAsOk + ' player commands ok), owner checks ' + ownerChecks + ' (' + distinctOwnerChecks + ' by non-case-variant names), runnerId checks ' + runnerIdChecks +
   ', export/import round trips ' + roundTrips + ', read-model checks ' + readChecks + ', active runners ' + SD.state.activeRunners(st).length + ', players ' + Object.keys(st.players).length);
 console.log('Reached Season ' + TARGET_SEASON + ' by playing after ' + steps + ' steps (' + SEASONS + ' seasons of ' + SD.CONFIG.SEASON.DAYS + ' days, ' + racesFinished + ' races finished), then RESET SEASON -> Season ' + st.season.number + '. ' + ((Date.now() - t0) / 1000).toFixed(1) + ' s');
