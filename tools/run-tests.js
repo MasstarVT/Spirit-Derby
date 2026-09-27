@@ -34,6 +34,10 @@
  *                race start, load and import; a leaked race seed predicts nothing), no seed salt / seed override
  *                in EXPORT JSON, no replayed races after a save rollback, refused trainings draw no action RNG,
  *                the seed override is never saved, hashRecord(stored) === hash, rollStats remainder order)
+ *   durability   tools/durability-test.js (review batch 6: slim history records + MIGRATIONS[4], the save size
+ *                budget under a per-origin quota, save-failure events, lazy saves for read-only chat / idle clock /
+ *                races, one writer per storage (a second window is read-only, TAKE OVER, stale locks), held
+ *                unreadable / newer saves, checked backups + RESTORE BACKUP, player retention, rankOf)
  *   runners      tools/runners-test.js (M6 !create, admin SPAWN RUNNER, MAX_ACTIVE, SD.debug)
  *   fuzz         tools/fuzz-test.js (M6 seeded 3-season fuzz: 17 viewers spamming every command, random race
  *                starts / pauses / ends / aborts / reloads, invariants after every command and race)
@@ -56,6 +60,7 @@ const SUITES = [
   { name: 'protokeys', file: 'protokeys-test.js', args: VERBOSE ? ['--verbose'] : [] },
   { name: 'economy', file: 'economy-test.js', args: VERBOSE ? ['--verbose'] : [] },
   { name: 'rng', file: 'rng-test.js', args: VERBOSE ? ['--verbose'] : [] },
+  { name: 'durability', file: 'durability-test.js', args: VERBOSE ? ['--verbose'] : [] },
   { name: 'runners', file: 'runners-test.js', args: VERBOSE ? ['--verbose'] : [] },
   { name: 'fuzz', file: 'fuzz-test.js', args: VERBOSE ? ['--verbose'] : [] }
 ];

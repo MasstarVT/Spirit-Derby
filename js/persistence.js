@@ -18,14 +18,39 @@
  *  - Every successful save emits state:saved { at, bytes, stats } (admin SAVE indicator).
  *  - Review batch 5: load() / importJSON() re-salt meta.seedSalt from SD.entropy (no replayed races
  *    after a rollback); exportJSON() leaves the salt out; the debug seed override is never saved.
+ *  - Review batch 6 (durability):
+ *    * slim history: records past the last HISTORY_FULL_LOGS keep a compact form (slimRecord: no
+ *      ticks, compacted chat effects, winning bets + betsSummary, capped cheer names); no history
+ *      record keeps inputs.raceEffects. MIGRATIONS[4] slims existing saves.
+ *    * size budget: save() keeps the JSON under CONFIG.SAVE.BUDGET_CHARS by dropping the oldest race
+ *      records (fitBudget), and on a quota error shrinks further and retries. The trimming is done on a
+ *      copy and reaches the live game only with a successful write. A failed save marks the game
+ *      dirty, emits state:saveFailed and backs autosave off for CONFIG.SAVE.RETRY_MS.
+ *    * pacing: scheduleSave({ lazy }) - read-only chat, clock ticks and mid-race changes wait
+ *      CONFIG.SAVE.LAZY_MS (SD.state.saveHint), a mutation that changed nothing saves nothing.
+ *    * one writer: spiritderby.lock { id, n, at, released? } names the window that saves. A second window
+ *      that finds a live lock loads read-only (no recovery of the race it saw, no writes at all); a writer
+ *      that finds another window's lock stops saving (state:readOnly). takeOver() / heartbeat(). On
+ *      pagehide release() marks the lock released: a reload claims it back at once, a reader only after
+ *      CONFIG.LOCK.RELEASE_GRACE_MS.
+ *    * held saves: an unreadable, newer-schema or failed-upgrade save is left untouched in
+ *      spiritderby.save (role 'held': nothing is written) until the streamer downloads it or starts a
+ *      new game (releaseHeld), which first copies it to spiritderby.rescue (checked).
+ *    * checked backups: writeBackup() reads the copy back; importJSON refuses when it cannot keep a
+ *      backup of a non-blank game (opts.force overrides), never backs up a blank game over an existing
+ *      backup, and rolls back (the game and the backup slot) when the imported game cannot be saved.
+ *      restoreBackup() swaps back. discardRescue() deletes spiritderby.rescue.
  */
 (function (SD) {
   'use strict';
 
   const KEY = 'spiritderby.save';
   const BACKUP_KEY = 'spiritderby.backup';
+  const RESCUE_KEY = 'spiritderby.rescue';   // review batch 6: a save load() could not read, kept on START NEW GAME
+  const LOCK_KEY = 'spiritderby.lock';       // review batch 6: { id, n, at } of the window that saves
   // 3 (review batch 2): runner.ownerKey (owner's login key) + entrant.ownerKeyAtRace; see MIGRATIONS[3].
-  const SCHEMA_VERSION = 3;
+  // 4 (review batch 6): slim history records (betsSummary, slim, compacted chatEffects); see MIGRATIONS[4].
+  const SCHEMA_VERSION = 4;
 
   // ---------------------------------------------------------------------------
   // Storage backend
@@ -62,34 +87,192 @@
   function writeRaw(key, value) {
     getStore().setItem(key, value); // may throw (quota) - callers handle
   }
+  function removeRaw(key) {
+    try { getStore().removeItem(key); } catch (e) { /* ignore */ }
+  }
+  // Only a real localStorage is shared with other windows (the memory fallback is per page).
+  function shared() { getStore(); return storeKind === 'localStorage'; }
 
   // ---------------------------------------------------------------------------
   // Save scheduling
   // ---------------------------------------------------------------------------
   let timer = null;
+  let timerDue = 0;
   let dirty = false;
   let lastError = null;
   let lastSavedAt = null;
   let lastBytes = null;
+  let lastFailAt = null;
+  let lastTrimmed = null;
   let autoSave = true;
   let saveCount = 0;
   let lastRosterAdded = [];
+  let backupLen = null;        // length of spiritderby.backup (null: not read yet)
+  let rescueLen = null;        // length of spiritderby.rescue (null: not read yet)
 
   function hasTimers() {
     return !SD.isNode && typeof globalThis.setTimeout === 'function';
   }
 
-  function scheduleSave() {
+  // Mark the game dirty and schedule an autosave. opts.lazy (read-only chat, clock ticks: see
+  // SD.state.saveHint) and a race in progress wait CONFIG.SAVE.LAZY_MS instead of SAVE_DEBOUNCE_MS
+  // (finishRace / abortRace save at once anyway); a pending later save is pulled forward, never pushed
+  // back. After a failed save the next try waits CONFIG.SAVE.RETRY_MS. Node has no timers: a normal
+  // save is written at once, a lazy one only marks the game dirty. Nothing is written in a window that
+  // is not the writer (read-only / held), and nothing at all with setAutoSave(false).
+  function scheduleSave(opts) {
     dirty = true;
-    if (!autoSave) return;
-    if (!hasTimers()) { save(true); return; }
-    if (timer) return;
-    timer = globalThis.setTimeout(function () { timer = null; save(true); }, SD.CONFIG.SAVE_DEBOUNCE_MS);
+    if (!autoSave || role !== 'writer') return;
+    const lazy = !!(opts && opts.lazy);
+    if (!hasTimers()) { if (!lazy) save(); return; }
+    const S = SD.CONFIG.SAVE || {};
+    const now = SD.clock.now();
+    const raceOn = !!(SD.state && SD.state.isRaceLocked && SD.state.isRaceLocked());
+    let delay = lazy || raceOn ? (Number(S.LAZY_MS) || 60000) : SD.CONFIG.SAVE_DEBOUNCE_MS;
+    if (lastFailAt != null) delay = Math.max(delay, (Number(S.RETRY_MS) || 15000) - (now - lastFailAt));
+    const due = now + delay;
+    if (timer && timerDue <= due) return;
+    cancelTimer();
+    timerDue = due;
+    timer = globalThis.setTimeout(function () { timer = null; save(); }, Math.max(0, delay));
   }
 
   function cancelTimer() {
     if (timer && typeof globalThis.clearTimeout === 'function') globalThis.clearTimeout(timer);
     timer = null;
+    timerDue = 0;
+  }
+
+  // ---------------------------------------------------------------------------
+  // One writer per storage (review batch 6)
+  // ---------------------------------------------------------------------------
+  // role: 'writer' (this window saves), 'reader' (another window saves this game: nothing is written
+  // here) or 'held' (the stored save could not be loaded and is kept untouched until the streamer
+  // chooses). roleInfo: { reason: 'other-window' | 'unreadable' | 'newer' | 'upgrade', message, otherAt }.
+  let role = 'writer';
+  let roleInfo = null;
+  let instanceId = null;
+  let lockN = 0;
+
+  function myId() {
+    if (!instanceId) {
+      const e = SD.entropy ? SD.entropy.next() : null;
+      instanceId = 'w' + ((e != null ? e : SD.rng.hash('instance:' + SD.clock.now())) >>> 0).toString(36);
+    }
+    return instanceId;
+  }
+
+  function readLock() {
+    const raw = readRaw(LOCK_KEY);
+    if (!raw) return null;
+    try {
+      const l = JSON.parse(raw);
+      return isObj(l) && typeof l.id === 'string' ? l : null;
+    } catch (e) { return null; }
+  }
+  function lockLive(l) {
+    return !!l && isNum(l.at) && SD.clock.now() - l.at < ((SD.CONFIG.LOCK && SD.CONFIG.LOCK.STALE_MS) || 90000);
+  }
+  // Another window's lock that is live and not released: that window saves, this one must not.
+  function lockHeldElsewhere(l) {
+    return !!l && l.id !== myId() && lockLive(l) && l.released !== true;
+  }
+  // ms left before a released lock may be taken over by a reader (0: now). See release().
+  function graceLeft(l) {
+    if (!l || l.released !== true || !isNum(l.at)) return 0;
+    const g = Number(SD.CONFIG.LOCK && SD.CONFIG.LOCK.RELEASE_GRACE_MS);
+    return Math.max(0, (g >= 0 ? g : 8000) - (SD.clock.now() - l.at));
+  }
+  // Stamp the lock as this window's (every successful save and every heartbeat).
+  function writeLock() {
+    if (!shared()) return true;
+    try {
+      lockN++;
+      writeRaw(LOCK_KEY, JSON.stringify({ id: myId(), n: lockN, at: SD.clock.now() }));
+      return true;
+    } catch (e) { return false; }
+  }
+
+  function setRole(next, info) {
+    const was = role;
+    role = next;
+    roleInfo = next === 'writer' ? null : (info || roleInfo);
+    if (next !== 'writer') cancelTimer();
+    if (was !== next && SD.bus && SD.EVENTS.STATE_READ_ONLY) {
+      try { SD.bus.emit(SD.EVENTS.STATE_READ_ONLY, lockStatus()); } catch (e) { /* never break a save */ }
+    }
+  }
+
+  // Is this window still the one that saves? A lock written by another window means it took over:
+  // this window stops saving (role 'reader') instead of overwriting the newer game.
+  function stillWriter() {
+    if (role !== 'writer') return false;
+    if (!shared()) return true;
+    const l = readLock();
+    if (l && l.id !== myId()) {
+      setRole('reader', {
+        reason: 'other-window', otherAt: isNum(l.at) ? l.at : null,
+        message: 'Another Spirit Derby window took over saving this game, so this window stopped saving. Changes made here are not kept.'
+      });
+      return false;
+    }
+    return true;
+  }
+
+  // -> { role, readOnly, reason, message, otherAt, free, freeIn } (free: a reader whose other window
+  // is gone: its lock went stale, or it was released more than CONFIG.LOCK.RELEASE_GRACE_MS ago and
+  // no window claimed it since, so takeOver() is safe. freeIn: ms until a released lock becomes free,
+  // 0 otherwise; main.js checks again then).
+  function lockStatus() {
+    const out = { role: role, readOnly: role !== 'writer', reason: roleInfo ? roleInfo.reason : null, message: roleInfo ? roleInfo.message : null, otherAt: null, free: false, freeIn: 0 };
+    if (role === 'reader') {
+      const l = shared() ? readLock() : null;
+      out.otherAt = l && isNum(l.at) ? l.at : (roleInfo && roleInfo.otherAt) || null;
+      const wait = lockLive(l) && l.id !== myId() ? graceLeft(l) : 0;
+      out.free = !l || l.id === myId() || !lockLive(l) || (l.released === true && wait === 0);
+      out.freeIn = out.free ? 0 : wait;
+    }
+    return out;
+  }
+
+  // main.js calls this every CONFIG.LOCK.HEARTBEAT_MS and on 'storage' events. A writer checks the
+  // lock (stepping down if another window took over) and refreshes it; a reader reports whether the
+  // other window is gone (status.free), and main.js then takes over.
+  function heartbeat() {
+    if (role === 'writer' && stillWriter()) writeLock();
+    return lockStatus();
+  }
+
+  // Become the writer: claim the lock and load the game from storage again (the other window's latest
+  // save; a race it had running is treated as interrupted). Returns load()'s result, which the caller
+  // adopts (SD.state.set + game.init). Not for a held save (see releaseHeld).
+  function takeOver() {
+    if (role === 'held') return { ok: false, error: 'The stored save could not be loaded here; download it or start a new game first.' };
+    role = 'writer';
+    roleInfo = null;
+    writeLock();
+    const res = load();
+    if (SD.bus && SD.EVENTS.STATE_READ_ONLY) {
+      try { SD.bus.emit(SD.EVENTS.STATE_READ_ONLY, lockStatus()); } catch (e) { /* ignore */ }
+    }
+    return Object.assign({ ok: role === 'writer' }, res);
+  }
+
+  // pagehide: mark this window's lock released ({ ..., released: true }), so the next window that
+  // loads starts as the writer straight away - above all this same window reloading (F5, OBS refreshing
+  // the source). A read-only window waits CONFIG.LOCK.RELEASE_GRACE_MS before it takes a released lock
+  // (lockStatus().free), so the reload claims it first and the saving role stays where the streamer
+  // left it. A crashed window's lock simply goes stale after CONFIG.LOCK.STALE_MS. Only this window's
+  // own lock is released.
+  function release() {
+    if (role !== 'writer' || !shared()) return false;
+    const l = readLock();
+    if (l && l.id !== myId()) return false;
+    try {
+      lockN++;
+      writeRaw(LOCK_KEY, JSON.stringify({ id: myId(), n: lockN, at: SD.clock.now(), released: true }));
+    } catch (e) { removeRaw(LOCK_KEY); }
+    return true;
   }
 
   // Automatic saves on/off (default on). Off: mutations only mark the game dirty; save() / flush()
@@ -101,26 +284,129 @@
     return was;
   }
 
-  // Strip tick data from all but the last HISTORY_FULL_LOGS races, and drop
-  // records beyond HISTORY_MAX. Mutates state in place (old records only).
+  // The last records a size-budget trim keeps whole (fitBudget step 1).
+  const BUDGET_FULL = 2;
+
+  // Keep the last HISTORY_FULL_LOGS races whole and store every older one slim (slimRecord), drop
+  // records beyond HISTORY_MAX, and drop inputs.raceEffects from every history record (a copy of the
+  // queued effects the race used: only a race still in progress needs it, to re-queue them on an abort
+  // or interruption). Mutates state in place.
+  // Once a size-budget trim has slimmed records inside that window (fitBudget step 1: a slim record
+  // among the last HISTORY_FULL_LOGS, older than the last BUDGET_FULL), only the last BUDGET_FULL stay
+  // whole from then on. Letting the window grow back to full size would eat the headroom the trim made
+  // (a whole 1600 m record is ~90K characters, a slim one ~11K) and trim again every few races.
   function trimHistory(st, keepFull) {
     if (!st || !Array.isArray(st.raceHistory)) return;
     const CFG = SD.CONFIG;
     const hist = st.raceHistory;
     if (hist.length > CFG.HISTORY_MAX) hist.splice(0, hist.length - CFG.HISTORY_MAX);
-    const full = keepFull == null ? CFG.HISTORY_FULL_LOGS : keepFull;
-    for (let i = 0; i < hist.length - full; i++) {
-      const rec = hist[i];
-      if (rec && rec.ticks && rec.ticks.length) {
-        rec.ticks = [];
-        rec.ticksStripped = true;
+    let full = keepFull == null ? CFG.HISTORY_FULL_LOGS : keepFull;
+    if (keepFull == null && full > BUDGET_FULL) {
+      for (let i = Math.max(0, hist.length - full); i < hist.length - BUDGET_FULL; i++) {
+        if (isObj(hist[i]) && hist[i].slim === true) { full = BUDGET_FULL; break; }
       }
     }
+    for (let i = 0; i < hist.length; i++) {
+      const rec = hist[i];
+      if (!isObj(rec)) continue;
+      if (isObj(rec.inputs) && rec.inputs.raceEffects !== undefined) delete rec.inputs.raceEffects;
+      if (i < hist.length - full) slimRecord(rec);
+    }
+  }
+
+  // The compact form of a past race (review batch 6; a finished race with 100 viewers betting and
+  // cheering weighed ~39 KB and 200 of them overflowed the browser's storage quota). Idempotent;
+  // rec.slim marks it. Kept: everything the history, season summary and replay read (entrants,
+  // results, events, summary, seed, settingsSnapshot, hash). Changed:
+  //   ticks                 [] (ticksStripped: true) - playback data, not needed to replay the hash
+  //   inputs.chatEffects    SD.race.compactChatEffects: the same simulation (same hash), one merged
+  //                         cheer entry per runner, no boost / sabotage the engine would skip
+  //   bets                  the CONFIG.SAVE.BETS_KEPT biggest winning bets; when any are left out,
+  //                         betsSummary { count, won, staked, paid } describes all of them
+  //   events[].data.names   the first CONFIG.SAVE.NAMES_MAX cheering viewers (+ namesMore: the rest)
+  function slimRecord(rec) {
+    if (!isObj(rec)) return rec;
+    if (Array.isArray(rec.ticks) && rec.ticks.length) {
+      rec.ticks = [];
+      rec.ticksStripped = true;
+    }
+    if (rec.slim === true) return rec;
+    const S = SD.CONFIG.SAVE || {};
+    if (isObj(rec.inputs) && Array.isArray(rec.inputs.chatEffects) && rec.inputs.chatEffects.length && SD.race && SD.race.compactChatEffects) {
+      const ids = Array.isArray(rec.entrants) ? rec.entrants.map(function (e) { return e && e.runnerId; }) : null;
+      rec.inputs.chatEffects = SD.race.compactChatEffects(rec.inputs.chatEffects, ids);
+    }
+    if (Array.isArray(rec.bets) && rec.bets.length) {
+      const bets = rec.bets.filter(isObj);
+      const kept = bets.filter(function (b) { return b.won; })
+        .sort(function (a, b) { return (Number(b.payout) || 0) - (Number(a.payout) || 0); })
+        .slice(0, Math.max(0, int(S.BETS_KEPT, 5, 0)));
+      if (kept.length < rec.bets.length) {
+        rec.betsSummary = {
+          count: bets.length,
+          won: bets.filter(function (b) { return b.won; }).length,
+          staked: bets.reduce(function (a, b) { return a + (Number(b.amount) || 0); }, 0),
+          paid: bets.reduce(function (a, b) { return a + (b.won ? Number(b.payout) || 0 : 0); }, 0)
+        };
+        rec.bets = kept;
+      }
+    }
+    const maxNames = Math.max(0, int(S.NAMES_MAX, 5, 0));
+    (Array.isArray(rec.events) ? rec.events : []).forEach(function (ev) {
+      const d = ev && ev.data;
+      if (!isObj(d) || !Array.isArray(d.names) || d.names.length <= maxNames) return;
+      d.namesMore = (Number(d.namesMore) || 0) + d.names.length - maxNames;
+      d.names = d.names.slice(0, maxNames);
+    });
+    rec.slim = true;
+    return rec;
+  }
+
+  // Shrink st until its JSON is about `excess` characters smaller (review batch 6), cheapest loss first:
+  //   1. every race but the last 2 (BUDGET_FULL) stored slim (tick logs are playback data; always done
+  //      in full, and it sticks: trimHistory keeps only the last 2 whole from then on)
+  //   2. the oldest race records dropped, down to CONFIG.SAVE.MIN_HISTORY
+  //   3. the game log cut to its last 50 lines
+  //   4. the oldest race records dropped, down to the last one (REPLAY LAST RACE still works)
+  // Returns { races, logs, log } (records dropped, records slimmed, log lines cut). Players, runners,
+  // balances, bets and the season are never touched. Mutates st.raceHistory / st.log and slims their
+  // records in place; with opts.copy (save() on its working copy, see workingCopy) a record is cloned
+  // before it is slimmed, so the objects the live game holds are left as they were.
+  function fitBudget(st, excess, opts) {
+    const out = { races: 0, logs: 0, log: 0 };
+    const hist = Array.isArray(st.raceHistory) ? st.raceHistory : [];
+    const size = function (x) { try { return JSON.stringify(x).length + 1; } catch (e) { return 0; } };
+    if (!(excess > 0)) return out;
+    for (let i = 0; i < hist.length - BUDGET_FULL; i++) {
+      let rec = hist[i];
+      if (!isObj(rec) || (rec.slim === true && !(rec.ticks && rec.ticks.length))) continue;
+      const before = size(rec);
+      if (opts && opts.copy) hist[i] = rec = JSON.parse(JSON.stringify(rec));
+      slimRecord(rec);
+      excess -= before - size(rec);
+      out.logs++;
+    }
+    const dropTo = function (floor) {
+      while (excess > 0 && hist.length > floor) {
+        excess -= size(hist[0]);
+        hist.shift();
+        out.races++;
+      }
+    };
+    dropTo(Math.max(1, int((SD.CONFIG.SAVE || {}).MIN_HISTORY, 20, 1)));
+    if (excess > 0 && Array.isArray(st.log) && st.log.length > 50) {
+      const cut = st.log.length - 50;
+      excess -= size(st.log.slice(0, cut));
+      st.log.splice(0, cut);
+      out.log = cut;
+    }
+    dropTo(1);
+    return out;
   }
 
   function emitSaved() {
     if (!SD.bus || !SD.EVENTS.STATE_SAVED) return;
-    try { SD.bus.emit(SD.EVENTS.STATE_SAVED, { at: lastSavedAt, bytes: lastBytes, stats: stats() }); } catch (e) { /* never break a save */ }
+    try { SD.bus.emit(SD.EVENTS.STATE_SAVED, { at: lastSavedAt, bytes: lastBytes, stats: stats(), trimmed: lastTrimmed }); } catch (e) { /* never break a save */ }
   }
 
   // What save() writes (review batch 5): the state without the debug seed override. A fixed seed
@@ -131,41 +417,144 @@
     return Object.assign({}, st, { settings: Object.assign({}, st.settings, { seedOverride: null }) });
   }
 
-  // Write the current state now. Returns true on success.
-  function save() {
+  function addTrim(a, b) {
+    if (!a) return b;
+    return { races: a.races + b.races, logs: a.logs + b.logs, log: a.log + b.log };
+  }
+
+  // A trim that only dropped old race records and still left CONFIG.SAVE.ROUTINE_HISTORY of them is
+  // routine (a long career at its steady size): an info log line, and main.js shows no toast
+  // (trimmed.routine). Anything deeper is a warning.
+  function isRoutine(st, t) {
+    const min = int((SD.CONFIG.SAVE || {}).ROUTINE_HISTORY, 100, 0);
+    return !t.log && Array.isArray(st.raceHistory) && st.raceHistory.length >= min;
+  }
+
+  // A log line written by save() itself into its working copy (SD.state.log would schedule another save
+  // from inside this one). It reaches the live game, with a log:entry for the event log panel, only
+  // when that save is written (adoptTrim).
+  function saveLog(w, text, severity) {
+    pushLog(w, 'system', text, severity || 'warn');
+    if (!w.__newLogs) Object.defineProperty(w, '__newLogs', { value: [], enumerable: false }); // not saved
+    w.__newLogs.push(w.log[w.log.length - 1]);
+  }
+
+  // What save() trims (fitBudget, saveLog) is a working copy of the live state (review batch 6, fix
+  // round 2): its own raceHistory and log arrays, records cloned before they are slimmed. The live game
+  // takes the trimmed history and log (adoptTrim) only once that copy is written; a save the browser
+  // keeps refusing loses nothing in memory, so EXPORT JSON still has everything and a later save (once
+  // storage accepts it again) writes the whole game rather than one shrunk by every failed attempt.
+  function workingCopy(st) {
+    return Object.assign({}, st, {
+      raceHistory: Array.isArray(st.raceHistory) ? st.raceHistory.slice() : st.raceHistory,
+      log: Array.isArray(st.log) ? st.log.slice() : st.log
+    });
+  }
+  function adoptTrim(st, w) {
+    const put = function (to, from) { to.length = 0; Array.prototype.push.apply(to, from); };
+    if (Array.isArray(st.raceHistory) && Array.isArray(w.raceHistory)) put(st.raceHistory, w.raceHistory);
+    if (Array.isArray(st.log) && Array.isArray(w.log)) put(st.log, w.log);
+    else if (Array.isArray(w.log)) st.log = w.log.slice();
+    (w.__newLogs || []).forEach(function (entry) {
+      if (SD.bus && SD.state && SD.state.get() === st) {
+        try { SD.bus.emit(SD.EVENTS.LOG_ENTRY, entry); } catch (e) { /* ignore */ }
+      }
+    });
+  }
+
+  // A write the browser refused for lack of room (worth retrying smaller). Any other error (security,
+  // a broken storage backend) is not helped by dropping race records.
+  function isQuotaError(e) {
+    if (!e) return false;
+    return e.name === 'QuotaExceededError' || e.name === 'NS_ERROR_DOM_QUOTA_REACHED' || e.code === 22 || e.code === 1014;
+  }
+  function trimText(t) {
+    const parts = [];
+    if (t.races) parts.push('the oldest ' + t.races + ' race record' + (t.races === 1 ? ' was' : 's were') + ' dropped');
+    if (t.log) parts.push(t.log + ' old log lines were cut');
+    return 'The save was getting too big for browser storage, so ' + parts.join(' and ') + '. Players, runners and balances are untouched.';
+  }
+
+  // Write the current state now. Returns true on success. Review batch 6:
+  //  - nothing is written unless this window is the writer (see stillWriter / role);
+  //  - a JSON over CONFIG.SAVE.BUDGET_CHARS is shrunk first (fitBudget), and a write the browser
+  //    refuses for lack of room (isQuotaError; any other error fails at once) is retried up to 3 times,
+  //    shrinking by 10 %, 30 % and 60 %. The shrinking is done on a working copy (workingCopy) and the
+  //    live game takes the trimmed history / log only when that copy was written (adoptTrim);
+  //  - a failure keeps the game dirty (flush() / the next autosave try again, backing off
+  //    CONFIG.SAVE.RETRY_MS) and emits state:saveFailed { at, error, bytes, stats }.
+  function save() { return doSave(false); }
+  function doSave(quiet) {
     const st = SD.state && SD.state.get();
     cancelTimer();
     if (!st) return false;
+    if (!stillWriter()) { dirty = true; return false; }
     trimHistory(st);
-    let json;
+    const budget = int((SD.CONFIG.SAVE || {}).BUDGET_CHARS, 2400000, 1000);
+    let json = null, trimmed = null, err = null, w = st;
     try {
       json = JSON.stringify(forStorage(st));
+      if (json.length > budget) {
+        // Down to 90 % of the budget. The tick logs slimmed here stay slim (trimHistory), so the save
+        // then grows by one slim record per race (~11K) and a long career trims about every 20 races.
+        w = workingCopy(st);
+        trimmed = fitBudget(w, json.length - Math.floor(budget * 0.9), { copy: true });
+        trimmed.routine = isRoutine(w, trimmed);
+        if (trimmed.races || trimmed.log) saveLog(w, trimText(trimmed), trimmed.routine ? 'info' : 'warn');
+        json = JSON.stringify(forStorage(w));
+      }
       writeRaw(KEY, json);
     } catch (e) {
-      // Most likely a quota error: keep only 2 full race logs and retry once.
-      lastError = e;
-      try {
-        trimHistory(st, 2);
-        json = JSON.stringify(forStorage(st));
-        writeRaw(KEY, json);
-      } catch (e2) {
-        lastError = e2;
-        if (typeof console !== 'undefined' && console.warn) console.warn('[SD.persistence] save failed:', e2);
-        return false;
+      err = e;
+      // Only a quota error is worth a smaller try. Each try shrinks the working copy further; none of
+      // it reaches the live game unless a write succeeds (a failed save loses nothing in memory).
+      const shrink = [0.1, 0.3, 0.6];
+      const first = json ? json.length : 0;
+      if (json && isQuotaError(e) && w === st) w = workingCopy(st);
+      for (let k = 0; k < shrink.length && err && json && isQuotaError(err); k++) {
+        try {
+          const t = fitBudget(w, json.length - Math.floor(first * (1 - shrink[k])), { copy: true });
+          trimmed = addTrim(trimmed, t);
+          trimmed.routine = false;                     // the browser refused the write: always a warning
+          if (t.races || t.log) saveLog(w, trimText(t));
+          json = JSON.stringify(forStorage(w));
+          writeRaw(KEY, json);
+          err = null;
+        } catch (e2) { err = e2; }
       }
     }
+    if (err) return saveFailed(err, json, quiet);
+    if (w !== st) adoptTrim(st, w);
     dirty = false;
     lastError = null;
+    lastFailAt = null;
+    lastTrimmed = trimmed;
     lastSavedAt = SD.clock.now();
     lastBytes = json.length;
     saveCount++;
+    writeLock();
     emitSaved();
     return true;
   }
 
+  function saveFailed(err, json, quiet) {
+    lastError = err;
+    dirty = true;
+    lastFailAt = SD.clock.now();
+    if (typeof console !== 'undefined' && console.warn) console.warn('[SD.persistence] save failed:', err);
+    if (!quiet && SD.bus && SD.EVENTS.STATE_SAVE_FAILED) {
+      try {
+        SD.bus.emit(SD.EVENTS.STATE_SAVE_FAILED, { at: lastFailAt, error: String((err && err.message) || err), bytes: json ? json.length : null, stats: stats() });
+      } catch (e) { /* never break a save */ }
+    }
+    // Try again by itself (after CONFIG.SAVE.RETRY_MS), even if nothing else changes meanwhile.
+    if (autoSave && role === 'writer' && hasTimers()) scheduleSave();
+    return false;
+  }
+
   // Write a pending save right now (beforeunload / pagehide / tab hidden). Safe to call any time.
   function flush() {
-    if (dirty || timer) return save(true);
+    if (dirty || timer) return save();
     return true;
   }
 
@@ -177,6 +566,8 @@
       try { bytes = JSON.stringify(st).length; } catch (e) { bytes = 0; }
     }
     const runners = st && Array.isArray(st.runners) ? st.runners.filter(function (r) { return r && !r.retired; }).length : 0;
+    if (backupLen == null) { const b = readRaw(BACKUP_KEY); backupLen = b ? b.length : 0; }
+    if (rescueLen == null) { const b = readRaw(RESCUE_KEY); rescueLen = b ? b.length : 0; }
     return {
       bytes: bytes || 0,
       races: st && Array.isArray(st.raceHistory) ? st.raceHistory.length : 0,
@@ -189,7 +580,15 @@
       autoSave: autoSave,
       storage: storageKind(),
       schema: SCHEMA_VERSION,
-      error: lastError ? String(lastError.message || lastError) : null
+      error: lastError ? String(lastError.message || lastError) : null,
+      // review batch 6
+      failedAt: lastError ? lastFailAt : null,
+      role: role,
+      readOnly: role !== 'writer',
+      reason: roleInfo ? roleInfo.reason : null,
+      backup: backupLen || 0,
+      rescue: rescueLen || 0,
+      budget: int((SD.CONFIG.SAVE || {}).BUDGET_CHARS, 2400000, 1000)
     };
   }
 
@@ -541,6 +940,20 @@
         (ownerRepair.released ? '; ' + ownerRepair.released + ' runner' + (ownerRepair.released === 1 ? '' : 's') +
           ' held under a display name no viewer could use ' + (ownerRepair.released === 1 ? 'was' : 'were') + ' released' : '') + '.', 'info');
       return raw;
+    },
+    // v3 -> v4 (review batch 6): race records past the last HISTORY_FULL_LOGS are stored slim
+    // (slimRecord: compacted chat effects, winning bets + betsSummary, capped cheer names) and no history
+    // record keeps inputs.raceEffects. Results, events, hashes and replays are unchanged.
+    4: function (raw, ctx) {
+      normalize(raw);
+      const before = raw.raceHistory.filter(function (r) { return r.slim === true; }).length;
+      trimHistory(raw);
+      const slimmed = raw.raceHistory.filter(function (r) { return r.slim === true; }).length - before;
+      raw.meta.migratedFrom = ctx && ctx.from != null ? ctx.from : 3;
+      raw.meta.migratedAt = SD.clock.now();
+      pushLog(raw, 'system', 'Save upgraded to schema v4: older race records are stored in a compact form' +
+        (slimmed ? ' (' + slimmed + ' record' + (slimmed === 1 ? '' : 's') + ')' : '') + ', so long careers fit in browser storage.', 'info');
+      return raw;
     }
   };
 
@@ -610,37 +1023,107 @@
     return st;
   }
 
-  // Returns { state, fromStorage, migratedFrom, rosterAdded }. Never throws.
+  // Returns { state, fromStorage, migratedFrom, rosterAdded, readOnly, held, error, backupFailed }.
+  // Never throws. Review batch 6:
+  //  - Another window holding a live lock (CONFIG.LOCK.STALE_MS) makes this one a reader: the game is
+  //    loaded as stored - a race that window has running is NOT cancelled or refunded here - and this
+  //    window writes nothing (readOnly: true).
+  //  - A save that cannot be loaded (unreadable JSON, a newer schema, a failed upgrade) is no longer
+  //    replaced by the fresh game's first autosave: it stays untouched in spiritderby.save (role 'held',
+  //    held: true, error: why) until the streamer downloads it or starts a new game (releaseHeld).
+  //  - The pre-upgrade backup write is checked (backupFailed: true when there was no room for it).
   function load() {
     const raw = readRaw(KEY);
-    if (!raw) return { state: fresh(), fromStorage: false, migratedFrom: null, rosterAdded: [] };
+    const l = shared() ? readLock() : null;
+    if (lockHeldElsewhere(l)) {
+      setRole('reader', {
+        reason: 'other-window', otherAt: l.at,
+        message: 'Another Spirit Derby window is already running this game and saving it. This window only shows it: nothing here is saved.'
+      });
+    } else {
+      setRole('writer');
+      writeLock();
+    }
+    const reading = role === 'reader';
+    const base = { fromStorage: false, migratedFrom: null, rosterAdded: [], readOnly: reading, held: false, error: null, backupFailed: false };
+    if (!raw) return Object.assign(base, { state: fresh() });
+    const hold = function (reason, error) {
+      if (!reading) setRole('held', { reason: reason, message: error });
+      return Object.assign(base, {
+        held: !reading, error: error,
+        state: fresh(error + (reading ? ' (The other window has it open.)'
+          : ' Your saved game was left untouched: this window saves nothing until you download it or start a new game (see the banner).'))
+      });
+    };
     let parsed;
     try {
       parsed = JSON.parse(raw);
     } catch (e) {
-      try { writeRaw(BACKUP_KEY, raw); } catch (e2) { /* ignore */ }
-      return { state: fresh('Saved data was unreadable, so a new game was started (a backup copy was kept).'), fromStorage: false, migratedFrom: null, rosterAdded: [] };
+      return hold('unreadable', 'The saved game in this browser is unreadable (not valid JSON).');
     }
     const v = validate(parsed);
-    if (!v.ok) {
-      try { writeRaw(BACKUP_KEY, raw); } catch (e2) { /* ignore */ }
-      return { state: fresh(v.error + ' A new game was started (a backup copy was kept).'), fromStorage: false, migratedFrom: null, rosterAdded: [] };
-    }
-    if (v.version < SCHEMA_VERSION) {
-      try { writeRaw(BACKUP_KEY, raw); } catch (e2) { /* ignore */ }
-    }
+    if (!v.ok) return hold(Number(parsed && parsed.schemaVersion) > SCHEMA_VERSION ? 'newer' : 'unreadable', v.error);
+    let backupFailed = false;
+    if (v.version < SCHEMA_VERSION && !reading) backupFailed = !writeBackup(raw);
     let st;
     try {
       st = migrate(parsed);
     } catch (e) {
-      try { writeRaw(BACKUP_KEY, raw); } catch (e2) { /* ignore */ }
-      return { state: fresh('Saved data could not be upgraded (' + e.message + '). A new game was started (a backup copy was kept).'), fromStorage: false, migratedFrom: null, rosterAdded: [] };
+      return hold('upgrade', 'The saved game could not be upgraded (' + e.message + ').');
     }
     const rosterAdded = lastRosterAdded.slice();
-    recoverInterruptedRace(st);
+    if (!reading) recoverInterruptedRace(st);
     freshSeeds(st, 'load');
-    return { state: st, fromStorage: true, migratedFrom: v.version < SCHEMA_VERSION ? v.version : null, rosterAdded: rosterAdded };
+    if (backupFailed) {
+      pushLog(st, 'system', 'There was no room in browser storage to keep a backup of the save from before this upgrade. EXPORT JSON keeps a copy.', 'warn');
+    }
+    return Object.assign(base, { state: st, fromStorage: true, migratedFrom: v.version < SCHEMA_VERSION ? v.version : null, rosterAdded: rosterAdded, backupFailed: backupFailed });
   }
+
+  // Copy text to spiritderby.backup and read it back (review batch 6: a backup the browser refused used
+  // to be ignored silently, while the log and the admin drawer said a backup was kept). If the write is
+  // refused the previous backup stays as it was.
+  function writeBackup(text) {
+    try { writeRaw(BACKUP_KEY, text); } catch (e) { return false; }
+    const ok = readRaw(BACKUP_KEY) === text;
+    backupLen = null;
+    return ok;
+  }
+
+  // A game nobody has played yet (no race run, no viewer joined): not worth a backup, and never
+  // written over an existing one.
+  function isBlank(st) {
+    return !isObj(st) || (!(isObj(st.meta) && Number(st.meta.raceCounter) > 0) && !(isObj(st.players) && Object.keys(st.players).length));
+  }
+
+  // Held save (role 'held'): copy the stored text to spiritderby.rescue and check it. Without room for
+  // the copy it refuses, unless force (the streamer downloaded it, or chose to lose it).
+  function rescueHeld(force) {
+    const raw = readRaw(KEY);
+    if (!raw) return { ok: true, rescued: false };
+    let ok = false;
+    try { writeRaw(RESCUE_KEY, raw); ok = readRaw(RESCUE_KEY) === raw; } catch (e) { ok = false; }
+    rescueLen = null;
+    if (!ok && !force) {
+      return { ok: false, rescueFailed: true, error: 'There is no room in this browser to keep a copy of the saved game that could not be loaded. Download it first, then try again.' };
+    }
+    return { ok: true, rescued: ok };
+  }
+
+  // START NEW GAME from the held-save banner: the stored save is copied to spiritderby.rescue (checked;
+  // refused without room unless opts.force), then this window becomes the writer and saves the game it
+  // is running. -> { ok, rescued, saved } | { ok:false, rescueFailed, error }
+  function releaseHeld(opts) {
+    if (role !== 'held') return { ok: true, rescued: false, saved: false };
+    const r = rescueHeld(!!(opts && opts.force));
+    if (!r.ok) return r;
+    setRole('writer');
+    writeLock();
+    return { ok: true, rescued: r.rescued, saved: save() };
+  }
+
+  // The text of the save this window is holding untouched (role 'held'), for DOWNLOAD; else null.
+  function heldText() { return role === 'held' ? readRaw(KEY) : null; }
 
   // Review batch 5, on every load and import: new entropy in the seed salt (SD.state.resalt; a no-op
   // without an SD.entropy source), so a save that was rolled back - an older export imported, a
@@ -683,8 +1166,24 @@
     return 'spirit-derby-s' + st.season.number + '-d' + st.season.day + '.json';
   }
 
-  // Replace the whole game with an exported save. Returns { ok, error?, migratedFrom? }.
-  function importJSON(text) {
+  // Replace the whole game with an exported save.
+  // -> { ok:true, migratedFrom, ignoredConnection, backedUp }
+  //  | { ok:false, error, readOnly? | backupFailed? | rescueFailed? | saveFailed? }
+  // Review batch 6: nothing changes unless all of this works -
+  //  - this window is the writer (a read-only window refuses: readOnly);
+  //  - a non-blank current game was copied to spiritderby.backup and read back (backupFailed without
+  //    room; opts.force imports anyway, e.g. after the admin drawer downloaded the current game). A
+  //    blank current game is not backed up, so it never replaces an existing backup;
+  //  - a held save (role 'held') was copied to spiritderby.rescue first (rescueFailed; opts.force);
+  //  - the imported game was saved. If the browser refuses it, the current game is kept and
+  //    spiritderby.backup is put back as it was (saveFailed);
+  //  - checked first: a writer another window just took over from refuses (readOnly) before any write.
+  // opts.restore: the file is spiritderby.backup (RESTORE BACKUP): logged as 'Backup restored.'.
+  function importJSON(text, opts) {
+    opts = opts || {};
+    // stillWriter(): a window another one just took over from (TAKE OVER, before its 'storage' event
+    // ran) must not write the backup slot either - it now belongs to the other window's game.
+    if (role === 'reader' || (role === 'writer' && !stillWriter())) return readOnlyRefusal();
     let parsed;
     try {
       parsed = typeof text === 'string' ? JSON.parse(text) : text;
@@ -699,23 +1198,75 @@
     } catch (e) {
       return { ok: false, error: 'Could not upgrade that save: ' + e.message };
     }
-    // Keep a copy of what we are about to overwrite.
     const cur = SD.state.get();
-    try {
-      if (cur) writeRaw(BACKUP_KEY, JSON.stringify(cur));
-    } catch (e) { /* ignore */ }
+    const wasHeld = role === 'held';
+    const heldInfo = roleInfo;
+    let backedUp = false;
+    // The backup slot as it was: if the imported game then cannot be saved, the slot is put back, so a
+    // failed import or RESTORE BACKUP never costs the game that was in it (review batch 6 fix round).
+    let oldBackup = null, backupTried = false;
+    if (wasHeld) {
+      // The current game is the fresh one started over a save this build could not load: that save is
+      // what must survive (spiritderby.rescue), not the fresh game.
+      const r = rescueHeld(!!opts.force);
+      if (!r.ok) return r;
+    } else if (cur && !isBlank(cur)) {
+      oldBackup = readRaw(BACKUP_KEY);
+      backupTried = true;
+      backedUp = writeBackup(JSON.stringify(cur));
+      if (!backedUp && !opts.force) {
+        return {
+          ok: false, backupFailed: true,
+          error: 'There is no room in this browser to keep a backup of the current game, so nothing was imported. EXPORT JSON it first (or import with force).'
+        };
+      }
+    }
     const ignoredConnection = keepLocalConnections(st, cur, parsed);
     recoverInterruptedRace(st);
     freshSeeds(st, 'import');
-    pushLog(st, 'system', 'Save imported.', 'info');
+    pushLog(st, 'system', opts.restore ? 'Backup restored.' : 'Save imported.', 'info');
+    if (wasHeld) { setRole('writer'); writeLock(); }
     SD.state.set(st);
-    save(true);
+    if (!doSave(true)) {
+      const lostRole = role === 'reader';
+      const why = String((lastError && lastError.message) || lastError || 'storage refused it');
+      SD.state.set(cur);
+      if (wasHeld) setRole('held', heldInfo);
+      const kept = backupTried ? putBackupBack(oldBackup) : true;
+      if (lostRole) return readOnlyRefusal();
+      return {
+        ok: false, saveFailed: true,
+        error: 'The imported game could not be saved (' + why + '), so the current game was kept' +
+          (kept ? '.' : ', but the backup slot could not be put back: EXPORT JSON the current game.')
+      };
+    }
     const migratedFrom = v.version < SCHEMA_VERSION ? v.version : null;
     if (SD.bus) {
-      SD.bus.emit(SD.EVENTS.STATE_LOADED, { source: 'import', migratedFrom: migratedFrom });
+      SD.bus.emit(SD.EVENTS.STATE_LOADED, { source: opts.restore ? 'restore' : 'import', migratedFrom: migratedFrom });
       SD.bus.emit(SD.EVENTS.STATE_CHANGED, { label: 'import' });
     }
-    return { ok: true, migratedFrom: migratedFrom, ignoredConnection: ignoredConnection };
+    return { ok: true, migratedFrom: migratedFrom, ignoredConnection: ignoredConnection, backedUp: backedUp };
+  }
+
+  function readOnlyRefusal() {
+    return { ok: false, readOnly: true, error: 'This window is read-only (another window is saving this game). Import there, or TAKE OVER first.' };
+  }
+
+  // After a failed import: spiritderby.backup gets its previous text back (or is removed when there was
+  // none). Returns false when the browser refused that write.
+  function putBackupBack(text) {
+    backupLen = null;
+    if (readRaw(BACKUP_KEY) === text) return true;
+    if (text == null) { removeRaw(BACKUP_KEY); return readRaw(BACKUP_KEY) == null; }
+    return writeBackup(text);
+  }
+
+  // RESTORE BACKUP (admin Save section): import spiritderby.backup. The game it replaces becomes the
+  // new backup (unless it is blank), so a restore can itself be undone.
+  function restoreBackup(opts) {
+    const text = readRaw(BACKUP_KEY);
+    if (!text) return { ok: false, error: 'There is no backup in this browser yet.' };
+    return importJSON(text, Object.assign({}, opts || {}, { restore: true }));
   }
 
   // settings.twitch / settings.bridge are per-install: an imported file never brings its own
@@ -748,19 +1299,35 @@
     return differs;
   }
 
+  // RESET ALL: forget the stored game. Review batch 6: refused (false) in a read-only window (that is
+  // another window's game) and while a save is held (it would be lost without a copy).
   function clear() {
+    if (role !== 'writer') return false;
     cancelTimer();
     dirty = false;
     lastBytes = null;
-    try { getStore().removeItem(KEY); } catch (e) { /* ignore */ }
+    removeRaw(KEY);
+    return true;
   }
 
   function readBackup() { return readRaw(BACKUP_KEY); }
+  function readRescue() { return readRaw(RESCUE_KEY); }
+  // DELETE RESCUE COPY (admin Save section, after downloading it): spiritderby.rescue shares the
+  // browser's storage quota with the save and its backup, so it should not stay forever. Refused (false)
+  // in a read-only window. Returns true when there is no rescue copy afterwards.
+  function discardRescue() {
+    if (role === 'reader') return false;
+    removeRaw(RESCUE_KEY);
+    rescueLen = null;
+    return readRaw(RESCUE_KEY) == null;
+  }
   function storageKind() { getStore(); return storeKind; }
 
   SD.persistence = {
     KEY: KEY,
     BACKUP_KEY: BACKUP_KEY,
+    RESCUE_KEY: RESCUE_KEY,
+    LOCK_KEY: LOCK_KEY,
     SCHEMA_VERSION: SCHEMA_VERSION,
     MIGRATIONS: MIGRATIONS,
     load: load,
@@ -772,16 +1339,31 @@
     exportJSON: exportJSON,
     exportFilename: exportFilename,
     importJSON: importJSON,
+    restoreBackup: restoreBackup,
     clear: clear,
     migrate: migrate,
     normalize: normalize,
     reconcileRoster: reconcileRoster,
     validate: validate,
     trimHistory: trimHistory,
+    slimRecord: slimRecord,
+    fitBudget: fitBudget,
     recoverInterruptedRace: recoverInterruptedRace,
     readBackup: readBackup,
+    readRescue: readRescue,
+    discardRescue: discardRescue,
     readRaw: readRaw,
     storageKind: storageKind,
+    // review batch 6: one writer per storage, held saves
+    role: function () { return role; },
+    lockStatus: lockStatus,
+    heartbeat: heartbeat,
+    takeOver: takeOver,
+    release: release,
+    releaseHeld: releaseHeld,
+    heldText: heldText,
+    instanceId: myId,
+    _setInstanceId: function (id) { instanceId = String(id); },
     lastError: function () { return lastError; },
     lastSavedAt: function () { return lastSavedAt; },
     _memoryStore: memoryStore

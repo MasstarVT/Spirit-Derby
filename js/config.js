@@ -13,6 +13,31 @@
     HISTORY_FULL_LOGS: 10,     // raceHistory entries that keep full tick data
     HISTORY_MAX: 200,          // raceHistory entries kept at all (older ones dropped)
     SAVE_DEBOUNCE_MS: 500,
+    // Review batch 6: save size, pacing and failure handling (js/persistence.js).
+    SAVE: {
+      // Soft cap on spiritderby.save (JSON characters). Above it save() drops the oldest race records
+      // (then extra tick logs and old log lines) before writing, so the save plus a same-size backup stay
+      // well inside the ~5.2M-character per-origin localStorage quota of Chrome / OBS.
+      BUDGET_CHARS: 2400000,
+      MIN_HISTORY: 20,          // budget trimming keeps at least this many race records while it can
+      LAZY_MS: 60000,           // read-only chat, clock ticks and mid-race changes autosave at most this often
+      RETRY_MS: 15000,          // after a failed save, the next autosave waits at least this long
+      NAMES_MAX: 5,             // viewer names kept in a slim history record's cheer event (data.names)
+      BETS_KEPT: 5,             // winning bets kept on a slim history record (the rest go into betsSummary)
+      // A budget trim that still leaves at least this many race records is routine (like HISTORY_MAX
+      // dropping the oldest): an info log line and no toast. Fewer, or old log lines cut: a warning toast.
+      ROUTINE_HISTORY: 100
+    },
+    // Review batch 6: one writer per browser storage. The window that saves refreshes spiritderby.lock
+    // every HEARTBEAT_MS; another window that finds a lock younger than STALE_MS opens read-only.
+    // A window that closes or reloads marks its lock released; a read-only window waits RELEASE_GRACE_MS
+    // before it takes over, so a reloaded saving window (F5, OBS refreshing the source) claims it back.
+    LOCK: { HEARTBEAT_MS: 10000, STALE_MS: 90000, RELEASE_GRACE_MS: 8000 },
+    // Review batch 6: drive-by viewers are removed from the save at a day change when ALL hold: not seen
+    // for INACTIVE_DAYS real days (0 = never prune), all-time participation <= MAX_PARTICIPATION, no
+    // runner / open bet / queued chat effect / race victory, not a mod, at most one achievement, at most
+    // JOIN_SP + DAILY_SP + ACHIEVEMENT_SP_MAX Spirit Points, and not named in any past season's summary.
+    RETENTION: { INACTIVE_DAYS: 45, MAX_PARTICIPATION: 20 },
     CLOCK_INTERVAL_MS: 30000,  // UI calls SD.game.tickClock() this often
     CLOCK_MAX_ELAPSED_MS: 30 * 60 * 1000, // cap on one tickClock step (sleeping tabs)
 

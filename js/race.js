@@ -1248,6 +1248,40 @@
     record.hash = hashRecord(record);
     return record;
   }
+  // Review batch 6: the smallest chat-effect list that simulate() treats exactly like `list` for a race
+  // whose entrants are `runnerIds` (same RNG draws, same cheer bonus, so the same hash). It mirrors the
+  // loop in simulate(): entries for runners not in the race and boosts / sabotages past the per-runner
+  // and per-race caps are dropped (the engine skips them before drawing), and each runner's cheers are
+  // merged into one entry at its first cheer's place (cheers draw nothing; count = the sum the engine
+  // adds up). Only the commentary names of a replayed race can differ. Slim history records store this.
+  function compactChatEffects(list, runnerIds) {
+    const CH = SD.CONFIG.RACE.CHAT;
+    const known = runnerIds ? Object.create(null) : null;
+    (runnerIds || []).forEach(function (id) { known[id] = true; });
+    const boosts = Object.create(null), sabs = Object.create(null), cheer = Object.create(null);
+    let sabTotal = 0;
+    const out = [];
+    (Array.isArray(list) ? list : []).forEach(function (ce) {
+      if (!ce || typeof ce !== 'object' || (known && !known[ce.runnerId])) return;
+      const id = ce.runnerId;
+      if (ce.type === 'boost') {
+        boosts[id] = (boosts[id] || 0) + 1;
+        if (boosts[id] <= CH.MAX_BOOSTS_PER_RUNNER) out.push(ce);
+      } else if (ce.type === 'sabotage') {
+        sabs[id] = (sabs[id] || 0) + 1;
+        if (sabs[id] > CH.MAX_SABOTAGE_PER_TARGET || sabTotal >= CH.MAX_SABOTAGE_PER_RACE) return;
+        sabTotal++;
+        out.push(ce);
+      } else if (ce.type === 'cheer') {
+        const n = Math.max(1, Math.round(Number(ce.count) || 1));
+        if (cheer[id]) { cheer[id].count += n; return; }
+        cheer[id] = { runnerId: id, type: 'cheer', by: ce.by || 'chat', count: n };
+        out.push(cheer[id]);
+      }
+    });
+    return out;
+  }
+
   // Hex FNV-1a over results + total ticks + event digest. Robust to tick stripping.
   // Review batch 5: results[].levelUps is hashed as 0, the value simulate() hashes: finishRace fills
   // it in afterwards (the results modal shows it), and it is an outcome of applying the race, not of
@@ -1284,6 +1318,7 @@
     assignOdds: assignOdds,
     selectField: selectField,
     simulate: simulate,
+    compactChatEffects: compactChatEffects,
     hashRecord: hashRecord
   };
 })(globalThis.SD = globalThis.SD || {});

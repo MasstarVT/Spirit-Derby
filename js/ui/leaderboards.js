@@ -147,9 +147,19 @@
       '</li>';
     },
 
+    // Review batch 6: nothing to compute while the Boards tab is not on screen (another tab is open,
+    // or overlay mode hides the whole sidebar); main.js re-renders every panel when a tab is selected
+    // or the overlay is turned off.
+    isHidden: function () {
+      if (document.body.classList.contains('sd-overlay')) return true;
+      const panel = document.getElementById('panel-boards');
+      return !!(panel && panel.hidden);
+    },
+
     render: function (state) {
       const LB = L();
       if (!LB || !this.refs.list) return;
+      if (this.isHidden()) return;
       const self = this;
       const cat = LB.get(this.category) || LB.get(DEFAULT_CATEGORY);
       const scope = this.scope;

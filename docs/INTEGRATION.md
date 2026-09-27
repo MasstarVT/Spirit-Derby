@@ -517,18 +517,28 @@ can also test with no relay at all from the browser console:
 ## 8. Two instances (control window + overlay) and localStorage
 
 The game saves to the browser's `localStorage` under `spiritderby.save`. Two open copies of the game
-do **not** share a live game:
+do **not** share a live game, and since review batch 6 only **one of them saves**:
 
-- **Two tabs or windows in the same browser** share the same storage but each runs its own
-  simulation. Whichever saves last overwrites the other. If both are connected to chat, every
-  command runs twice.
+- **Two tabs or windows in the same browser** share the same storage. The first one open is the
+  *saving window*: it keeps a small `spiritderby.lock` entry fresh (every 10 s). A copy opened while
+  that window is alive starts **read-only**: a banner says so, it never writes the save (not even on
+  its 30 s clock), never auto-connects to Twitch or the bridge, and leaves a race it sees running
+  alone (it does not cancel it or refund its bets). Changes made in a read-only window are not kept.
+  When the saving window closes, the read-only one takes over by itself about 8 s later
+  (`CONFIG.LOCK.RELEASE_GRACE_MS`) and reloads the latest save. Reloading the saving window (F5, or
+  OBS refreshing its source) is not a close: the reloaded page claims the role back within that
+  time, so it stays the saving window and reconnects to chat, and the read-only one stays read-only.
+  **TAKE OVER** in the banner makes a read-only window the saving window at once (use it when the other window crashed or is on
+  another screen you cannot reach). The window that loses the saving role that way stops saving,
+  disconnects from chat and shows the banner too. A window that crashed stops counting after 90 s
+  (`CONFIG.LOCK.STALE_MS`), so a copy opened later saves normally.
 - **OBS and your normal browser** have separate storage. OBS's built-in browser has its own
-  profile, so they do not even see each other's saves. To move a game between them, use
-  **Streamer Controls → Save → EXPORT JSON / IMPORT JSON**. The import keeps the receiving
-  side's own Twitch and bridge settings, so set up the connection once in each place.
-  After moving a game this way, **play on in the copy you imported into only**: close the old
+  profile, so they do not even see each other's saves (and each one is its own saving window). To
+  move a game between them, use **Streamer Controls → Save → EXPORT JSON / IMPORT JSON**. The import
+  keeps the receiving side's own Twitch and bridge settings, so set up the connection once in each
+  place. After moving a game this way, **play on in the copy you imported into only**: close the old
   copy, or leave it alone. The two copies would otherwise race on from the same saved game with
-  different results, and whichever saves last wins. (Every load and import draws new race seeds, so an
+  different results, each in its own storage. (Every load and import draws new race seeds, so an
   older copy never replays races chat already watched; an export also leaves the secret seed salt
   out, so it is safe to share in a bug report.)
 
@@ -539,8 +549,16 @@ Recommended setups:
 - **Browser window + Window Capture:** run the game in a normal browser window, connect chat there,
   press **O** for the overlay layout while live, and capture the window in OBS. Only close Streamer
   Controls before you go live.
-- If you open a second copy just to look at something, add `?connect=0` so it does not connect to
-  chat, and avoid changing the game in it.
+- Opening a second copy in the same browser just to look at something is safe now: it opens
+  read-only and saves nothing. Adding `?connect=0` is no longer needed for that (a read-only window
+  never connects on its own), but it still keeps a window you *take over* in off chat.
+
+If the stored save cannot be loaded (it comes from a newer version of Spirit Derby, or it is
+damaged), the game starts a fresh game **without overwriting it**: a banner offers **DOWNLOAD SAVED
+GAME** (open it in the newer version with IMPORT JSON) and **START NEW GAME**, which first copies the
+old save to `spiritderby.rescue` (Save → **⬇ RESCUE COPY** downloads it later, and **✕ DELETE
+RESCUE COPY** frees the space once you have it: the copy shares the browser's storage quota with the
+save and its backup). Nothing is saved until you choose.
 
 ## 9. Commands, sources and permissions
 
@@ -608,6 +626,8 @@ in the Chat tab. A `#streamer` name arriving from Twitch, the bridge or the demo
 | Nobody sees the replies on stream | Replies are toasts, and they only show in **overlay mode** (`?overlay=1` or **O**). To reply in Twitch chat, use the bridge (sections 5 and 6). |
 | Bridge pill shows `ERROR · No bridge is answering at ws://localhost:8765` | The relay isn't running, or it uses another port. Start it; the game retries by itself. If the relay **is** running, look at its window: `Refused a connection (missing or wrong token)` means the bridge URL needs `?token=<the relay's token>` (the game shows it as `?token=…`); `(web page from another site)` means the game is not opened from disk or `localhost` (see the hosting row below). The browser console prints one `WebSocket connection … failed` line per attempt; that is the browser, not the game, and the backoff limits it to about once a minute. If `localhost` fails, try `ws://127.0.0.1:8765`. |
 | Every command happens twice | Two instances are connected, or chat arrives through both Twitch and the bridge. See sections 6 and 8. |
+| A **Read-only window** banner | Another window of the game in this browser is saving it. Close this one, or press **TAKE OVER** if the other one is gone. See section 8. |
+| **⚠ NOT SAVED** in the header | The browser refused the last save (storage full or blocked). It retries by itself; meanwhile use **EXPORT JSON** so nothing is lost. |
 | Bridge refuses to connect when the game is hosted on a website, or opened through a LAN address | The example relay only accepts the game from disk (`file://`) or from `http://localhost` / `127.0.0.1` (`node tools/serve.js`); any other page is refused with `403` / `Refused a connection (web page from another site)`, TLS or not. Run the game from disk or localhost. If you really host it elsewhere, add that exact origin (for example `https://derby.example.com`) to `originOk` in `relay.js` and keep the token. A page on `https://` must also use `wss://` for any host other than `localhost` (mixed content), so the relay then needs TLS as well. |
 | Bridge keeps flipping between ON and `RECONNECTING…` (header tooltip: `The bridge connection closed (code 1008).`) | The example relay already has a game connected (another tab, window or OBS source) and allows one game at a time. Close the other copy's bridge (or use `?connect=0` there, section 8). |
 | Auto-connect stopped working | **RESET ALL** replaces the settings, including the auto-connect boxes. Tick them again. (**IMPORT JSON** keeps this PC's Twitch channel, bridge URL and auto-connect boxes.) |

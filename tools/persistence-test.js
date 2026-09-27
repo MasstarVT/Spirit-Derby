@@ -17,7 +17,8 @@
  *      existing saves on load, exactly once, with a unique id and name
  *   D  interrupted-race recovery: bets refunded (SP back, spent total reversed), paid effects
  *      queued again, log line; a race saved as 'finished' is applied by game.init()
- *   E  backup key: written before a migration, before an import, and for unreadable saves
+ *   E  backup key: written before a migration and before an import; unreadable / newer saves are
+ *      held untouched (review batch 6: see tools/durability-test.js for the rest)
  *   F  raceHistory: ticks kept for the last HISTORY_FULL_LOGS races only, HISTORY_MAX cap, quota
  *      fallback keeps 2 full logs
  *   G  stats() + state:saved, setAutoSave / flush (beforeunload), clear()
@@ -38,11 +39,13 @@ const fakeStorage = {
   data: Object.create(null),
   quota: Infinity,
   writes: 0,
+  keyWrites: Object.create(null),   // per-key count (review batch 6: a save also stamps spiritderby.lock)
   getItem: function (k) { return k in this.data ? this.data[k] : null; },
   setItem: function (k, v) {
     v = String(v);
     if (v.length > this.quota) { const e = new Error('QuotaExceededError (fake)'); e.name = 'QuotaExceededError'; throw e; }
     this.writes++;
+    this.keyWrites[k] = (this.keyWrites[k] || 0) + 1;
     this.data[k] = v;
   },
   removeItem: function (k) { delete this.data[k]; },
@@ -119,7 +122,7 @@ section('A. M1 fixture: load, migrate, play, round trip');
   ok(fixture.runners.length === 4 && fixture.runners.every(function (r) { return !r.rosterKey && !r.lifetime && !r.effects && !('ribbonColor' in r) && !r.trainStreak; }),
     'the fixture has 4 M1-shaped runners');
   ok(fixture.currentRace && fixture.currentRace.status === 'running', 'the fixture was saved mid-race');
-  eq(P.SCHEMA_VERSION, 3, 'SCHEMA_VERSION is 3 (review batch 2: runner.ownerKey)');
+  eq(P.SCHEMA_VERSION, 4, 'SCHEMA_VERSION is 4 (review batch 2: runner.ownerKey; review batch 6: slim history records)');
   ok(typeof P.MIGRATIONS[2] === 'function', 'MIGRATIONS[2] exists');
   eq(P.storageKind(), 'localStorage', 'persistence uses (fake) localStorage when it exists');
 
@@ -130,7 +133,7 @@ section('A. M1 fixture: load, migrate, play, round trip');
   eq(res.migratedFrom, 1, 'load() reports migratedFrom 1');
   eq(fakeStorage.getItem(P.BACKUP_KEY), fixtureText, 'the raw M1 save was copied to spiritderby.backup before migrating');
   const st = res.state;
-  eq(st.schemaVersion, 3, 'migrated state is schema 3');
+  eq(st.schemaVersion, 4, 'migrated state is schema 4');
   eq(st.meta.migratedFrom, 1, 'MIGRATIONS[2] records meta.migratedFrom');
   ok(st.log.some(function (e) { return /Save upgraded from schema v1 to v2/.test(e.text); }), 'the upgrade is logged');
   ok(st.currentRace === null, 'the interrupted race was cancelled');
@@ -205,7 +208,7 @@ section('A. M1 fixture: load, migrate, play, round trip');
   ok(!d2, 'save -> load is lossless', d2);
   // importing the raw M1 fixture works too
   const imp2 = P.importJSON(fixtureText);
-  ok(imp2.ok && imp2.migratedFrom === 1 && SD.state.get().schemaVersion === 3 && SD.state.get().currentRace === null, 'IMPORT JSON of the M1 save migrates it as well');
+  ok(imp2.ok && imp2.migratedFrom === 1 && SD.state.get().schemaVersion === 4 && SD.state.get().currentRace === null, 'IMPORT JSON of the M1 save migrates it as well');
 })();
 
 // =============================================================================
@@ -365,15 +368,20 @@ section('E. Backup key');
   fakeStorage.setItem(KEY, '{ not json');
   const r1 = P.load();
   ok(!r1.fromStorage && r1.state && r1.state.runners.length === SD.DATA.ROSTER.length, 'an unreadable save starts a fresh game');
-  eq(fakeStorage.getItem(P.BACKUP_KEY), '{ not json', 'and keeps the unreadable text in spiritderby.backup');
+  // Review batch 6 (lifecycle-concurrency#12, persistence#3): the unreadable save is no longer copied to
+  // the single backup slot and then overwritten by the fresh game's first autosave; it is held.
+  eq(fakeStorage.getItem(KEY), '{ not json', 'and the unreadable text stays untouched in spiritderby.save');
+  ok(r1.held === true && P.role() === 'held' && /unreadable/.test(r1.error), 'load() reports it (held, error)');
   ok(r1.state.log.some(function (e) { return /unreadable/.test(e.text); }), 'with a warning in the log');
 
   fakeStorage.setItem(KEY, JSON.stringify({ schemaVersion: 99, runners: [] }));
   const r2 = P.load();
   ok(!r2.fromStorage && /newer version/.test(r2.state.log[r2.state.log.length - 1].text), 'a save from a newer build is refused, not overwritten silently');
-  ok(/"schemaVersion":99/.test(fakeStorage.getItem(P.BACKUP_KEY)), 'and backed up');
+  ok(/"schemaVersion":99/.test(fakeStorage.getItem(KEY)) && r2.held, 'and held untouched');
+  ok(P.releaseHeld().ok && P.role() === 'writer' && /"schemaVersion":99/.test(fakeStorage.getItem(P.RESCUE_KEY)), 'START NEW GAME copies it to spiritderby.rescue first');
 
   boot(SD.state.create({ seedSalt: 31 }));
+  say('FoxFan', '!join');                      // a game someone played (a blank game is not backed up: see durability-test)
   // The backup is the full local state (salt included: it never leaves this PC), not an export.
   const current = JSON.stringify(SD.state.get());
   const imp = P.importJSON(JSON.stringify(SD.state.create({ seedSalt: 32 })));
@@ -421,7 +429,7 @@ section('E2. Import keeps this PC\'s Twitch / bridge settings (review batch 1, i
   // the M1 fixture (M1 settings, no twitch / bridge keys) still imports with the local values
   boot(local);
   const imp3 = P.importJSON(fixtureText);
-  eq([imp3.ok, SD.state.get().settings.twitch.channel, SD.state.get().schemaVersion], [true, 'myownchannel', 3], 'the M1 fixture imports and keeps the local connection settings');
+  eq([imp3.ok, SD.state.get().settings.twitch.channel, SD.state.get().schemaVersion], [true, 'myownchannel', 4], 'the M1 fixture imports and keeps the local connection settings');
   eq(imp3.ignoredConnection, false, 'the M1 fixture carries no connection settings → nothing reported as ignored (fix round 1)');
 
   // a fresh install's export (default connection values) into a configured install → nothing ignored
@@ -496,21 +504,24 @@ section('G. stats(), state:saved, autosave / flush, clear');
   off();
   const stt = P.stats();
   eq(stt.bytes, fakeStorage.getItem(KEY).length, 'stats().bytes = size of the saved JSON');
-  eq([stt.races, stt.players, stt.runners, stt.schema, stt.storage], [0, 1, SD.DATA.ROSTER.length, 3, 'localStorage'], 'stats() counts races / players / runners');
+  eq([stt.races, stt.players, stt.runners, stt.schema, stt.storage], [0, 1, SD.DATA.ROSTER.length, 4, 'localStorage'], 'stats() counts races / players / runners');
   eq(stt.savedAt, NOW, 'stats().savedAt');
   ok(evt && evt.bytes === stt.bytes && evt.at === NOW && evt.stats && evt.stats.players === 1, 'save() emits state:saved { at, bytes, stats }');
 
   // Node saves immediately on every mutation; with autosave off only flush()/save() write.
-  const writes = fakeStorage.writes;
+  // (Counted on spiritderby.save itself: since review batch 6 a save also stamps spiritderby.lock.)
+  const saves = function () { return fakeStorage.keyWrites[KEY] || 0; };
+  const writes = saves();
+  const allWrites = fakeStorage.writes;
   P.setAutoSave(false);
   say('FoxFan', '!claim');
-  eq(fakeStorage.writes, writes, 'setAutoSave(false): mutations do not write');
+  eq(fakeStorage.writes, allWrites, 'setAutoSave(false): mutations do not write');
   ok(P.stats().dirty, 'the game is marked dirty');
-  ok(P.flush() && fakeStorage.writes === writes + 1, 'flush() (beforeunload / pagehide) writes the pending save');
-  ok(P.flush() && fakeStorage.writes === writes + 1, 'flush() with nothing pending does not write again');
+  ok(P.flush() && saves() === writes + 1, 'flush() (beforeunload / pagehide) writes the pending save');
+  ok(P.flush() && saves() === writes + 1, 'flush() with nothing pending does not write again');
   P.setAutoSave(true);
   say('FoxFan', '!train speed');
-  ok(fakeStorage.writes > writes + 1, 'autosave back on');
+  ok(saves() > writes + 1, 'autosave back on');
   ok(JSON.parse(fakeStorage.getItem(KEY)).players.foxfan.runnerId === st.players.foxfan.runnerId, 'the saved game has the latest change');
   P.clear();
   eq(fakeStorage.getItem(KEY), null, 'clear() removes spiritderby.save');
@@ -563,7 +574,7 @@ section('I. Schema 3: a v2 save with display-name owners (review batch 2, econom
   ok(res.fromStorage && res.migratedFrom === 2, 'load() migrates the v2 save', res.migratedFrom);
   eq(fakeStorage.getItem(P.BACKUP_KEY), text, 'the raw v2 save was backed up first');
   const st = res.state;
-  eq([st.schemaVersion, st.meta.migratedFrom], [3, 2], 'schema 3, meta.migratedFrom 2');
+  eq([st.schemaVersion, st.meta.migratedFrom], [4, 2], 'schema 4, meta.migratedFrom 2');
   ok(st.log.some(function (e) { return /schema v3/.test(e.text) && /3 runners/.test(e.text) && /released/.test(e.text); }), 'the upgrade and the 3 released runners are logged');
   const R = function (id) { return st.runners.filter(function (r) { return r.id === id; })[0]; };
   eq([R('r04').ownerKey, R('r04').owner], ['foxfan', '狐狸'], "foxfan's last claim (his runnerId) is his: ownerKey = login, owner = display label");

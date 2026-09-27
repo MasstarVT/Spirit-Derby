@@ -451,10 +451,21 @@
     return false;
   }
 
+  /** Hand the viewer a text file (EXPORT JSON, the held-save and backup downloads). */
+  function download(name, text, type) {
+    const blob = new Blob([String(text)], { type: type || 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = el('a', { href: url, download: name, style: 'display:none' });
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
+  }
+
   SD.ui.dom = {
     $: $, $$: $$, el: el, esc: esc, fmt: fmt, schedule: schedule, toast: toast, toastStats: toastStats, prefs: prefs,
     refs: refs, ev: ev, on: on, emit: emit, state: state, settings: settings, debugOn: debugOn, cfg: cfg,
     clamp: clamp, num: num, safeColor: safeColor, safeUrl: safeUrl, runnerVars: runnerVars, badgeHTML: badgeHTML,
-    isRaceLocked: isRaceLocked, confirmClick: confirmClick, info: info, flush: flush
+    isRaceLocked: isRaceLocked, confirmClick: confirmClick, info: info, flush: flush, download: download
   };
 })(globalThis.SD = globalThis.SD || {});

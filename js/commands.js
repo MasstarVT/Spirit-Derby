@@ -197,7 +197,11 @@
   // Registry
   // ---------------------------------------------------------------------------
   // def: { name, aliases, usage, description, admin, requiresPlayer, requiresRunner,
-  //        lockedDuringRace, cooldownMs (number | fn(ctx)), cooldownKey, minArgs, hidden, handler(ctx, args) }
+  //        lockedDuringRace, cooldownMs (number | fn(ctx)), cooldownKey, minArgs, hidden, lookOnly,
+  //        handler(ctx, args) }
+  // lookOnly (review batch 6): the handler never writes the state (!status, !lb, !help ...), so the
+  // pipeline saves the viewer's lastSeen / command count lazily (SD.state.saveHint) instead of within
+  // 500 ms; a daily bonus it grants is saved as usual.
   function register(def) {
     if (!def || typeof def.handler !== 'function') throw new Error('SD.commands.register: a handler function is required.');
     const name = String(def.name || '').toLowerCase();
@@ -217,6 +221,7 @@
       cooldownKey: def.cooldownKey ? String(def.cooldownKey) : null,
       minArgs: Math.max(0, def.minArgs | 0),
       hidden: !!def.hidden,
+      lookOnly: !!def.lookOnly,
       handler: def.handler
     };
     registry[name] = d;
@@ -241,7 +246,7 @@
       name: d.name, aliases: d.aliases.slice(), usage: d.usage, description: d.description, admin: d.admin,
       requiresPlayer: d.requiresPlayer, requiresRunner: d.requiresRunner, lockedDuringRace: d.lockedDuringRace,
       cooldownMs: typeof d.cooldownMs === 'number' ? d.cooldownMs : null, cooldownKey: d.cooldownKey,
-      minArgs: d.minArgs, hidden: d.hidden
+      minArgs: d.minArgs, hidden: d.hidden, lookOnly: d.lookOnly
     };
   }
 
@@ -463,17 +468,23 @@
       out = SD.state.mutate('cmd:' + def.name, function (st) {
         ctx.state = st;
         const r = normalizeOut(def.handler(ctx, parsed.args));
+        let touched = false, bonus = 0;
         if (r.ok && !ctx.touched && P() && P().get(st, username)) {
           // The streamer console (source admin) can speak as anyone: it never changes player.isMod.
           if (ctx.readOnly && !readOnly) ctx.countActivity = infoCount();
           const t = P().touch(st, username, {
             isMod: source === 'admin' ? undefined : isMod, displayName: displayName, now: now, count: ctx.countActivity
           });
+          touched = true;
+          bonus = t.dailyBonus || 0;
           if (t.dailyBonus) {
             r.message += DOT + 'Daily bonus +' + t.dailyBonus + ' SP!';
             effects.push({ type: 'sp', amount: t.dailyBonus, reason: 'daily' });
           }
         }
+        // Review batch 6: a look-only command (or a handler that only looked, ctx.readOnly) changed at
+        // most lastSeen / the command count: saved lazily, or not at all when no player was touched.
+        if (r.ok && (def.lookOnly || ctx.readOnly) && !bonus) SD.state.saveHint(touched ? 'lazy' : 'none');
         return r;
       });
     } catch (e) {
@@ -808,6 +819,7 @@
     description: 'Your Spirit Points and your runner at a glance.',
     requiresPlayer: true,
     cooldownMs: 0,
+    lookOnly: true,
     handler: function (ctx) {
       const S = ctx.state;
       const p = ctx.player;
@@ -836,6 +848,7 @@
     usage: '!inspect <runner>',
     description: 'Full card for a runner: style, ability, owner, stats, condition, mood, record and odds.',
     cooldownMs: 0,
+    lookOnly: true,
     handler: function (ctx, args) {
       const S = ctx.state;
       let runner = null;
@@ -1003,6 +1016,7 @@
     usage: '!help [command]',
     description: 'List the commands, or explain one: !help train',
     cooldownMs: 0,
+    lookOnly: true,
     handler: function (ctx, args) {
       if (args.length) {
         const d = registry[resolveName(String(args[0]).replace(/^!+/, ''))];
@@ -1029,6 +1043,7 @@
     usage: '!leaderboard [wins|xp|sp|part|victories|hype] [all]',
     description: 'Top ' + SD.CONFIG.LEADERBOARDS.CHAT_TOP_N + ' on a board (default: Spirit Points). Add "all" for all-time: !lb wins all',
     cooldownMs: 0,
+    lookOnly: true,
     handler: function (ctx, args) {
       const L = SD.leaderboards;
       if (!L) throw new CommandError('Leaderboards are not available right now.', { severity: 'info' });
@@ -1057,6 +1072,7 @@
     usage: '!rank [viewer]',
     description: 'Your rank on the Spirit Points, victories and hype boards (or another viewer\'s).',
     cooldownMs: 0,
+    lookOnly: true,
     handler: function (ctx, args) {
       const L = SD.leaderboards;
       if (!L) throw new CommandError('Leaderboards are not available right now.', { severity: 'info' });
@@ -1208,6 +1224,7 @@
     usage: '!bets',
     description: 'Open bets on the next race: how many, how much, on whom (and yours).',
     cooldownMs: 0,
+    lookOnly: true,
     handler: function (ctx) {
       const B = needBetting();
       const S = ctx.state;
@@ -1231,6 +1248,7 @@
     usage: '!odds',
     description: 'Odds for every runner in the next race (or the race that is running).',
     cooldownMs: 0,
+    lookOnly: true,
     handler: function (ctx) {
       const S = ctx.state;
       const cr = S.currentRace;
@@ -1435,6 +1453,7 @@
     usage: '!hype',
     description: 'The crowd hype meter and the next threshold.',
     cooldownMs: 0,
+    lookOnly: true,
     handler: function (ctx) {
       const S = ctx.state;
       const v = Number(S.hype.value) || 0;
@@ -1455,6 +1474,7 @@
     usage: '!achievements [viewer]',
     description: 'Your achievements (count and the latest ones), or another viewer\'s.',
     cooldownMs: 0,
+    lookOnly: true,
     handler: function (ctx, args) {
       const A = SD.achievements;
       if (!A) throw new CommandError('Achievements are not available right now.', { severity: 'info' });

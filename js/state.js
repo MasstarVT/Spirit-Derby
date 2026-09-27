@@ -116,8 +116,13 @@
 
   // Run fn(state). Emits state:changed once for the outermost call. If fn throws,
   // nothing is emitted and the error propagates (callers use check-then-commit).
+  // Review batch 6: code inside the mutation may call saveHint('lazy' | 'none') to say how much it
+  // changed: 'lazy' (only lastSeen / counters, a clock tick) saves within CONFIG.SAVE.LAZY_MS instead
+  // of the 500 ms debounce; 'none' (nothing changed) saves nothing and emits no state:changed.
+  let hint = null;
   function mutate(label, fn) {
     if (!current) throw new Error('SD.state.mutate("' + label + '") called before SD.state.set()');
+    if (depth === 0) hint = null;
     depth++;
     let result;
     try {
@@ -126,11 +131,20 @@
       depth--;
     }
     if (depth === 0) {
+      const mode = hint;
+      hint = null;
+      if (mode === 'none') return result;
       current.meta.updatedAt = SD.clock.now();
-      if (SD.persistence && typeof SD.persistence.scheduleSave === 'function') SD.persistence.scheduleSave();
+      if (SD.persistence && typeof SD.persistence.scheduleSave === 'function') SD.persistence.scheduleSave(mode === 'lazy' ? { lazy: true } : undefined);
       if (SD.bus) SD.bus.emit(SD.EVENTS.STATE_CHANGED, { label: label });
     }
     return result;
+  }
+
+  // Inside mutate(): how this mutation should be saved ('lazy' | 'none'; see mutate). The last call of
+  // the outermost mutation wins; outside a mutation it does nothing.
+  function saveHint(mode) {
+    if (depth > 0 && (mode === 'lazy' || mode === 'none' || mode == null)) hint = mode || null;
   }
 
   function isMutating() { return depth > 0; }
@@ -231,6 +245,7 @@
     get: get,
     set: set,
     mutate: mutate,
+    saveHint: saveHint,
     isMutating: isMutating,
     log: log,
     runtime: runtime,

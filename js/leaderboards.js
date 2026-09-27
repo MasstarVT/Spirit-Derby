@@ -218,21 +218,34 @@
 
   // Rank of a runner (id or name) or player (username / display name) on a board.
   // -> { rank, value, label, total } | null (not on the board: value 0 or unknown id)
+  // Review batch 6: one pass over the values, no entries built and no sort (every !status and three
+  // per !rank used to rank the whole audience). Same result as all(): ties share a rank, so the rank
+  // is 1 + the number of entries with a strictly higher value.
   function rankOf(state, categoryId, id, scope) {
     const cat = get(categoryId);
     if (!state || !cat || id == null) return null;
+    scope = scopeOf(scope);
     let key = String(id);
-    if (cat.kind === 'player') key = SD.players ? SD.players.keyOf(key) : key.toLowerCase();
-    else {
+    let values;
+    if (cat.kind === 'player') {
+      key = SD.players ? SD.players.keyOf(key) : key.toLowerCase();
+      const players = state.players || {};
+      values = Object.keys(players).map(function (k) {
+        const p = players[k];
+        return { id: (p && p.username) || k, value: p && typeof p === 'object' ? U.round1(playerValue(cat, p, scope)) : 0 };
+      });
+    } else {
       const r = SD.state.runnerById(key, state) || SD.state.findRunner(key, state).runner;
       if (!r) return null;
       key = r.id;
+      values = (state.runners || []).filter(function (x) { return x && (scope === 'all' || !x.retired); })
+        .map(function (x) { return { id: x.id, value: U.round1(runnerValue(cat, x, scope)) }; });
     }
-    const list = all(state, cat.id, scope);
-    for (let i = 0; i < list.length; i++) {
-      if (list[i].id === key) return { rank: list[i].rank, value: list[i].value, label: list[i].label, total: list.length };
-    }
-    return null;
+    let mine = null, total = 0, higher = 0;
+    values.forEach(function (e) { if (e.value > 0) total++; if (e.id === key && mine === null && e.value > 0) mine = e.value; });
+    if (mine === null) return null;
+    values.forEach(function (e) { if (e.value > mine) higher++; });
+    return { rank: higher + 1, value: mine, label: labelOf(cat, mine, scope), total: total };
   }
 
   // One chat-friendly line:

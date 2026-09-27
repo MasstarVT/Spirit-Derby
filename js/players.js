@@ -459,6 +459,70 @@
     });
   }
 
+  // Review batch 6: retention. Every !join used to stay in the save forever (~800 characters each, so a
+  // 5,000-viewer raid alone filled most of the browser's storage quota). At a day change the director
+  // removes drive-by viewers who meet ALL of CONFIG.RETENTION's rules:
+  //   - not seen (lastSeen) for INACTIVE_DAYS real days (INACTIVE_DAYS 0 turns pruning off);
+  //   - all-time participation <= MAX_PARTICIPATION and no race victory, ever;
+  //   - holds nothing: no runner (ownerKey or runnerId), no open bet, no queued chat effect;
+  //   - not a mod, at most one achievement (First Steps), at most JOIN_SP + DAILY_SP + ACHIEVEMENT_SP_MAX
+  //     Spirit Points (what joining, one daily bonus and one achievement give);
+  //   - not named in any past season's summary (champion owner, MVP, top hype, win table).
+  // Removed with the player: their achievements.progress counters, hype.contributions entry and the
+  // achievements.unlocked entries from earlier seasons (this season's summary keeps its own). If they
+  // come back, !join starts them afresh. Returns the removed login keys (sorted).
+  function prune(state, now) {
+    const R = SD.CONFIG.RETENTION || {};
+    const days = Number(R.INACTIVE_DAYS) || 0;
+    if (!state || !state.players || days <= 0) return [];
+    now = now != null ? now : SD.clock.now();
+    const cutoff = now - days * 86400000;
+    const maxPart = Number(R.MAX_PARTICIPATION) || 0;
+    const maxSp = E().JOIN_SP + E().DAILY_SP + (Number(E().ACHIEVEMENT_SP_MAX) || 0);
+    const keep = U.dict();
+    (state.runners || []).forEach(function (r) { if (r && r.ownerKey) keep[r.ownerKey] = true; });
+    (state.bets || []).forEach(function (b) { if (b && b.username) keep[String(b.username).toLowerCase()] = true; });
+    (state.raceEffects || []).forEach(function (e) { if (e && e.by) keep[String(e.by).toLowerCase()] = true; });
+    // Past seasons: entries written before mvpKey / championOwnerKey existed name the MVP and the
+    // champion's owner by display name only, so those labels are matched against logins and display names.
+    const keepName = U.dict();
+    ((state.season && state.season.history) || []).forEach(function (h) {
+      if (!h || typeof h !== 'object') return;
+      [h.championOwnerKey, h.mvpKey, h.topHypeContributor && h.topHypeContributor.username].forEach(function (k) { if (k) keep[String(k)] = true; });
+      (Array.isArray(h.runnerTable) ? h.runnerTable : []).forEach(function (r) { if (r && r.ownerKey) keep[r.ownerKey] = true; });
+      [h.mvpKey ? null : h.mvpUsername, h.championOwnerKey ? null : h.championOwner].forEach(function (label) {
+        if (!label) return;
+        keep[keyOf(label)] = true;
+        keepName[cleanName(label)] = true;
+      });
+    });
+    const part = SD.leaderboards && SD.leaderboards.participation;
+    const removed = Object.keys(state.players).filter(function (k) {
+      const p = byKey(state, k);
+      if (!p || keep[k] || (p.displayName && keepName[cleanName(p.displayName)]) || p.isMod || p.runnerId != null) return false;
+      if (!(Number(p.lastSeen) < cutoff)) return false;
+      if ((Number(p.spiritPoints) || 0) > maxSp || (Array.isArray(p.achievements) ? p.achievements.length : 0) > 1) return false;
+      const st = p.stats || {}, life = p.lifetime || {};
+      if ((Number(st.raceVictories) || 0) + (Number(life.raceVictories) || 0) > 0) return false;
+      return (part ? part(p, 'all') : (Number(st.commands) || 0) + (Number(life.commands) || 0)) <= maxPart;
+    }).sort();
+    if (!removed.length) return removed;
+    const gone = U.dict();
+    removed.forEach(function (k) { gone[k] = true; delete state.players[k]; });
+    const A = state.achievements;
+    if (A && typeof A === 'object') {
+      if (A.progress && typeof A.progress === 'object') removed.forEach(function (k) { if (U.hasOwn(A.progress, k)) delete A.progress[k]; });
+      const season = state.season ? state.season.number : null;
+      if (Array.isArray(A.unlocked)) {
+        const kept = A.unlocked.filter(function (a) { return !(a && gone[a.username] && a.season !== season); });
+        if (kept.length !== A.unlocked.length) A.unlocked = kept;
+      }
+    }
+    const H = state.hype && state.hype.contributions;
+    if (H && typeof H === 'object') removed.forEach(function (k) { if (U.hasOwn(H, k)) delete H[k]; });
+    return removed;
+  }
+
   SD.players = {
     STAT_KEYS: STAT_KEYS,
     STREAMER_KEY: STREAMER_KEY,
@@ -489,6 +553,7 @@
     addHypeContribution: addHypeContribution,
     applyRaceResults: applyRaceResults,
     onNewDay: onNewDay,
-    onSeasonEnd: onSeasonEnd
+    onSeasonEnd: onSeasonEnd,
+    prune: prune
   };
 })(globalThis.SD = globalThis.SD || {});

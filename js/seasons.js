@@ -43,12 +43,25 @@
 
   // Move to the next day (or roll over into a new season).
   // Returns { seasonEnded, summary?, season, day, dayEvent, refunded }
+  // Review batch 6: drive-by viewers inactive per CONFIG.RETENTION leave the save at every day change
+  // (SD.players.prune). Returns how many were removed.
+  function pruneInactive(state) {
+    if (!SD.players || typeof SD.players.prune !== 'function') return 0;
+    const gone = SD.players.prune(state);
+    if (gone.length && SD.state.get() === state) {
+      SD.state.log('system', gone.length + ' inactive viewer' + (gone.length === 1 ? ' was' : 's were') + ' removed from the save (not seen for ' +
+        SD.CONFIG.RETENTION.INACTIVE_DAYS + '+ days, nothing held or won). They can !join again any time.', 'info');
+    }
+    return gone.length;
+  }
+
   function advanceDay(state, rng) {
     const S = state.season;
     if (S.day >= S.daysPerSeason) {
       const summary = endSeason(state);
       const started = startSeason(state, rng);
-      return { seasonEnded: true, summary: summary, season: S.number, day: S.day, dayEvent: started.dayEvent, refunded: summary.refundedBets || 0 };
+      const prunedS = pruneInactive(state);
+      return { seasonEnded: true, summary: summary, season: S.number, day: S.day, dayEvent: started.dayEvent, refunded: summary.refundedBets || 0, pruned: prunedS };
     }
     S.day += 1;
     S.raceIndexInDay = 0;
@@ -61,7 +74,8 @@
       SD.state.log('season', 'A new day dawns in the forest: Season ' + S.number + ', Day ' + S.day + '. Today: ' + ev.name + '.', 'good',
         { dayEventId: ev.id });
     }
-    return { seasonEnded: false, season: S.number, day: S.day, dayEvent: ev, refunded: refunded };
+    const pruned = pruneInactive(state);
+    return { seasonEnded: false, season: S.number, day: S.day, dayEvent: ev, refunded: refunded, pruned: pruned };
   }
 
   // Admin RESET DAY: same day number and event, race slots and energy restored.
@@ -201,6 +215,7 @@
       championOwner: sum.championOwner,
       championOwnerKey: sum.championOwnerKey,
       mvpUsername: sum.mvpUsername,
+      mvpKey: sum.mvpKey || null,         // review batch 6 fix round: the MVP's login key (retention keeps them)
       mvpSpEarned: sum.mvpSpEarned,
       totalRaces: sum.totalRaces,
       biggestUpset: sum.biggestUpset,

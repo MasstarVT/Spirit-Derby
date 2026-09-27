@@ -144,7 +144,12 @@
             '<span class="adm-saved" data-ref="savedFlash" aria-hidden="true">SAVED ✓</span>' +
             '<button type="button" class="btn btn--sm" data-act="savenow" style="margin-left:auto">Save now</button></div>' +
           '<p class="adm-note adm-save__stats" data-ref="saveStats"></p>' +
-          '<p class="adm-note">Stored in this browser (<b>spiritderby.save</b>). Import replaces the current game; a backup copy is kept (<b>spiritderby.backup</b>).</p>' +
+          '<div class="adm-row adm-row--2">' +
+            '<button type="button" class="btn btn--sm" data-act="restorebackup" data-confirm data-ref="btnRestore" title="Swap the current game with spiritderby.backup (the game before the last import, restore or upgrade). The current game becomes the backup.">↺ RESTORE BACKUP</button>' +
+            '<button type="button" class="btn btn--sm" data-act="dlrescue" data-ref="btnRescue" hidden title="Download the save this browser could not load (spiritderby.rescue), e.g. to import it in a newer build.">⬇ RESCUE COPY</button>' +
+            '<button type="button" class="btn btn--sm btn--danger" data-act="delrescue" data-ref="btnDelRescue" data-confirm hidden title="Delete spiritderby.rescue from this browser (download it first). It uses the same storage space as the save and its backup.">✕ DELETE RESCUE COPY</button>' +
+          '</div>' +
+          '<p class="adm-note">Stored in this browser (<b>spiritderby.save</b>). Import and restore replace the current game only after a backup copy of it was written and checked (<b>spiritderby.backup</b>); with no room for one, the current game is downloaded first. A save this build cannot load is never overwritten: see the banner.</p>' +
         '</div></details>' +
 
         // ---------------- SEND AS (M2): streamer/mod command through SD.processCommand
@@ -426,6 +431,21 @@
         case 'replay': this.replay(); break;
         case 'send': this.sendAs(); break;
         case 'export': this.exportSave(); break;
+        case 'restorebackup': this.restoreBackup(); break;
+        case 'dlrescue': {
+          const text = SD.persistence && SD.persistence.readRescue ? SD.persistence.readRescue() : null;
+          if (text) { dom.download('spirit-derby-rescued-save.json', text); dom.toast('Downloaded spirit-derby-rescued-save.json', 'good'); }
+          else dom.toast('There is no rescued save in this browser.', 'info');
+          break;
+        }
+        case 'delrescue':
+          if (SD.persistence && SD.persistence.discardRescue && SD.persistence.discardRescue()) {
+            dom.toast('The rescue copy was deleted from this browser.', 'info');
+          } else {
+            dom.toast('The rescue copy could not be deleted here (a read-only window changes nothing).', 'bad');
+          }
+          this.renderSave();
+          break;
         case 'import':
           if (this.refs.file) this.refs.file.click();
           break;
@@ -433,6 +453,7 @@
           if (SD.persistence && typeof SD.persistence.save === 'function') {
             try {
               if (SD.persistence.save(true)) dom.toast('Game saved.', 'good');
+              else if (SD.persistence.role && SD.persistence.role() !== 'writer') dom.toast('This window does not save the game (see the banner at the top).', 'bad');
               else dom.toast('Save failed: ' + ((SD.persistence.lastError() && SD.persistence.lastError().message) || 'storage refused it') + '. Use EXPORT JSON.', 'bad');
             } catch (e) { dom.toast('Save failed: ' + e.message, 'bad'); }
           } else dom.toast('Persistence is not available.', 'bad');
@@ -576,14 +597,44 @@
       const s = dom.state() || {};
       const season = s.season || {};
       const name = 'spirit-derby-s' + (season.number || 1) + '-d' + (season.day || 1) + '.json';
-      const blob = new Blob([text], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = dom.el('a', { href: url, download: name, style: 'display:none' });
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
+      dom.download(name, text);
       dom.toast('Exported ' + name, 'good');
+      return name;
+    },
+
+    // Review batch 6: importJSON / restoreBackup refuse when they cannot keep a checked copy of what
+    // they replace (backupFailed: no room for spiritderby.backup; rescueFailed: no room to rescue a
+    // held save). The drawer then downloads that game first and runs again with force, so the game
+    // being replaced always survives somewhere.
+    runImport: function (fn, what) {
+      let res;
+      try { res = fn({}); } catch (e) { res = { ok: false, error: e.message }; }
+      let saved = null;
+      if (res && !res.ok && (res.backupFailed || res.rescueFailed)) {
+        if (res.rescueFailed) {
+          const held = SD.persistence.heldText && SD.persistence.heldText();
+          if (held) { dom.download('spirit-derby-unreadable-save.json', held); saved = 'spirit-derby-unreadable-save.json'; }
+        } else {
+          saved = this.exportSave() || null;
+        }
+        if (saved) {
+          try { res = fn({ force: true }); } catch (e) { res = { ok: false, error: e.message }; }
+        }
+      }
+      if (res && res.ok) {
+        if (SD.playback && SD.playback.stop) SD.playback.stop();
+        if (SD.ui.renderAll) SD.ui.renderAll();
+        dom.toast(what + (saved ? ' There was no room for a backup in this browser, so the game it replaced was downloaded as ' + saved + '.' : '') +
+          (res.ignoredConnection ? " This PC's Twitch and bridge settings were kept; the file's were ignored." : ''), 'good', saved ? { ms: 9000 } : undefined);
+      } else {
+        dom.toast((what === 'Backup restored.' ? 'Restore' : 'Import') + ' failed: ' + ((res && (res.error || res.message)) || 'not a Spirit Derby save'), 'bad', { ms: 9000 });
+      }
+      return res;
+    },
+
+    restoreBackup: function () {
+      if (!SD.persistence || typeof SD.persistence.restoreBackup !== 'function') { dom.toast('Restore is not available.', 'bad'); return; }
+      this.runImport(function (o) { return SD.persistence.restoreBackup(o); }, 'Backup restored.');
     },
 
     importFile: function (file) {
@@ -592,16 +643,8 @@
       if (!SD.persistence || typeof SD.persistence.importJSON !== 'function') { dom.toast('Import is not available.', 'bad'); return; }
       const reader = new FileReader();
       reader.onload = function () {
-        let res;
-        try { res = SD.persistence.importJSON(String(reader.result || '')); } catch (e) { res = { ok: false, error: e.message }; }
-        if (res && res.ok) {
-          if (SD.playback && SD.playback.stop) SD.playback.stop();
-          if (SD.ui.renderAll) SD.ui.renderAll();
-          dom.toast('Save imported — welcome back to the forest.' + (res.ignoredConnection
-            ? " This PC's Twitch and bridge settings were kept; the file's were ignored." : ''), 'good');
-        } else {
-          dom.toast('Import failed: ' + ((res && (res.error || res.message)) || 'not a Spirit Derby save'), 'bad');
-        }
+        const text = String(reader.result || '');
+        self.runImport(function (o) { return SD.persistence.importJSON(text, o); }, 'Save imported — welcome back to the forest.');
         if (self.refs.file) self.refs.file.value = '';
       };
       reader.onerror = function () {
@@ -645,13 +688,24 @@
       if (this.refs.saveStats) {
         const line = fmt.int(st.races) + ' race' + (st.races === 1 ? '' : 's') + ' · ' + fmt.int(st.players) + ' viewer' + (st.players === 1 ? '' : 's') + ' · ' +
           fmt.int(st.runners) + ' runners · ' + (st.storage === 'localStorage' ? 'localStorage' : '⚠ memory only: this browser blocks storage, use EXPORT JSON') +
+          (st.backup ? ' · backup ' + fmtBytes(st.backup) : ' · no backup yet') +
+          (st.role === 'reader' ? ' · 👀 READ-ONLY: another window saves this game' : (st.role === 'held' ? ' · ⚠ NOT SAVING: the stored save could not be loaded' : '')) +
           (st.error ? ' · ⚠ last save failed: ' + st.error : '');
         if (this.refs.saveStats.textContent !== line) this.refs.saveStats.textContent = line;
+      }
+      if (this.refs.btnRestore) this.refs.btnRestore.disabled = !st.backup || st.role === 'reader';
+      if (this.refs.btnRescue) this.refs.btnRescue.hidden = !st.rescue;
+      if (this.refs.btnDelRescue) {
+        this.refs.btnDelRescue.hidden = !st.rescue;
+        this.refs.btnDelRescue.disabled = st.role === 'reader';
       }
     },
 
     // ---------------------------------------------------------------- render
     render: function (state) {
+      // Review batch 6: the drawer is not on screen (closed, or overlay mode): nothing to compute.
+      // main.js setAdmin(true) schedules a render when it opens.
+      if (!document.body.classList.contains('sd-admin-open')) return;
       const r = this.refs;
       const cr = state.currentRace;
       const status = cr ? cr.status : null;

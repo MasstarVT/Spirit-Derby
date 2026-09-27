@@ -35,7 +35,8 @@
 
       const rerender = function () { dom.schedule(self); };
       ['STATE_CHANGED', 'STATE_LOADED', 'SETTINGS_CHANGED', 'HYPE_CHANGED', 'EVENT_DAY',
-        'SEASON_DAY_ADVANCED', 'SEASON_ENDED', 'RACE_STARTED', 'RACE_FINISHED', 'RACE_ABORTED']
+        'SEASON_DAY_ADVANCED', 'SEASON_ENDED', 'RACE_STARTED', 'RACE_FINISHED', 'RACE_ABORTED',
+        'STATE_SAVED', 'STATE_SAVE_FAILED', 'STATE_READ_ONLY']
         .forEach(function (k) { self.offs.push(dom.on(k, rerender)); });
       this.offs.push(dom.on('HYPE_THRESHOLD', function (p) { self.onThreshold(p); }));
       this.offs.push(dom.on('INTEGRATION_STATUS', function (p) { self.onIntegration(p); }));
@@ -48,6 +49,21 @@
     destroy: function () {
       this.offs.forEach(function (off) { off(); });
       this.offs = [];
+    },
+
+    // Review batch 6: a game that is not being saved says so in the header, in overlay mode too
+    // (the admin drawer, where the save line lives, is hidden there).
+    saveWarning: function () {
+      const P = SD.persistence;
+      if (!P || typeof P.role !== 'function') return '';
+      const role = P.role();
+      const err = P.lastError && P.lastError();
+      let label = '', title = '';
+      if (role === 'reader') { label = 'READ-ONLY'; title = 'Another Spirit Derby window saves this game: nothing changed here is kept.'; }
+      else if (role === 'held') { label = 'NOT SAVING'; title = 'The stored save could not be loaded and is kept untouched. See the banner.'; }
+      else if (err) { label = 'NOT SAVED'; title = 'The last save failed (' + String(err.message || err) + '). Progress since then is only in this window: EXPORT JSON to keep it.'; }
+      if (!label) return '';
+      return ' · <span class="hdr-savewarn" title="' + dom.esc(title) + '">⚠ ' + label + '</span>';
     },
 
     render: function (state) {
@@ -75,6 +91,7 @@
           html += ' · <span class="hdr-fixedseed" title="Debug seed override ' + dom.esc(st.seedOverride) +
             ': every race uses the same seed. Clear it in the admin Debug section.">FIXED<span class="hdr-fixedseed__more"> SEED</span></span>';
         }
+        html += this.saveWarning();
         if (r.race.innerHTML !== html) r.race.innerHTML = html;
         r.race.classList.toggle('hdr-season__race--live', live);
       }

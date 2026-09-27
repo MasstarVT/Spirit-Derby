@@ -770,8 +770,12 @@
     commit('clock', function (st, emit) {
       const condBefore = {};
       st.runners.forEach(function (r) { condBefore[r.id] = r.condition; });
+      const hypeBefore = st.hype.value;
       changed = SD.training.tickClock(st, elapsed);
       SD.hype.idleDecay(st, elapsed);
+      // Review batch 6: a tick that changed nothing saves nothing (a window left open "just to look"
+      // used to rewrite the whole save every 30 s); energy regen / hype decay is saved lazily.
+      SD.state.saveHint(changed.length || st.hype.value !== hypeBefore ? 'lazy' : 'none');
       changed.forEach(function (id) {
         const r = SD.state.runnerById(id, st);
         if (r && r.condition !== condBefore[id]) emit(SD.EVENTS.RUNNER_CONDITION, { runnerId: id, from: condBefore[id], to: r.condition });

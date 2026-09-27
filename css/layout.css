@@ -217,6 +217,31 @@ body.sd-admin-open .admin-drawer {
   color: var(--sev-bad);
 }
 
+/* ---- save banner (review batch 6): read-only second window / held save ---- */
+.savebar {
+  position: fixed;
+  left: 50%;
+  top: var(--sp-2);
+  transform: translateX(-50%);
+  z-index: var(--z-toast);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2) var(--sp-3);
+  max-width: min(960px, calc(100vw - 2 * var(--sp-4)));
+  padding: var(--sp-2) var(--sp-4);
+  background: rgba(40, 20, 14, 0.95);
+  border: 1px solid var(--sev-bad);
+  border-radius: var(--r-md);
+  color: var(--cream);
+  font-size: var(--fs-min);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
+}
+.savebar[hidden] { display: none; }
+.savebar__text { flex: 1 1 320px; min-width: 0; }
+.savebar__text b { color: var(--sev-bad); }
+.savebar__actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+
 .noscript {
   position: fixed;
   inset: 0;

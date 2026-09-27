@@ -7,6 +7,10 @@
  * M5: SD.achievements.init() after game.init, season summary panel, gold achievement toasts.
  * M6: shared UI prefs (SD.ui.dom.prefs), save flush on beforeunload / pagehide / hidden tab, roster
  *     reconciliation toast. SD.debug (js/debug.js) is the console toolbox.
+ * Review batch 6: the save banner (a read-only second window with TAKE OVER, a held save that could not
+ *     be loaded with DOWNLOAD / START NEW GAME), the writer-lock heartbeat + 'storage' listener, lock
+ *     release on pagehide, save-failure / history-trim toasts, no auto-connect in a read-only window,
+ *     and hidden panels re-rendered when a tab is selected or the overlay is turned off.
  */
 (function (SD) {
   'use strict';
@@ -57,6 +61,7 @@
     if (btn) btn.setAttribute('aria-pressed', String(on));
     if (!opts || opts.persist !== false) writePrefs({ overlay: on });
     window.dispatchEvent(new Event('resize'));     // track re-measures lane width
+    renderAll();                                    // panels skipped while hidden catch up
   }
   function toggleOverlay() { setOverlay(!document.body.classList.contains('sd-overlay')); }
 
@@ -84,6 +89,7 @@
       if (panel) panel.hidden = !on;
     });
     if (!opts || opts.persist !== false) writePrefs({ tab: name });
+    renderAll();                                    // a panel that was hidden (Boards) renders now
     return true;
   }
 
@@ -182,6 +188,9 @@
   function autoConnect(params) {
     const I = SD.integrations;
     if (!I) return;
+    // Review batch 6: a window that does not save the game (another window does, or the stored save
+    // could not be loaded) never connects to chat on its own: every command would run twice.
+    if (SD.persistence && SD.persistence.role && SD.persistence.role() !== 'writer') return;
     const get = function (k) { try { return params ? params.get(k) : null; } catch (e) { return null; } };
     if (get('connect') === '0') return;
     const s = (SD.state.get() || {}).settings || {};
@@ -225,6 +234,166 @@
     }
   }
   installEntropy();
+
+  // ------------------------------------------------------------------ save banner + writer lock (review batch 6)
+  let bootParams = null;
+  let bar = null;
+  let forceNewGame = false;
+
+  function saveBar() {
+    if (bar) return bar;
+    bar = document.createElement('div');
+    bar.className = 'savebar';
+    bar.setAttribute('role', 'alert');
+    bar.hidden = true;
+    bar.innerHTML = '<span class="savebar__text" data-ref="text"></span><span class="savebar__actions" data-ref="actions"></span>';
+    bar.addEventListener('click', function (e) {
+      const b = e.target.closest('button[data-bar]');
+      if (b) barAction(b.getAttribute('data-bar'), b);
+    });
+    document.body.appendChild(bar);
+    return bar;
+  }
+
+  function agoText(t) {
+    if (!t) return '';
+    const s = Math.max(0, Math.round((Date.now() - t) / 1000));
+    return s < 90 ? s + ' s ago' : Math.round(s / 60) + ' min ago';
+  }
+
+  // Show / hide the banner for the persistence role: reader (another window saves) or held.
+  function renderSaveBar(status) {
+    const P = SD.persistence;
+    if (!P || typeof P.lockStatus !== 'function') return;
+    status = status || P.lockStatus();
+    const el = saveBar();
+    const esc = SD.ui.dom.esc;
+    let text = '', actions = '';
+    if (status.role === 'reader') {
+      text = '<b>👀 Read-only window.</b> ' + esc(status.message || 'Another Spirit Derby window is saving this game.') +
+        (status.otherAt ? ' (It last checked in ' + esc(agoText(status.otherAt)) + '.)' : '') +
+        ' Close this one, or take over if the other window is gone.';
+      actions = '<button type="button" class="btn btn--sm" data-bar="takeover">TAKE OVER</button>';
+    } else if (status.role === 'held') {
+      text = '<b>⚠ Your saved game could not be loaded.</b> ' + esc(status.message || '') +
+        ' It is kept untouched and this window saves nothing. Download it (a newer build of Spirit Derby can import it), or start a new game here' +
+        (forceNewGame ? ': <b>there is no room to keep a copy in this browser, so download it first, or click START NEW GAME again to lose it.</b>' : ' (a copy is kept in spiritderby.rescue).');
+      actions = '<button type="button" class="btn btn--sm" data-bar="download">⬇ DOWNLOAD SAVED GAME</button>' +
+        '<button type="button" class="btn btn--sm" data-bar="newgame">START NEW GAME</button>';
+    }
+    // Text and buttons update separately: the "last checked" age changes every heartbeat, and
+    // re-creating the buttons would disarm a TAKE OVER / START NEW GAME waiting for its confirm click.
+    if (el.dataset.text !== text) { el.dataset.text = text; el.querySelector('[data-ref="text"]').innerHTML = text; }
+    if (el.dataset.actions !== actions) { el.dataset.actions = actions; el.querySelector('[data-ref="actions"]').innerHTML = actions; }
+    el.hidden = !text;
+  }
+
+  // Adopt a game loaded from storage (TAKE OVER), like an import does.
+  function adopt(res, source) {
+    SD.state.set(res.state);
+    SD.game.init();
+    if (SD.playback && SD.playback.stop) SD.playback.stop();
+    SD.bus.emit(SD.EVENTS.STATE_LOADED, { source: source });
+    SD.bus.emit(SD.EVENTS.STATE_CHANGED, { label: source });
+  }
+
+  function takeOver(auto) {
+    const P = SD.persistence;
+    let res = null;
+    try { res = P.takeOver(); } catch (e) { console.error('[boot] take over failed', e); }
+    if (!res || res.ok === false || !res.state) {
+      SD.ui.dom.toast('Could not take over: ' + ((res && res.error) || 'see the console'), 'bad');
+      return;
+    }
+    adopt(res, 'takeover');
+    renderSaveBar();
+    SD.ui.dom.toast(auto ? 'The other Spirit Derby window closed: this window saves the game now (reloaded from its last save).'
+      : 'This window saves the game now (reloaded from the last save).', 'good', { ms: 7000 });
+    autoConnect(bootParams);
+  }
+
+  function barAction(act, btn) {
+    const P = SD.persistence;
+    const dom = SD.ui.dom;
+    if (act === 'takeover') {
+      dom.confirmClick(btn, function () { takeOver(false); });
+    } else if (act === 'download') {
+      const text = (P.heldText && P.heldText()) || (P.readRescue && P.readRescue());
+      if (text) { dom.download('spirit-derby-unreadable-save.json', text); dom.toast('Downloaded spirit-derby-unreadable-save.json', 'good'); }
+      else dom.toast('There is no stored save to download.', 'info');
+    } else if (act === 'newgame') {
+      dom.confirmClick(btn, function () {
+        const r = P.releaseHeld({ force: forceNewGame });
+        if (!r.ok) {
+          forceNewGame = true;
+          renderSaveBar();
+          dom.toast(r.error || 'Could not keep a copy of the old save.', 'bad', { ms: 9000 });
+          return;
+        }
+        forceNewGame = false;
+        renderSaveBar();
+        dom.toast('New game started.' + (r.rescued ? ' The old save is kept in spiritderby.rescue (admin Save: RESCUE COPY).' : ''), 'good', { ms: 8000 });
+        autoConnect(bootParams);
+      });
+    }
+  }
+
+  function installSaveGuards() {
+    const P = SD.persistence;
+    const dom = SD.ui.dom;
+    if (!P || typeof P.heartbeat !== 'function') return;
+    // A released lock (the saving window closed or is reloading) becomes free only after
+    // CONFIG.LOCK.RELEASE_GRACE_MS: a reloading window claims it back first and stays the saving
+    // window. st.freeIn says when to look again (before the next heartbeat).
+    let recheck = null;
+    const check = function () {
+      let st;
+      try { st = P.heartbeat(); } catch (e) { return; }
+      if (st.role === 'reader' && st.free) { takeOver(true); return; }
+      renderSaveBar(st);
+      if (st.role === 'reader' && st.freeIn > 0 && !recheck) {
+        recheck = setTimeout(function () { recheck = null; check(); }, st.freeIn + 250);
+      }
+    };
+    const beat = Number(SD.CONFIG.LOCK && SD.CONFIG.LOCK.HEARTBEAT_MS) || 10000;
+    setInterval(check, beat);
+    // Another window wrote the save or the lock: react at once instead of at the next heartbeat.
+    window.addEventListener('storage', function (e) {
+      if (e.key === null || e.key === P.KEY || e.key === P.LOCK_KEY) check();
+    });
+    window.addEventListener('pageshow', function (e) { if (e.persisted) check(); });
+
+    dom.on('STATE_READ_ONLY', function (st) {
+      renderSaveBar();
+      if (st && st.role === 'reader' && st.reason === 'other-window') {
+        // This window stepped down: stop answering chat here (the other window does).
+        const I = SD.integrations || {};
+        ['twitch', 'bridge'].forEach(function (k) {
+          try { if (I[k] && typeof I[k].disconnect === 'function') I[k].disconnect(); } catch (x) { /* ignore */ }
+        });
+      }
+    });
+    let lastFailToast = 0;
+    dom.on('STATE_SAVE_FAILED', function (p) {
+      const now = Date.now();
+      if (now - lastFailToast < 60000) return;      // the header shows NOT SAVED meanwhile
+      lastFailToast = now;
+      dom.toast('⚠ The game could not be saved (' + String((p && p.error) || 'storage refused it').slice(0, 120) +
+        '). Progress since the last save lives only in this window: use EXPORT JSON.', 'bad', { ms: 12000 });
+    });
+    let trimToasted = false;
+    dom.on('STATE_SAVED', function (p) {
+      lastFailToast = 0;
+      const t = p && p.trimmed;
+      // Once per session, and not for a routine trim (a long career at its steady size: the oldest
+      // records go like HISTORY_MAX drops them). The game log keeps a line for every trim.
+      if (t && t.races && !t.routine && !trimToasted) {
+        trimToasted = true;
+        dom.toast('The save was getting too big for browser storage: the oldest ' + t.races + ' race records were dropped to make room.', 'info', { ms: 8000 });
+      }
+    });
+    renderSaveBar();
+  }
 
   // ------------------------------------------------------------------ boot
   function boot() {
@@ -297,6 +466,7 @@
     const prefs = readPrefs();
     let params = null;
     try { params = new URLSearchParams(window.location.search); } catch (e) { params = null; }
+    bootParams = params;
     const urlOverlay = params && params.get('overlay');
     if (urlOverlay === '1' || urlOverlay === 'true') setOverlay(true, { persist: false });
     else if (urlOverlay !== '0' && prefs.overlay) setOverlay(true, { persist: false });
@@ -316,7 +486,12 @@
       try { if (SD.persistence && SD.persistence.flush) SD.persistence.flush(); } catch (e) { /* ignore */ }
     };
     window.addEventListener('beforeunload', flushSave);
-    window.addEventListener('pagehide', flushSave);
+    window.addEventListener('pagehide', function () {
+      flushSave();
+      // Review batch 6: the lock is marked released, so the next window (this one reloading, OBS
+      // restarting the source) saves straight away; a read-only window waits RELEASE_GRACE_MS first.
+      try { if (SD.persistence && SD.persistence.release) SD.persistence.release(); } catch (e) { /* ignore */ }
+    });
     document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'hidden') flushSave(); });
 
     // 10. body[data-hype-tier] + debug class
@@ -325,6 +500,9 @@
 
     // 11. debug error toasts
     installErrorToasts();
+
+    // 11b. review batch 6: writer lock heartbeat, save banner, save-failure toasts
+    installSaveGuards();
 
     // 12. optional modules (later milestones) — guarded so M1 boots without them.
     // The chat panel (M2) enables its own tab in init(); open it by default unless the
@@ -346,9 +524,10 @@
       autoConnect(params);
     }
 
-    if (loaded && loaded.migratedFrom != null) {
+    if (loaded && loaded.migratedFrom != null && !loaded.readOnly) {   // a read-only window upgrades in memory only
       dom.toast('Save upgraded from schema v' + loaded.migratedFrom + ' to v' + (SD.persistence ? SD.persistence.SCHEMA_VERSION : '?') +
-        ' (a backup of the old save was kept).', 'info', { ms: 7000 });
+        (loaded.backupFailed ? '. There was no room to keep a backup of the old save: EXPORT JSON keeps a copy.' : ' (a backup of the old save was kept).'),
+        loaded.backupFailed ? 'bad' : 'info', { ms: 9000 });
     }
     // M6: runners added to SD.DATA.ROSTER since this save was made join the roster on load.
     if (loaded && loaded.rosterAdded && loaded.rosterAdded.length) {

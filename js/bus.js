@@ -9,7 +9,9 @@
   SD.EVENTS = {
     STATE_CHANGED: 'state:changed',
     STATE_LOADED: 'state:loaded',
-    STATE_SAVED: 'state:saved',       // M6: persistence wrote the save { at, bytes, stats }
+    STATE_SAVED: 'state:saved',       // M6: persistence wrote the save { at, bytes, stats, trimmed }
+    STATE_SAVE_FAILED: 'state:saveFailed', // review batch 6: a save could not be written { at, error, bytes, stats }
+    STATE_READ_ONLY: 'state:readOnly',     // review batch 6: this window stopped / resumed saving { readOnly, role, reason, message }
     SETTINGS_CHANGED: 'settings:changed',
     LOG_ENTRY: 'log:entry',
     RUNNER_SPAWNED: 'runner:spawned',

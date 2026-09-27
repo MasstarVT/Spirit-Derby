@@ -62,6 +62,7 @@
 .hdr-season__race b { color: var(--gold-bright); }
 .hdr-season__race--live b { color: var(--sev-good); }
 .hdr-fixedseed { color: var(--sev-bad); white-space: nowrap; }
+.hdr-savewarn { color: var(--sev-bad); white-space: nowrap; font-weight: 700; }
 
 .hdr-dayevent {
   flex: 0 1 auto;
