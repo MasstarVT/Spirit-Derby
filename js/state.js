@@ -108,10 +108,32 @@
 
   function get() { return current; }
 
+  // Replace the whole game. Review batch 7 (director-state#8): the mutate depth is left alone. It
+  // used to be reset to 0, so a set() inside a mutation (a listener running resetAll / importJSON)
+  // left it at -1 after the outer mutate's finally, and from then on no mutation ever reached depth 0
+  // again: no state:changed, no updatedAt, no autosave. A set() inside a mutate now simply takes
+  // effect when that mutate ends (its state:changed / save apply to the new state).
   function set(st) {
     current = st;
-    depth = 0;
     return current;
+  }
+
+  // Review batch 7 (director-state#3): forget every per-game runtime map. The runtime outlives
+  // state.set(), and runner ids restart at r01 in every game, so RESET ALL and IMPORT / RESTORE BACKUP
+  // clear what belonged to the old game: command cooldowns, read-only activity, runner rest cooldowns,
+  // nervous-cheer counts, recent hype contributors, the running command, the idle-decay accumulator
+  // and the clock baseline. The chat feed and the connection status are about this browser session
+  // and are kept.
+  function resetRuntime() {
+    runtime.cooldowns = U.dict();
+    runtime.activity = U.dict();
+    runtime.runnerCooldowns = U.dict();
+    runtime.nervousCheers = U.dict();
+    runtime.hypeRecent = U.dict();
+    runtime.activeCommand = null;
+    runtime.hypeIdleAccumMs = 0;
+    runtime.lastClockAt = SD.clock.now();
+    return runtime;
   }
 
   // Run fn(state). Emits state:changed once for the outermost call. If fn throws,
@@ -191,7 +213,9 @@
     if (!raw) return { none: true };
     const pool = st.runners.filter(function (r) { return !r.retired; });
     const lower = raw.toLowerCase();
-    const byId = pool.filter(function (r) { return r.id.toLowerCase() === lower; });
+    // String(): a runner id is always a string after persistence.normalize (review batch 7); this
+    // keeps one bad id from breaking every name lookup anyway.
+    const byId = pool.filter(function (r) { return String(r.id).toLowerCase() === lower; });
     if (byId.length === 1) return { runner: byId[0] };
     const key = U.nameKey(raw);
     if (!key) return { none: true };
@@ -244,6 +268,7 @@
     resalt: resalt,
     get: get,
     set: set,
+    resetRuntime: resetRuntime,
     mutate: mutate,
     saveHint: saveHint,
     isMutating: isMutating,

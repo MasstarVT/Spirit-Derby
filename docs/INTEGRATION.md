@@ -560,6 +560,12 @@ old save to `spiritderby.rescue` (Save → **⬇ RESCUE COPY** downloads it late
 RESCUE COPY** frees the space once you have it: the copy shares the browser's storage quota with the
 save and its backup). Nothing is saved until you choose.
 
+IMPORT JSON checks the file in depth. Anything malformed (a race record the game cannot use, bad
+runner ids or best times) is repaired or dropped, a race saved as finished is applied right away (or
+cancelled and its bets refunded when it is broken), and IMPORT clears the old game's chat cooldowns,
+rest cooldowns and cheer counts. If the page still fails to start, it shows the error with
+**DOWNLOAD SAVED GAME**, **RESTORE BACKUP** and **START NEW GAME** buttons (see section 10).
+
 ## 9. Commands, sources and permissions
 
 Sources: `twitch` (read-only chat), `bridge` (relay), `sim` (Chat tab / demo bots) and `admin`
@@ -628,6 +634,7 @@ in the Chat tab. A `#streamer` name arriving from Twitch, the bridge or the demo
 | Every command happens twice | Two instances are connected, or chat arrives through both Twitch and the bridge. See sections 6 and 8. |
 | A **Read-only window** banner | Another window of the game in this browser is saving it. Close this one, or press **TAKE OVER** if the other one is gone. See section 8. |
 | **⚠ NOT SAVED** in the header | The browser refused the last save (storage full or blocked). It retries by itself; meanwhile use **EXPORT JSON** so nothing is lost. |
+| **Spirit Derby could not start.** with an error box | Something in the stored game stops the page from starting (for example a hand-edited file you imported). Press **⬇ DOWNLOAD SAVED GAME** first, then **RESTORE BACKUP** (the game before your last import or upgrade) or **START NEW GAME** (click twice to confirm). Both keep the failing save in `spiritderby.rescue` and reload the page, so you never need to clear `localStorage` by hand. |
 | Bridge refuses to connect when the game is hosted on a website, or opened through a LAN address | The example relay only accepts the game from disk (`file://`) or from `http://localhost` / `127.0.0.1` (`node tools/serve.js`); any other page is refused with `403` / `Refused a connection (web page from another site)`, TLS or not. Run the game from disk or localhost. If you really host it elsewhere, add that exact origin (for example `https://derby.example.com`) to `originOk` in `relay.js` and keep the token. A page on `https://` must also use `wss://` for any host other than `localhost` (mixed content), so the relay then needs TLS as well. |
 | Bridge keeps flipping between ON and `RECONNECTING…` (header tooltip: `The bridge connection closed (code 1008).`) | The example relay already has a game connected (another tab, window or OBS source) and allows one game at a time. Close the other copy's bridge (or use `?connect=0` there, section 8). |
 | Auto-connect stopped working | **RESET ALL** replaces the settings, including the auto-connect boxes. Tick them again. (**IMPORT JSON** keeps this PC's Twitch channel, bridge URL and auto-connect boxes.) |

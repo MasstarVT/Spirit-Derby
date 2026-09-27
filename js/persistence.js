@@ -40,6 +40,12 @@
  *      backup of a non-blank game (opts.force overrides), never backs up a blank game over an existing
  *      backup, and rolls back (the game and the backup slot) when the imported game cannot be saved.
  *      restoreBackup() swaps back. discardRescue() deletes spiritderby.rescue.
+ *  - Review batch 7 (import hardening): normalize() checks the race in progress in depth (recordProblem:
+ *    a 'finished' race finishRace cannot apply is refunded like an interrupted one), bounds record
+ *    distances, gives non-string runner ids a new id, and refunds bets / paid effects on runners that are
+ *    gone or retired. importJSON() runs boot's post-load routine (SD.game.afterLoad: runtime maps reset,
+ *    day event rolled) and applies a 'finished' race (SD.game.applyPending). bootRecovery() backs the
+ *    boot error overlay's RESTORE BACKUP / START NEW GAME.
  */
 (function (SD) {
   'use strict';
@@ -266,6 +272,11 @@
   // own lock is released.
   function release() {
     if (role !== 'writer' || !shared()) return false;
+    return releaseLock();
+  }
+  // Mark this window's own lock released (any role; bootRecovery uses it from a held window too).
+  function releaseLock() {
+    if (!shared()) return false;
     const l = readLock();
     if (l && l.id !== myId()) return false;
     try {
@@ -662,8 +673,91 @@
     });
   }
 
+  // Review batch 7: a race distance a record may carry (the engine only runs CONFIG.RACE.DISTANCES;
+  // a huge one hung the track ruler and REPLAY).
+  function goodDistance(d) {
+    const max = Number(SD.CONFIG.RACE.MAX_RECORD_DISTANCE) || 10000;
+    return isNum(d) && d >= 100 && d <= max;
+  }
+
+  // A race record worth keeping (history). Review batch 7: entrants and results must be objects and
+  // the distance bounded (goodDistance).
   function isValidRecord(rec) {
-    return isObj(rec) && rec.id != null && Array.isArray(rec.entrants) && rec.entrants.length > 0 && Array.isArray(rec.results);
+    return isObj(rec) && rec.id != null && Array.isArray(rec.entrants) && rec.entrants.length > 0 && Array.isArray(rec.results) &&
+      rec.entrants.every(isObj) && rec.results.every(isObj) && goodDistance(rec.distance);
+  }
+
+  // Review batch 7 (persistence#4, ui-track#2): why a record cannot be the race in progress, or null
+  // when it can. Stricter than isValidRecord: a string id, entrants with unique string runner ids and
+  // integer lanes (the track and playback read them), a bounded distance. With `finished` (a race saved
+  // as 'finished' that game.applyPending() will apply) also everything finishRace reads: a summary
+  // object and non-empty results, each for an entrant, with numeric place / timeSec / xp / energyDelta /
+  // fatigueDelta, statChanges only on known stats, and non-negative SP shares.
+  function recordProblem(rec, finished) {
+    if (!isValidRecord(rec)) return 'malformed race record';
+    if (typeof rec.id !== 'string' || !rec.id) return 'bad race id';
+    const maxLane = Math.max(Number(SD.CONFIG.RACE.MAX_RUNNERS) || 10, rec.entrants.length);
+    const inRace = SD.util.dict();
+    for (let i = 0; i < rec.entrants.length; i++) {
+      const e = rec.entrants[i];
+      if (typeof e.runnerId !== 'string' || !e.runnerId || inRace[e.runnerId]) return 'bad entrant runner id';
+      inRace[e.runnerId] = true;
+      if (!(Number.isInteger(e.lane) && e.lane >= 1 && e.lane <= maxLane)) return 'bad entrant lane';
+    }
+    if (!finished) return null;
+    if (!isObj(rec.summary)) return 'no race summary';
+    if (!rec.results.length) return 'no results';
+    const STATS = SD.CONFIG.STATS;
+    for (let i = 0; i < rec.results.length; i++) {
+      const res = rec.results[i];
+      if (typeof res.runnerId !== 'string' || !inRace[res.runnerId]) return 'bad result runner id';
+      if (!['place', 'timeSec', 'xp', 'energyDelta', 'fatigueDelta'].every(function (k) { return isNum(res[k]); })) return 'bad result numbers';
+      if (!(Number.isInteger(res.place) && res.place >= 1) || !(res.timeSec > 0) || !(res.xp >= 0)) return 'bad result numbers';
+      if (!['spOwner', 'spBacker'].every(function (k) { return res[k] == null || (isNum(res[k]) && res[k] >= 0); })) return 'bad result SP';
+      if (res.statChanges != null && !(isObj(res.statChanges) && Object.keys(res.statChanges).every(function (k) {
+        return STATS.indexOf(k) >= 0 && isNum(res.statChanges[k]);
+      }))) return 'bad result stat changes';
+    }
+    return null;
+  }
+
+  // Credit SP back to a player of a state that is being normalized (not live yet: no bus events).
+  // Like players.refundSp, the spend is reversed too. Returns the amount refunded.
+  function refundRaw(st, username, amount) {
+    const p = SD.util.own(st.players, String(username == null ? '' : username).toLowerCase());
+    const amt = Math.floor(Number(amount) || 0);
+    if (!isObj(p) || !(amt > 0)) return 0;
+    p.spiritPoints = (Number(p.spiritPoints) || 0) + amt;
+    if (isObj(p.stats) && isNum(p.stats.spSpentTotal)) p.stats.spSpentTotal = Math.max(0, p.stats.spSpentTotal - amt);
+    return amt;
+  }
+
+  // Ids of the runners that can still race (not retired), as a dict.
+  function liveIds(st) {
+    const live = SD.util.dict();
+    (Array.isArray(st.runners) ? st.runners : []).forEach(function (r) {
+      if (isObj(r) && typeof r.id === 'string' && !r.retired) live[r.id] = true;
+    });
+    return live;
+  }
+
+  // Queued chat effects: well-formed ones on a runner that can still race are kept (count / paid
+  // repaired). Review batch 7 (gap1#4): a paid boost / sabotage on a runner that is gone or retired
+  // (a hand-edited import) can never be used, so its SP goes back to the viewer now instead of at the
+  // end of the season, and it stops counting toward the per-race sabotage cap. -> the kept list
+  function cleanEffects(st, list, live) {
+    const out = [];
+    (Array.isArray(list) ? list : []).forEach(function (e) {
+      if (!isObj(e) || typeof e.type !== 'string' || !/^(boost|sabotage|cheer)$/.test(e.type)) return;
+      if (typeof e.runnerId !== 'string' || !live[e.runnerId]) {
+        if (isNum(e.paid) && e.paid > 0 && e.by != null) refundRaw(st, e.by, e.paid);
+        return;
+      }
+      if (!(isNum(e.count) && e.count >= 1)) e.count = 1;
+      if (e.paid != null && !(isNum(e.paid) && e.paid >= 0)) e.paid = 0;
+      out.push(e);
+    });
+    return out;
   }
 
   // Bring a loaded state up to the current shape (saves from any milestone load cleanly).
@@ -731,9 +825,18 @@
     const U = SD.util;
     const seenIds = U.dict();
     st.runners.forEach(function (r) {
-      if (r.id == null || r.id === '' || seenIds[r.id]) r.id = SD.runners ? SD.runners.nextId(st) : 'r' + (++M.runnerCounter);
+      // Review batch 7 (runners-data#2): an id that is not a non-empty string (a number from a hand
+      // edit or another tool) broke every runner lookup by name; it gets a new id like a duplicate.
+      if (typeof r.id !== 'string' || r.id === '' || seenIds[r.id]) r.id = SD.runners ? SD.runners.nextId(st) : 'r' + (++M.runnerCounter);
       seenIds[r.id] = true;
     });
+    // Review batch 7 (gap1#4): a retired runner (only a hand-edited import retires one) has no owner,
+    // and nothing may point at it: player.runnerId / backing are cleared, its open bets and queued paid
+    // effects refunded (below). Past races keep who owned it (entrant.ownerAtRace / ownerKeyAtRace).
+    st.runners.forEach(function (r) {
+      if (r.retired && (r.ownerKey || r.owner)) { r.ownerKey = null; r.owner = null; r.claimedAt = null; }
+    });
+    const live = liveIds(st);
 
     // players (keyed by username key). Keys come from the save ('constructor' / '__proto__' are
     // valid logins, and JSON.parse stores '__proto__' as an own key): own reads / writes only.
@@ -752,21 +855,24 @@
     }
     Object.keys(st.players).forEach(function (k) {
       const p = st.players[k];
-      if (p.runnerId != null && !seenIds[p.runnerId]) p.runnerId = null;
-      if (p.backing && p.backing.runnerId != null && !seenIds[p.backing.runnerId]) p.backing = { runnerId: null, actions: 0 };
+      if (p.runnerId != null && !live[p.runnerId]) p.runnerId = null;
+      if (p.backing && p.backing.runnerId != null && !live[p.backing.runnerId]) p.backing = { runnerId: null, actions: 0 };
     });
     resolveOwners(st);
 
-    // open bets: well-formed, one per player (older duplicates are refunded), known player + runner
+    // open bets: well-formed, one per player (older duplicates are refunded), known player + runner.
+    // Review batch 7: a bet on a runner that is gone or retired is refunded (it used to be dropped
+    // with its stake; a retired runner never races, so the bet could never settle).
     const betBy = U.dict();
     const bets = [];
     st.bets.forEach(function (b) {
-      if (!isObj(b) || !b.username || !seenIds[b.runnerId] || !(isNum(b.amount) && b.amount > 0) || !(isNum(b.odds) && b.odds > 0)) return;
+      if (!isObj(b) || !b.username || !(isNum(b.amount) && b.amount > 0) || !(isNum(b.odds) && b.odds > 0)) return;
       const p = U.own(st.players, String(b.username).toLowerCase());
       if (!isObj(p)) return;
+      if (typeof b.runnerId !== 'string' || !live[b.runnerId]) { refundRaw(st, p.username, b.amount); return; }
       if (betBy[p.username]) {
         const old = betBy[p.username];
-        p.spiritPoints += old.amount;                        // keep the newest bet, refund the older one
+        refundRaw(st, p.username, old.amount);               // keep the newest bet, refund the older one
         bets.splice(bets.indexOf(old), 1);
       }
       betBy[p.username] = b;
@@ -774,23 +880,29 @@
     });
     if (bets.length !== st.bets.length) st.bets = bets;
 
-    // queued chat effects
-    const effects = st.raceEffects.filter(function (e) {
-      return isObj(e) && /^(boost|sabotage|cheer)$/.test(e.type) && seenIds[e.runnerId];
-    });
-    effects.forEach(function (e) {
-      if (!(isNum(e.count) && e.count >= 1)) e.count = 1;
-      if (e.paid != null && !(isNum(e.paid) && e.paid >= 0)) e.paid = 0;
-    });
+    // queued chat effects (cleanEffects: on a gone / retired runner, refunded and dropped)
+    const effects = cleanEffects(st, st.raceEffects, live);
     if (effects.length !== st.raceEffects.length) st.raceEffects = effects;
 
     // race history + the race in progress
     st.raceHistory = st.raceHistory.filter(isValidRecord).length === st.raceHistory.length ? st.raceHistory : st.raceHistory.filter(isValidRecord);
     // A malformed race in progress becomes an interrupted one (recoverInterruptedRace, which runs
     // right after migrate(), refunds its bets and clears it); record:null never reaches the game.
+    // Review batch 7 (persistence#4): the record is checked in depth (recordProblem). A race saved as
+    // 'finished' is kept only when finishRace can apply it; otherwise it is refunded like any
+    // interrupted race (it used to crash game.init() on every boot). `malformed` (the reason) is only
+    // read by recoverInterruptedRace, which clears the race.
     const cr = st.currentRace;
-    if (cr != null && !(isObj(cr) && isValidRecord(cr.record) && /^(countdown|running|paused|finished)$/.test(cr.status))) {
-      st.currentRace = { record: isObj(cr) && isValidRecord(cr.record) ? cr.record : null, status: 'running', startedAt: isObj(cr) ? num(cr.startedAt, 0, 0) : 0 };
+    if (cr != null) {
+      const shaped = isObj(cr) && /^(countdown|running|paused|finished)$/.test(cr.status);
+      const problem = shaped ? recordProblem(cr.record, cr.status === 'finished') : 'malformed race';
+      if (problem) {
+        st.currentRace = {
+          record: isObj(cr) && isValidRecord(cr.record) ? cr.record : null, status: 'running',
+          startedAt: isObj(cr) ? num(cr.startedAt, 0, 0) : 0,
+          malformed: (isObj(cr) && typeof cr.malformed === 'string' && cr.malformed) || problem
+        };
+      }
     }
     st.log = st.log.filter(isObj).length === st.log.length ? st.log : st.log.filter(isObj);
     if (st.log.length > SD.CONFIG.LOG_CAP) st.log.splice(0, st.log.length - SD.CONFIG.LOG_CAP);
@@ -995,7 +1107,7 @@
   function recoverInterruptedRace(st) {
     const cr = st.currentRace;
     if (!cr) return false;
-    if (cr.status === 'finished' && cr.record) return false; // game.init() applies it
+    if (cr.status === 'finished' && cr.record) return false; // game.applyPending() applies it (boot, import)
     let refunded = 0;
     if (SD.betting && typeof SD.betting.refundAll === 'function') {
       const r = SD.betting.refundAll(st, 'interrupted');
@@ -1004,12 +1116,17 @@
       refunded = refundBetsRaw(st);
     }
     // Paid-for chat effects go back into the queue for the next race.
-    const inputs = cr.record && cr.record.inputs;
-    if (inputs && Array.isArray(inputs.raceEffects) && inputs.raceEffects.length) {
-      st.raceEffects = inputs.raceEffects.concat(st.raceEffects || []);
+    // Review batch 7: the same checks as the queue itself (cleanEffects: a record read from a save is
+    // not trusted; an effect on a runner that is gone or retired is refunded instead).
+    const inputs = isObj(cr.record) && cr.record.inputs;
+    if (isObj(inputs) && Array.isArray(inputs.raceEffects) && inputs.raceEffects.length) {
+      st.raceEffects = cleanEffects(st, inputs.raceEffects, liveIds(st)).concat(Array.isArray(st.raceEffects) ? st.raceEffects : []);
     }
+    const malformed = typeof cr.malformed === 'string' ? cr.malformed : null;
     st.currentRace = null;
-    pushLog(st, 'race', 'The last race was interrupted (the page closed mid-race). It was cancelled' +
+    pushLog(st, 'race', (malformed
+      ? 'The race saved in progress could not be used (' + malformed + '). It was cancelled'
+      : 'The last race was interrupted (the page closed mid-race). It was cancelled') +
       (refunded ? ' and ' + refunded + ' bet' + (refunded === 1 ? ' was' : 's were') + ' refunded.' : '.'), 'warn');
     return true;
   }
@@ -1167,7 +1284,7 @@
   }
 
   // Replace the whole game with an exported save.
-  // -> { ok:true, migratedFrom, ignoredConnection, backedUp }
+  // -> { ok:true, migratedFrom, ignoredConnection, backedUp, pendingRace: 'applied' | 'cancelled' | null }
   //  | { ok:false, error, readOnly? | backupFailed? | rescueFailed? | saveFailed? }
   // Review batch 6: nothing changes unless all of this works -
   //  - this window is the writer (a read-only window refuses: readOnly);
@@ -1241,11 +1358,27 @@
       };
     }
     const migratedFrom = v.version < SCHEMA_VERSION ? v.version : null;
+    // Review batch 7 (lifecycle-concurrency#7, director-state#3): the post-load routine boot runs
+    // (SD.game.afterLoad): the old game's runtime maps are cleared, a missing day event is rolled, and
+    // after state:loaded (the panels show the new game) a race saved as 'finished' is applied - it used
+    // to sit in currentRace until a reload, with START refused and the drawer's controls locked.
+    const post = function (fn) {
+      try { return fn(); } catch (e) {
+        if (typeof console !== 'undefined' && console.error) console.error('[SD.persistence] post-import step failed:', e);
+        return null;
+      }
+    };
+    if (SD.game && typeof SD.game.afterLoad === 'function') post(function () { return SD.game.afterLoad({ resetRuntime: true, deferPending: true }); });
+    else if (typeof SD.state.resetRuntime === 'function') SD.state.resetRuntime();
     if (SD.bus) {
       SD.bus.emit(SD.EVENTS.STATE_LOADED, { source: opts.restore ? 'restore' : 'import', migratedFrom: migratedFrom });
       SD.bus.emit(SD.EVENTS.STATE_CHANGED, { label: 'import' });
     }
-    return { ok: true, migratedFrom: migratedFrom, ignoredConnection: ignoredConnection, backedUp: backedUp };
+    const pending = SD.game && typeof SD.game.applyPending === 'function' ? post(SD.game.applyPending) : null;
+    return {
+      ok: true, migratedFrom: migratedFrom, ignoredConnection: ignoredConnection, backedUp: backedUp,
+      pendingRace: pending ? (pending.applied ? 'applied' : 'cancelled') : null
+    };
   }
 
   function readOnlyRefusal() {
@@ -1323,6 +1456,37 @@
   }
   function storageKind() { getStore(); return storeKind; }
 
+  // Review batch 7: the recovery buttons main.js shows when boot fails (a stored save that loads but
+  // breaks the game, so the page would fail the same way on every reload).
+  //   'fresh'  - START NEW GAME: the stored save is copied to spiritderby.rescue (checked; refused
+  //              without room unless opts.force) and removed, so the next load starts a new game;
+  //   'backup' - RESTORE BACKUP: the same, then spiritderby.backup (the game before the last import or
+  //              upgrade) becomes the stored save.
+  // Afterwards this window writes nothing more (a later flush would put the broken game back) and its
+  // lock is released, so the reload the caller does next saves straight away. Refused in a read-only
+  // window (the save belongs to the other one). -> { ok, rescued } | { ok:false, error, rescueFailed? }
+  function bootRecovery(action, opts) {
+    if (role === 'reader') return readOnlyRefusal();
+    if (action !== 'fresh' && action !== 'backup') return { ok: false, error: 'Unknown recovery action "' + action + '".' };
+    const backup = action === 'backup' ? readRaw(BACKUP_KEY) : null;
+    if (action === 'backup' && !backup) return { ok: false, error: 'There is no backup in this browser.' };
+    const r = rescueHeld(!!(opts && opts.force));
+    if (!r.ok) return r;
+    try {
+      if (backup) writeRaw(KEY, backup);
+      else removeRaw(KEY);
+    } catch (e) {
+      return { ok: false, error: 'Browser storage refused the change (' + String((e && e.message) || e) + ').' };
+    }
+    releaseLock();
+    cancelTimer();
+    dirty = false;
+    lastBytes = null;
+    role = 'held';
+    roleInfo = { reason: 'recovery', message: 'The page is reloading after a failed start.' };
+    return { ok: true, rescued: r.rescued };
+  }
+
   SD.persistence = {
     KEY: KEY,
     BACKUP_KEY: BACKUP_KEY,
@@ -1349,6 +1513,10 @@
     slimRecord: slimRecord,
     fitBudget: fitBudget,
     recoverInterruptedRace: recoverInterruptedRace,
+    // review batch 7
+    isValidRecord: isValidRecord,
+    recordProblem: recordProblem,
+    bootRecovery: bootRecovery,
     readBackup: readBackup,
     readRescue: readRescue,
     discardRescue: discardRescue,

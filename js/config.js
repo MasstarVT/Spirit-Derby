@@ -49,6 +49,9 @@
       BASE_SPEED: 16,          // m/s -> 8 m per tick nominal
       MAX_TICKS_MULT: 3,       // hard stop at 3x nominal ticks
       DISTANCES: [1200, 1600, 2000, 2400],
+      // Review batch 7: the longest distance a race record may carry (saves, imports, the track ruler).
+      // A loaded record outside 100..MAX_RECORD_DISTANCE m is malformed (it would hang the ruler / replay).
+      MAX_RECORD_DISTANCE: 10000,
       MIN_RUNNERS: 2,
       MAX_RUNNERS: 10,
       MIN_ENERGY_TO_RACE: 15,

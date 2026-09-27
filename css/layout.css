@@ -217,6 +217,21 @@ body.sd-admin-open .admin-drawer {
   color: var(--sev-bad);
 }
 
+/* review batch 7: recovery buttons when boot fails */
+.boot-error__hint,
+.boot-error__status {
+  max-width: 720px;
+  margin: var(--sp-3) auto 0;
+  font-size: var(--fs-base);
+}
+.boot-error__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--sp-2);
+  margin-top: var(--sp-3);
+}
+
 /* ---- save banner (review batch 6): read-only second window / held save ---- */
 .savebar {
   position: fixed;

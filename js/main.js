@@ -1,10 +1,12 @@
 /* SPIRIT DERBY — main.js (browser boot)
- * persistence.load → state.set → game.init → init every panel whose root exists →
- * race:finished → results modal → keyboard shortcuts → ?overlay=1 → 30 s clock →
- * beforeunload flush → body[data-hype-tier] sync → debug error toasts.
+ * persistence.load → state.set → achievements.init → game.init({ deferPending }) → init every panel
+ * whose root exists → race:finished → results modal → keyboard shortcuts → ?overlay=1 → 30 s clock →
+ * beforeunload flush → body[data-hype-tier] sync → debug error toasts → … → game.applyPending()
+ * (review batch 7: a race saved as 'finished' is applied last, when everything listens; the whole
+ * boot is wrapped, and a failure shows the error overlay with DOWNLOAD / RESTORE BACKUP / START NEW GAME).
  * Optional modules (commands, chat, leaderboards, integrations) are guarded.
  * M7: integrations init + auto-connect (settings.twitch/bridge.enabled or ?twitch= / ?bridge=).
- * M5: SD.achievements.init() after game.init, season summary panel, gold achievement toasts.
+ * M5: SD.achievements.init() (before game.init since review batch 7), season summary panel, gold achievement toasts.
  * M6: shared UI prefs (SD.ui.dom.prefs), save flush on beforeunload / pagehide / hidden tab, roster
  *     reconciliation toast. SD.debug (js/debug.js) is the console toolbox.
  * Review batch 6: the save banner (a read-only second window with TAKE OVER, a held save that could not
@@ -37,7 +39,11 @@
   function writePrefs(patch) { if (SD.ui.dom && SD.ui.dom.prefs) SD.ui.dom.prefs.write(patch); }
 
   // ------------------------------------------------------------------ boot error overlay
-  function bootError(err) {
+  // opts.recover (review batch 7): boot failed after the game was loaded, so the stored save may be
+  // what breaks it (the page would fail the same way on every reload). The overlay then offers a way
+  // out: DOWNLOAD SAVED GAME, RESTORE BACKUP (when there is one) and START NEW GAME. Both of the latter
+  // keep the stored save in spiritderby.rescue first (SD.persistence.bootRecovery) and reload the page.
+  function bootError(err, opts) {
     console.error('[boot]', err);
     const box = document.createElement('div');
     box.className = 'boot-error';
@@ -47,6 +53,57 @@
     const pre = document.createElement('pre');
     pre.textContent = String((err && (err.stack || err.message)) || err);
     inner.appendChild(title);
+    const P = SD.persistence;
+    const readOnly = !!(P && P.role && P.role() === 'reader');
+    if (opts && opts.recover && P && typeof P.bootRecovery === 'function' && !readOnly) {
+      const hint = document.createElement('p');
+      hint.className = 'boot-error__hint';
+      hint.textContent = 'The saved game may be what stops it. Download it first (a newer build may read it), then restore the backup ' +
+        '(the game before your last import or upgrade) or start a new game. Either way a copy of the save is kept in spiritderby.rescue.';
+      inner.appendChild(hint);
+      const actions = document.createElement('div');
+      actions.className = 'boot-error__actions';
+      const status = document.createElement('p');
+      status.className = 'boot-error__status';
+      const button = function (label, fn) {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'btn btn--sm';
+        b.textContent = label;
+        b.addEventListener('click', fn);
+        actions.appendChild(b);
+        return b;
+      };
+      // A second click confirms (OBS docks and browser sources may not show confirm() dialogs).
+      const confirmed = function (b) {
+        if (b.getAttribute('data-armed') === '1') return true;
+        b.setAttribute('data-armed', '1');
+        b.textContent = 'Click again: ' + b.textContent;
+        return false;
+      };
+      const recover = function (action) {
+        let force = false;
+        return function () {
+          if (!confirmed(this)) return;
+          let res;
+          try { res = P.bootRecovery(action, { force: force }); } catch (e) { res = { ok: false, error: e.message }; }
+          if (res && res.ok) { status.textContent = 'Done. Reloading…'; window.location.reload(); return; }
+          if (res && res.rescueFailed) force = true;   // the next click goes ahead without the rescue copy
+          status.textContent = ((res && res.error) || 'That did not work.') + (force ? ' Click again to go ahead anyway.' : '');
+        };
+      };
+      const saved = P.readRaw ? P.readRaw(P.KEY) : null;
+      if (saved) {
+        button('⬇ DOWNLOAD SAVED GAME', function () {
+          if (SD.ui.dom && SD.ui.dom.download) SD.ui.dom.download('spirit-derby-save-that-failed.json', saved);
+          status.textContent = 'Downloaded spirit-derby-save-that-failed.json.';
+        });
+      }
+      if (P.readBackup && P.readBackup()) button('RESTORE BACKUP', recover('backup'));
+      button('START NEW GAME', recover('fresh'));
+      inner.appendChild(actions);
+      inner.appendChild(status);
+    }
     inner.appendChild(pre);
     box.appendChild(inner);
     document.body.appendChild(box);
@@ -402,6 +459,22 @@
       bootError(new Error('Core modules failed to load (need SD.state, SD.game, SD.bus). Check the browser console for the first error.'));
       return;
     }
+    // Review batch 7: anything that throws while booting shows the error overlay with a way out
+    // (download the save, restore the backup, start a new game) instead of leaving a dead page that
+    // fails the same way on every reload.
+    try {
+      bootGame();
+    } catch (e) {
+      // This window may hold the writer lock: release it when the page goes, so a reload (or the
+      // recovery buttons) can save straight away.
+      window.addEventListener('pagehide', function () {
+        try { if (SD.persistence && SD.persistence.release) SD.persistence.release(); } catch (x) { /* ignore */ }
+      });
+      bootError(e, { recover: true });
+    }
+  }
+
+  function bootGame() {
     const dom = SD.ui.dom;
 
     // 1. load saved (or fresh) state
@@ -411,11 +484,15 @@
     if (!state) state = SD.state.create();
     SD.state.set(state);
 
-    // 2. game director (subscribes to race:playbackDone → finishRace) + achievements (M5, bus-driven)
-    SD.game.init();
+    // 2. achievements (M5, bus-driven) first, then the game director (subscribes to race:playbackDone
+    //    → finishRace; rolls a missing day event). Review batch 7 (ui-panels-boot#4): a race saved as
+    //    'finished' is NOT applied here but at the end of boot (step 13), once achievements, the panels,
+    //    the results modal and the season summary listen - it used to be applied before any of them
+    //    existed, so its achievements, results modal and season summary were lost.
     if (SD.achievements && typeof SD.achievements.init === 'function') {
       try { SD.achievements.init(); } catch (e) { console.error('[boot] achievements failed to init', e); }
     }
+    SD.game.init({ deferPending: true });
 
     // 3. panels
     PANELS.forEach(function (pair) {
@@ -532,6 +609,14 @@
     // M6: runners added to SD.DATA.ROSTER since this save was made join the roster on load.
     if (loaded && loaded.rosterAdded && loaded.rosterAdded.length) {
       dom.toast('New in the roster: ' + loaded.rosterAdded.map(function (r) { return r.emoji + ' ' + r.name; }).join(', '), 'good', { ms: 7000 });
+    }
+
+    // 13. review batch 7: a race saved as 'finished' is applied now that everything listens (results
+    //     modal, achievements, season summary). applyPending() never throws on a bad record: it
+    //     cancels the race (bets refunded) and logs why.
+    const pending = SD.game.applyPending ? SD.game.applyPending() : null;
+    if (pending && pending.cancelled) {
+      dom.toast('A race saved as finished could not be applied, so it was cancelled and its bets refunded (see the log).', 'bad', { ms: 9000 });
     }
     SD.ui.booted = true;
   }

@@ -1,7 +1,16 @@
 /*
  * Spirit Derby - game.js
- * The director. Every public method changes state through SD.state.mutate and emits
- * bus events AFTER the mutation completes (so listeners always see consistent state).
+ * The director. Every public method changes state through SD.state.mutate (commit). The events a
+ * method queues through commit()'s emit (race:started / finished / aborted, runner:*, season:*,
+ * event:day ...) go out AFTER the mutation completes, in order, so their listeners see the finished
+ * state. Review batch 7 (director-state#10): the hook modules called INSIDE the mutation emit their
+ * own events at once, while it is still running - bet:resolved (betting), hype:changed /
+ * hype:threshold (hype), player:sp (players), log:entry (SD.state.log), achievement:unlocked from a
+ * nested check. Those listeners may see a half-applied state (e.g. currentRace still set during
+ * finishRace / abortRace) and arrive before the director's own events (an abort's "bets refunded"
+ * chat line comes before "the race was cancelled"). Listeners that need the final state read it on
+ * state:changed or on the director's event. This is the documented contract; deferring the hook
+ * events would reorder what achievements rely on (bet:resolved is checked during the same finish).
  * UI buttons, the command pipeline and integrations all call these methods.
  *
  * Optional later-milestone modules are called only when present:
@@ -58,26 +67,87 @@
   // ---------------------------------------------------------------------------
   // Lifecycle
   // ---------------------------------------------------------------------------
-  function init() {
+  // Boot (main.js), TAKE OVER and the tests: subscribe to race:playbackDone, then afterLoad(opts).
+  // opts.deferPending: leave a race saved as 'finished' for a later applyPending() call (main.js
+  // applies it once achievements, the panels and the results modal listen). -> { ok, pending }
+  function init(opts) {
     unsubs.forEach(function (u) { u(); });
     unsubs = [];
     if (!cur()) SD.state.set(SD.state.create());
     unsubs.push(SD.bus.on(SD.EVENTS.RACE_PLAYBACK_DONE, function (p) {
       const cr = cur() && cur().currentRace;
       if (!cr) return;
-      if (p && p.recordId && p.recordId !== cr.record.id) return;
+      if (p && p.recordId && cr.record && p.recordId !== cr.record.id) return;
       finishRace();
     }));
+    const res = afterLoad(opts);
+    return { ok: true, pending: res.pending };
+  }
+
+  // Review batch 7: THE post-load routine, shared by boot / TAKE OVER (init), IMPORT JSON / RESTORE
+  // BACKUP (persistence.importJSON) and RESET ALL. The game that was just SD.state.set() gets:
+  //   - opts.resetRuntime: SD.state.resetRuntime() and a fresh betting odds cache (import / restore /
+  //     reset: the runtime maps are keyed by login and runner id, and ids restart at r01 in every game);
+  //   - a race saved as 'finished' applied (applyPending), unless opts.deferPending;
+  //   - a day event rolled when it has none (normalize() drops ids this build does not know);
+  //   - the clock baseline set to now.
+  // -> { ok, pending: applyPending()'s result | null (deferred / nothing pending), dayEventRolled }
+  function afterLoad(opts) {
+    opts = opts || {};
     const s = cur();
-    // A race saved as 'finished' before its results were applied is applied now.
-    if (s.currentRace && s.currentRace.status === 'finished') finishRace();
-    if (!s.season.activeDayEvent) {
+    if (!s) return { ok: false, pending: null, dayEventRolled: false };
+    if (opts.resetRuntime) {
+      SD.state.resetRuntime();
+      if (SD.betting && typeof SD.betting.clearCache === 'function') SD.betting.clearCache();
+    }
+    let pending = null;
+    if (!opts.deferPending) pending = applyPending();
+    let rolled = false;
+    if (!cur().season.activeDayEvent) {
       commit('game:init', function (st) {
         st.season.activeDayEvent = SD.events.rollDayEvent(actionRng(st, 'day')).id;
       });
+      rolled = true;
     }
     SD.state.runtime.lastClockAt = SD.clock.now();
-    return { ok: true };
+    return { ok: true, pending: pending, dayEventRolled: rolled };
+  }
+
+  // Apply a race saved as 'finished' before its results were applied (review batch 7: shared by boot
+  // and import, and safe). persistence.normalize() already turns a 'finished' race whose record lacks
+  // what finishRace needs into an interrupted one (refunded on load / import); if applying still fails,
+  // the race is cancelled like END / abort (bets refunded, paid effects queued again) and logged, so a
+  // bad record can never stop the game from booting or leave the drawer locked.
+  // -> { ok, applied: true, result } | { ok, applied: false, cancelled?, reason? } (null: nothing pending)
+  function applyPending() {
+    const s = cur();
+    const cr = s && s.currentRace;
+    if (!cr || cr.status !== 'finished') return null;
+    let reason = SD.persistence && typeof SD.persistence.recordProblem === 'function'
+      ? SD.persistence.recordProblem(cr.record, true) : (cr.record ? null : 'no race record');
+    if (!reason) {
+      try {
+        return { ok: true, applied: true, result: finishRace() };
+      } catch (e) {
+        reason = String((e && e.message) || e);
+        if (typeof console !== 'undefined' && console.error) console.error('[SD.game] a finished race could not be applied:', e);
+      }
+    }
+    const after = cur();
+    if (!after || !after.currentRace) return { ok: true, applied: false, reason: reason };
+    let refunded = 0;
+    if (after.currentRace.record) {
+      refunded = abortRace().refunded || 0;
+    } else {
+      commit('race:abort', function (st, emit) {
+        refunded = SD.seasons.refundBets(st, 'abort');
+        st.currentRace = null;
+        emit(SD.EVENTS.RACE_ABORTED, { recordId: null, refunded: refunded });
+      });
+    }
+    SD.state.log('race', 'A race saved as finished could not be applied (' + reason + '), so it was cancelled' +
+      (refunded ? ' and ' + refunded + ' bet' + (refunded === 1 ? ' was' : 's were') + ' refunded.' : '.'), 'warn');
+    return { ok: true, applied: false, cancelled: true, reason: reason, refunded: refunded };
   }
 
   // A fixed seed: an explicit startRace({ seed }) or the debug override (settings.debug &&
@@ -354,7 +424,7 @@
         if (res.place === 1) { rec.wins++; rec.winStreak++; } else { rec.losses++; rec.winStreak = 0; }
         if (res.place <= 3) rec.podiums++;
         if (rec.bestTimeSec == null || res.timeSec < rec.bestTimeSec) rec.bestTimeSec = res.timeSec;
-        rec.bestTimes = rec.bestTimes || {};
+        if (!rec.bestTimes || typeof rec.bestTimes !== 'object' || Array.isArray(rec.bestTimes)) rec.bestTimes = {};
         if (rec.bestTimes[record.distance] == null || res.timeSec < rec.bestTimes[record.distance]) rec.bestTimes[record.distance] = res.timeSec;
         r.lifetime.races++;
         if (res.place === 1) r.lifetime.wins++;
@@ -424,7 +494,7 @@
         st.raceEffects = inputs.raceEffects.concat(st.raceEffects || []);
       }
       st.currentRace = null;
-      SD.state.log('race', 'The race at ' + record.trackName + ' was cancelled' +
+      SD.state.log('race', 'The race at ' + (record.trackName || 'the forest track') + ' was cancelled' +
         (refunded ? '; ' + refunded + ' bet' + (refunded === 1 ? ' was' : 's were') + ' refunded.' : '.'), 'warn', { recordId: record.id });
       emit(SD.EVENTS.RACE_ABORTED, { recordId: record.id, refunded: refunded });
     });
@@ -664,11 +734,9 @@
     if (s && s.currentRace) SD.bus.emit(SD.EVENTS.RACE_ABORTED, { recordId: s.currentRace.record.id, refunded: 0, reset: true });
     if (SD.persistence) SD.persistence.clear();
     SD.state.set(SD.state.create());
-    const rt = SD.state.runtime;
-    rt.cooldowns = U.dict();
-    rt.runnerCooldowns = U.dict();
-    rt.hypeIdleAccumMs = 0;
-    rt.lastClockAt = SD.clock.now();
+    // Review batch 7 (director-state#3): every per-game runtime map is cleared (nervous cheers, rest
+    // cooldowns, activity, recent hype ... used to carry over to the new game's r01, r02 ...).
+    afterLoad({ resetRuntime: true });
     SD.state.log('system', 'A brand new Spirit Derby begins!', 'epic');
     saveNow();
     SD.bus.emit(SD.EVENTS.STATE_LOADED, { source: 'reset' });
@@ -786,6 +854,8 @@
 
   SD.game = {
     init: init,
+    afterLoad: afterLoad,
+    applyPending: applyPending,
     startRace: startRace,
     setRaceStatus: setRaceStatus,
     pauseRace: pauseRace,

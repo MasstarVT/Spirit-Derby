@@ -323,7 +323,8 @@
 
   // Bring a loaded runner up to the current shape (persistence.normalize, saves from any milestone):
   // every field added since M1 (lifetime, effects, ribbonColor, trainStreak, daily, rosterKey,
-  // createdAt, record.bestTimes ...) gets its default; wrong types are repaired; numbers are clamped.
+  // createdAt ...) gets its default; wrong types are repaired (record.bestTimes: see below); numbers
+  // are clamped. The id is checked by persistence.normalize (a non-string id gets a new one).
   // A well-formed runner is left exactly as it is.
   function normalize(runner) {
     if (!isObj(runner.stats)) runner.stats = {};
@@ -341,6 +342,19 @@
     });
     ['races', 'wins', 'losses', 'podiums', 'winStreak'].forEach(function (k) { runner.record[k] = Math.round(finiteOr(runner.record[k], 0, 0)); });
     if (runner.record.bestTimeSec != null && !(Number(runner.record.bestTimeSec) > 0)) runner.record.bestTimeSec = null;
+    // Review batch 7 (runners-data#1): record.bestTimes (distance -> best time, written by finishRace)
+    // is not in freshRecord(), so the loop above never repaired it. A string / number / array there made
+    // finishRace throw half-way through applying a race. Not an object: removed (finishRace creates it
+    // again); an object keeps only positive integer distances with a positive finite time.
+    if (runner.record.bestTimes !== undefined) {
+      const bt = runner.record.bestTimes;
+      if (!isObj(bt)) delete runner.record.bestTimes;
+      else {
+        Object.keys(bt).forEach(function (d) {
+          if (!/^[1-9][0-9]{0,5}$/.test(d) || !(typeof bt[d] === 'number' && isFinite(bt[d]) && bt[d] > 0)) delete bt[d];
+        });
+      }
+    }
     ['races', 'wins', 'totalXp'].forEach(function (k) { runner.lifetime[k] = finiteOr(runner.lifetime[k], 0, 0); });
     runner.trainStreak.count = Math.round(finiteOr(runner.trainStreak.count, 0, 0));
     runner.daily.snacks = Math.round(finiteOr(runner.daily.snacks, 0, 0));

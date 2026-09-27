@@ -38,7 +38,11 @@
  *                budget under a per-origin quota, save-failure events, lazy saves for read-only chat / idle clock /
  *                races, one writer per storage (a second window is read-only, TAKE OVER, stale locks), held
  *                unreadable / newer saves, checked backups + RESTORE BACKUP, player retention, rankOf)
- *   runners      tools/runners-test.js (M6 !create, admin SPAWN RUNNER, MAX_ACTIVE, SD.debug)
+ *   import       tools/import-test.js (review batch 7: deep checks of imported saves - a 'finished' race
+ *                finishRace cannot apply, bestTimes, non-string runner ids, lanes / distance, retired runners'
+ *                refunds; IMPORT runs boot's post-load routine; runtime maps reset; state.set() depth; boot
+ *                order; bootRecovery)
+ *   runners     tools/runners-test.js (M6 !create, admin SPAWN RUNNER, MAX_ACTIVE, SD.debug)
  *   fuzz         tools/fuzz-test.js (M6 seeded 3-season fuzz: 17 viewers spamming every command, random race
  *                starts / pauses / ends / aborts / reloads, invariants after every command and race)
  */
@@ -61,6 +65,7 @@ const SUITES = [
   { name: 'economy', file: 'economy-test.js', args: VERBOSE ? ['--verbose'] : [] },
   { name: 'rng', file: 'rng-test.js', args: VERBOSE ? ['--verbose'] : [] },
   { name: 'durability', file: 'durability-test.js', args: VERBOSE ? ['--verbose'] : [] },
+  { name: 'import', file: 'import-test.js', args: VERBOSE ? ['--verbose'] : [] },
   { name: 'runners', file: 'runners-test.js', args: VERBOSE ? ['--verbose'] : [] },
   { name: 'fuzz', file: 'fuzz-test.js', args: VERBOSE ? ['--verbose'] : [] }
 ];

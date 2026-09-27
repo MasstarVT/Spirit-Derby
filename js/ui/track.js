@@ -33,6 +33,20 @@
   function nowMs() { return (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now(); }
   function tickSeconds(tick) { return (Number(tick) || 0) * dom.cfg('RACE.DT', 0.5); }
   function condClass(c) { return /^[A-Za-z]+$/.test(String(c || '')) ? String(c) : 'Normal'; }
+  // Review batch 7 (ui-track#2): a race record can come from an imported save. Its entrant lane is
+  // only ever used as a whole number 1..99 (else the fallback), and its distance is bounded to
+  // 100..CONFIG.RACE.MAX_RECORD_DISTANCE m (else 1200), with at most MAX_MARKS ruler marks: a huge
+  // distance used to spin the ruler loop until the tab hung.
+  const MAX_MARKS = 60;
+  function laneOf(e, dflt) {
+    const n = Number(e && e.lane);
+    return Number.isInteger(n) && n >= 1 && n <= 99 ? n : dflt;
+  }
+  function boundDistance(d) {
+    const n = Number(d);
+    const max = dom.cfg('RACE.MAX_RECORD_DISTANCE', 10000);
+    return isFinite(n) && n >= 100 && n <= max ? n : 1200;
+  }
 
   const track = {
     name: 'track',
@@ -185,7 +199,7 @@
       this.clearRace();
       this.record = rec;
       const r = this.refs;
-      const distance = Number(rec.distance) || 1200;
+      const distance = boundDistance(rec.distance);
       this.root.classList.remove('track--idle');
       this.root.classList.add('track--racing');
 
@@ -198,7 +212,7 @@
       // distance markers every 200 m (≤1600 m) or 400 m, scaled to the race length
       const step = distance <= 1600 ? 200 : 400;
       const marks = [];
-      for (let m = step; m < distance - step / 2; m += step) marks.push(m);
+      for (let m = step; m < distance - step / 2 && marks.length < MAX_MARKS; m += step) marks.push(m);
       if (r.ruler) {
         r.ruler.innerHTML = marks.map(function (m) {
           return '<span class="ruler__mark" style="--f:' + (m / distance).toFixed(5) + '">' + m + ' m</span>';
@@ -208,22 +222,25 @@
         return '<i class="lane__mark" style="--f:' + (m / distance).toFixed(5) + '"></i>';
       }).join('');
 
-      const entrants = (rec.entrants || []).slice().sort(function (a, b) { return (a.lane || 0) - (b.lane || 0); });
+      // Review batch 7 (ui-track#2): the lane goes into inline styles and HTML, and a record can come
+      // from an imported save: always a small integer (laneOf), never the raw value.
+      const entrants = (Array.isArray(rec.entrants) ? rec.entrants : []).filter(function (e) { return e && typeof e === 'object'; })
+        .slice().sort(function (a, b) { return laneOf(a, 0) - laneOf(b, 0); });
       this.entrantCount = entrants.length;
       this.root.setAttribute('data-n', String(entrants.length));   // CSS sizes sprites/lanes by field size
 
       if (r.lanes) {
         r.lanes.innerHTML = entrants.map(function (e, i) {
-          const lane = e.lane || i + 1;
+          const lane = laneOf(e, i + 1);
           const style = dom.info.style(e.style);
           const owner = e.ownerAtRace;
           const ownerLine = (owner ? '👤 ' + esc(owner) : 'Unclaimed') +
             ' · Lv ' + esc(e.level || 1) + ' · <span title="' + esc(style.name) + '">' + esc(style.short) + '</span>';
           const url = dom.safeUrl(e.avatarUrl);
           return '' +
-            '<div class="lane" role="listitem" data-id="' + esc(e.runnerId) + '" style="' + esc(dom.runnerVars(e)) + '--lane:' + lane + '">' +
+            '<div class="lane" role="listitem" data-id="' + esc(e.runnerId) + '" style="' + esc(dom.runnerVars(e)) + '--lane:' + esc(lane) + '">' +
               '<div class="lane__info">' +
-                '<span class="lane__rank">' + lane + '</span>' +
+                '<span class="lane__rank">' + esc(lane) + '</span>' +
                 dom.badgeHTML(e) +
                 '<div class="lane__text">' +
                   '<div class="lane__name" title="' + esc(e.name) + '">' + esc(e.name) + '</div>' +
@@ -248,7 +265,7 @@
         Array.prototype.slice.call(r.lanes.querySelectorAll('.lane')).forEach(function (node, i) {
           lanes[node.getAttribute('data-id')] = {
             el: node,
-            lane: (entrants[i] && entrants[i].lane) || i + 1,
+            lane: entrants[i] ? laneOf(entrants[i], i + 1) : i + 1,
             rank: node.querySelector('.lane__rank'),
             stWrap: node.querySelector('.stamina'),
             stam: node.querySelector('.stamina > i'),
@@ -261,9 +278,9 @@
       if (r.posList) {
         r.posList.style.setProperty('--n', String(entrants.length || 1));
         r.posList.innerHTML = entrants.map(function (e, i) {
-          const lane = e.lane || i + 1;
-          return '<li class="pos-item" data-id="' + esc(e.runnerId) + '" style="' + esc(dom.runnerVars(e)) + '--r:' + lane + '">' +
-            '<span class="pos-item__rank">' + lane + '</span>' + dom.badgeHTML(e, 'badge--sm') +
+          const lane = laneOf(e, i + 1);
+          return '<li class="pos-item" data-id="' + esc(e.runnerId) + '" style="' + esc(dom.runnerVars(e)) + '--r:' + esc(lane) + '">' +
+            '<span class="pos-item__rank">' + esc(lane) + '</span>' + dom.badgeHTML(e, 'badge--sm') +
             '<span class="pos-item__name" title="' + esc(e.name) + '">' + esc(e.name) + '</span><span class="pos-item__gap">—</span></li>';
         }).join('');
         const items = this.posItems;
