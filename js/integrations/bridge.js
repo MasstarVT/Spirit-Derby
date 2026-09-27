@@ -367,7 +367,7 @@
     }
     ensureListeners();
     if (enabled && st.url === u && ws) {
-      return { ok: true, message: (st.state === 'on' ? 'Already connected to' : 'Already connecting to') + ' the bridge at ' + shown(u) + '.' };
+      return { ok: true, message: (st.state === 'on' ? 'Already connected to' : 'Already connecting to') + ' the bridge (' + shown(u) + ').' };
     }
     teardown();
     enabled = true;
@@ -379,7 +379,8 @@
     // open() may already have failed fatally (the WebSocket constructor threw: a bad URL, or
     // ws:// to another host from an https:// page). Report that instead of "Connecting…".
     if (!enabled) return { ok: false, message: st.lastError || 'Could not open the bridge connection.' };
-    return { ok: true, message: 'Connecting to the bridge at ' + shown(u) + (opts.auto ? ' (auto-connect)' : '') + '…' };
+    // The URL goes in brackets: a redacted token ends it in '…', which would run into the trailing '…'.
+    return { ok: true, message: 'Connecting to the bridge (' + shown(u) + ')' + (opts.auto ? ' (auto-connect)' : '') + '…' };
   }
 
   function resetCounters() {

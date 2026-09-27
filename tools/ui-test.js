@@ -21,6 +21,11 @@
  *      seconds left, pause while running keeps the cursor (no jump, no lost or repeated tick), END while
  *      running, abort in the countdown / running / paused never emits race:playbackDone, and
  *      race:playbackDone fires exactly once per race
+ *   M  review batch 11 (R4 / R5): the header's status tags (FIXED SEED, NOT SAVED, DEMO BOTS) sit on
+ *      their own line and add no width. Also batch 11: the lock itself in A (R16), a drawer select /
+ *      checkbox does not keep focus from a modal in F (R17), paddock__grid--many for 9-10 cards in D
+ *      (R19; fix round: the style is left out of those cards, owner before energy, no 1 px overflow at
+ *      8 cards), a static glow under reduced motion in I (R18), the real race:finished payload in J (R15)
  *
  *   node tools/ui-test.js [--verbose]
  * Runs the real js/ui/dom.js, playback.js, track.js, results.js, season.js and js/main.js (boot) on a
@@ -347,16 +352,18 @@ section('A. Hidden page: playback at real speed (ui-track#1)');
     const st = SD.game.startRace();
     if (!ok(st.ok, mode + ': race starts', st.message)) return null;
     const rec = S().currentRace.record;
-    let lockedAt60 = null;
+    let lockedAt60 = null, unlockedAt = null;
     run(4 * 3600 * 1000, function () {
       if (lockedAt60 === null && T - t0 > 60000) lockedAt60 = SD.state.isRaceLocked();
+      if (unlockedAt === null && T > t0 && !SD.state.isRaceLocked()) unlockedAt = (T - t0) / 1000;
       return done.n > 0;
     });
+    if (unlockedAt === null && !SD.state.isRaceLocked()) unlockedAt = (T - t0) / 1000;
     const out = {
       wall: (T - t0) / 1000, lastTick: rec.ticks.length - 1, events: rec.events.length, finishers: rec.results.length,
       ticks: ticks.list.map(function (p) { return p.tick; }), evCount: evs.n, finCount: fins.n,
       evInOrder: evs.list.every(function (e, i) { return i === 0 || Number(e.tick) >= Number(evs.list[i - 1].tick); }),
-      finished: !S().currentRace, lockedAt60: lockedAt60, est: playSeconds(rec)
+      finished: !S().currentRace, lockedAt60: lockedAt60, unlockedAt: unlockedAt, est: playSeconds(rec)
     };
     setHidden(false);
     return out;
@@ -400,7 +407,9 @@ section('A. Hidden page: playback at real speed (ui-track#1)');
     { visible: vis.wall, visibleNominal: vis.est, hidden: h1.wall, hiddenNominal: h1.est });
   // Intensive throttling (one wake-up a minute): done at the first or second wake-up, not after hours.
   ok(h60.wall <= 125, 'hidden with 1 min timers: done within two wake-ups', h60.wall);
-  ok(h60.lockedAt60 === false || h60.wall <= 60 || h60.wall <= 125, 'hidden with 1 min timers: training unlocks within minutes', h60);
+  // Review batch 11 (R16): the lock itself, measured (the old check could not fail).
+  ok(h60.unlockedAt !== null && h60.unlockedAt <= 125 && !SD.state.isRaceLocked(), 'hidden with 1 min timers: training unlocks within minutes',
+    { unlockedAt: h60.unlockedAt, lockedAt60: h60.lockedAt60 });
 
   // A suspend / resume far longer than a race is capped (HIDDEN_MAX_DT_MS) but still finishes the race.
   settle();
@@ -585,6 +594,25 @@ section('D. 9-10 runner fields (ui-track#6)');
   try { html = SD.ui.track.paddockHTML(S()); } catch (e) { html = 'ERR ' + e.message; }
   SD.betting.fieldOdds = fo;
   eq((html.match(/paddock__runner/g) || []).length >= 10 ? 10 : (html.match(/paddock__runner/g) || []).length, 10, 'the fallback paddock previews all 10 runners');
+  // Review batch 11 (R19): 9-10 cards use the narrower columns (4 across a 1920x1080 track: 3 rows, so
+  // the paddock fits under the leader line); 8 or fewer keep the old grid.
+  ok(/class="paddock__grid paddock__grid--many"/.test(html), '10 runners: the paddock grid gets paddock__grid--many');
+  SD.game.updateSettings({ runnerCount: 8 });
+  const html8 = SD.ui.track.paddockHTML(S());
+  ok(/class="paddock__grid"/.test(html8) && !/paddock__grid--many/.test(html8), '8 runners: the plain grid');
+  ok(/\.paddock__grid--many\s*\{[^}]*minmax\(300px,\s*1fr\)/.test(css), 'css: .paddock__grid--many columns are at least 300 px (4 across 1392 px)');
+  // Batch 11 fix round: the narrower cards leave out the running style, the owner comes before the energy
+  // (so a cut meta line still shows it), and the leader line has no top margin (the 8-card paddock under
+  // it overflowed by 1 px at 1920x1080 and showed a scrollbar).
+  ok(/<div class="paddock__meta"><span class="paddock__style">[^<]+ · <\/span><span class="cond /.test(html8), 'the running style is its own span in the meta line');
+  ok(/\.paddock__grid--many \.paddock__style\s*\{\s*display:\s*none;?\s*\}/.test(css), 'css: the narrower cards hide the running style');
+  const claimed = S().runners.filter(function (r) { return !r.retired; })[0];
+  const oldOwner = claimed.owner;
+  SD.state.mutate('test', function () { claimed.owner = 'OwnerNine'; });
+  const htmlOwned = SD.ui.track.paddockHTML(S());
+  ok(/<div class="paddock__meta">(?:(?!<\/div>).)*👤 OwnerNine · ⚡ \d+\/\d+<\/div>/.test(htmlOwned), 'the owner comes before the energy in the meta line');
+  SD.state.mutate('test', function () { claimed.owner = oldOwner; });
+  ok(/\.paddock__leader\s*\{[^}]*margin-top:\s*0;/.test(css), 'css: the paddock leader line has no top margin');
   SD.game.updateSettings({ runnerCount: 6 });
 })();
 
@@ -704,6 +732,24 @@ section('F. Modals never take focus from an input being typed in (ui-panels-boot
   season.close();
   ok(document.activeElement === drawerBtn, 'closing it gives focus back');
 
+  // Review batch 11 (R17): a drawer <select> or checkbox is not typing. Left focused behind the modal,
+  // Space / arrows would change Distance or Runners there instead of pressing Continue.
+  const pickSel = h('select', { id: 'adm-test-select' });
+  const pickBox = h('input', { id: 'adm-test-check', type: 'checkbox' });
+  app.appendChild(pickSel);
+  app.appendChild(pickBox);
+  [['a drawer <select>', pickSel], ['a checkbox', pickBox]].forEach(function (x) {
+    x[1].focus();
+    results.show({ record: { id: 'sel', entrants: [], results: [], events: [] }, results: [] });
+    ok(document.activeElement === resultsRoot.querySelector('.results__foot .btn'), 'focus on ' + x[0] + ': the results modal takes it (Continue)');
+    results.close();
+    ok(document.activeElement === x[1], 'closing gives it back to ' + x[0]);
+  });
+  eq([SD.ui.dom.isEditable(chatInput), SD.ui.dom.isEditable(pickSel), SD.ui.dom.isEditable(pickBox), SD.ui.dom.isEditable(h('textarea', {}))],
+    [true, false, false, true], 'isEditable: text input and textarea yes, select and checkbox no');
+  app.removeChild(pickSel);
+  app.removeChild(pickBox);
+
   // The overlay shortcut itself still works with no modal.
   document.activeElement = body;
   press('o');
@@ -773,6 +819,7 @@ section('I. prefers-reduced-motion stops every infinite animation (ui-panels-boo
   const files = ['css/tokens.css', 'css/layout.css', 'css/track.css', 'css/panels.css'];
   const loops = [];
   const stopped = new Set();
+  const staticOpacity = {};     // selector -> opacity a reduced-motion block gives it
   files.forEach(function (f) {
     let css = fs.readFileSync(path.join(ROOT, f), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
     // Pull out the reduced-motion blocks.
@@ -787,6 +834,8 @@ section('I. prefers-reduced-motion stops every infinite animation (ui-panels-boo
       let r;
       while ((r = rr.exec(inner))) {
         if (/animation:\s*none/.test(r[2])) r[1].split(',').forEach(function (s) { stopped.add(s.trim().replace(/\s+/g, ' ')); });
+        const op = /(?:^|;)\s*opacity:\s*([\d.]+)/.exec(r[2]);
+        if (op) r[1].split(',').forEach(function (s) { staticOpacity[s.trim().replace(/\s+/g, ' ')] = Number(op[1]); });
       }
       cut.push([m.index, i]);
     }
@@ -807,6 +856,11 @@ section('I. prefers-reduced-motion stops every infinite animation (ui-panels-boo
   const missing = loops.filter(function (l) { return !stopped.has(l.sel); });
   eq(missing, [], 'every infinite animation is stopped under prefers-reduced-motion');
   ok(stopped.has('.hype__bar'), 'the hype meter pulse (.hype__bar) is stopped');
+  // Review batch 11 (R18): the aura's keyframes fade it in from opacity 0, so a stopped loop must leave
+  // a static glow, not nothing.
+  ['.lane.fx-ability .sprite::before', '.lane.fx-awakened .sprite::before'].forEach(function (sel) {
+    ok(stopped.has(sel) && staticOpacity[sel] > 0, sel + ': stopped, and shown as a static glow', staticOpacity[sel]);
+  });
 })();
 
 // =============================================================================
@@ -817,14 +871,31 @@ section("J. '+N to backers' only when someone backed the runner (ui-panels-boot#
   rest();
   ok(SD.game.startRace().ok, 'race starts');
   const rec = S().currentRace.record;
-  const f = SD.game.finishRace();
-  const payload = { record: rec, results: rec.results, payouts: (f && f.payouts) || [] };
+  // Review batch 11 (R15): the payload the results modal really gets is race:finished's (finishRace()'s
+  // return value has no payouts). Two viewers back one runner, so one row is checked end to end.
+  const backed = rec.entrants[0].runnerId;
+  SD.state.mutate('test', function (st) {
+    ['bk1', 'bk2'].forEach(function (u) {
+      const p = SD.players.ensure(st, u, u.toUpperCase()).player;
+      p.backing = { runnerId: backed, actions: 1 };
+    });
+  });
+  let payload = null;
+  const offFin = SD.bus.on(EV.RACE_FINISHED || 'race:finished', function (p) { payload = p; });
+  SD.game.finishRace();
+  offFin();
   run(10);
   closeModals();
   const html0 = results.html(rec, rec.results, { payouts: [] });
   ok(rec.results.some(function (r) { return Number(r.spBacker) > 0; }), 'every result carries spBacker (the per-backer share)');
   ok(!/backer/.test(html0), 'no backers: no backer line on any row');
-  ok(!/backer/.test(results.html(rec, rec.results, payload)) || payload.payouts.some(function (p) { return p.role === 'backer'; }), 'the real payload has no backer line without backers');
+  ok(!!payload && Array.isArray(payload.payouts), 'race:finished carries payouts');
+  const realBackers = (payload && payload.payouts || []).filter(function (p) { return p.role === 'backer'; });
+  const share = rec.results.filter(function (r) { return r.runnerId === backed; })[0].spBacker;
+  eq(realBackers.map(function (p) { return [p.username, p.runnerId, p.amount]; }), [['bk1', backed, share], ['bk2', backed, share]], 'the real payload pays both backers the per-backer share');
+  const realHtml = payload ? results.html(rec, rec.results, payload) : '';
+  eq((realHtml.match(/backer/g) || []).length, 1, 'the real payload renders one backer line');
+  ok(realHtml.indexOf('+' + share + ' each to 2 backers') >= 0, 'it reads "+' + share + ' each to 2 backers"', realHtml.slice(0, 300));
   const a = rec.results[0], b = rec.results[1];
   const pay = [
     { username: 'x1', runnerId: a.runnerId, amount: 25, role: 'backer' },
@@ -973,6 +1044,42 @@ section('L. Playback state machine: pause / resume / END / abort (review batch 1
     eq(done.n, 0, 'abort ' + c[0] + ': no race:playbackDone, ever');
     eq(ticks.n, tn, 'abort ' + c[0] + ': no ticks after the abort');
   });
+})();
+
+// =============================================================================
+section('M. Header status tags sit on their own line (review batch 11, R4 / R5)');
+// =============================================================================
+(function () {
+  require(path.join(ROOT, 'js/ui/header.js'));
+  const hdr = SD.ui.header;
+  const season = h('div', { class: 'hdr-season' });
+  const race = h('span', { class: 'hdr-season__race' });
+  season.appendChild(h('span', { class: 'hdr-season__main' }));
+  season.appendChild(race);
+  const saved = [hdr.refs, hdr.root];
+  hdr.refs = { race: race };
+  hdr.root = h('div', {});
+  SD.state.mutate('test', function (st) { st.settings.debug = true; st.settings.seedOverride = 999; });
+  hdr.render(S());
+  ok(/^RACE <b>[^<]*<\/b> · (NEXT UP|LIVE)<span class="hdr-tags"><span class="hdr-fixedseed"[^>]*>FIXED SEED<\/span><\/span>$/.test(race.innerHTML),
+    'the seed override shows FIXED SEED in .hdr-tags after the race line', race.innerHTML);
+  ok(season.classList.contains('hdr-season--tags'), 'the season block gets hdr-season--tags (tighter lines)');
+  SD.ui.chat = SD.ui.chat || {};
+  const hadBots = SD.ui.chat.botsOn;
+  SD.ui.chat.botsOn = true;
+  hdr.render(S());
+  ok(/FIXED SEED<\/span> <span class="hdr-tag">· <span class="hdr-demobots"/.test(race.innerHTML), 'a second tag carries its own " · " (it wraps with the tag)', race.innerHTML);
+  SD.ui.chat.botsOn = hadBots;
+  SD.state.mutate('test', function (st) { st.settings.debug = false; st.settings.seedOverride = null; });
+  hdr.render(S());
+  ok(race.innerHTML.indexOf('hdr-tags') < 0 && !season.classList.contains('hdr-season--tags'), 'no tags: plain race line, class removed');
+  hdr.refs = saved[0];
+  hdr.root = saved[1];
+  const css = fs.readFileSync(path.join(ROOT, 'css/panels.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+  const rule = /\.hdr-tags\s*\{([^}]*)\}/.exec(css);
+  ok(!!rule && /width:\s*0/.test(rule[1]) && /min-width:\s*100%/.test(rule[1]) && /display:\s*block/.test(rule[1]),
+    'css: .hdr-tags is its own line and adds no width to the header (width 0, min-width 100%)');
+  ok(!/hdr-fixedseed__more/.test(css), 'css: no width-dependent FIXED / FIXED SEED switch is needed any more');
 })();
 
 console.log('\n' + (failed ? 'FAILED: ' : 'OK: ') + passed + ' passed, ' + failed + ' failed');

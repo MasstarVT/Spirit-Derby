@@ -61,6 +61,18 @@
 }
 .hdr-season__race b { color: var(--gold-bright); }
 .hdr-season__race--live b { color: var(--sev-good); }
+/* Review batch 11 (R4, R5): the status tags (FIXED SEED, ⚠ NOT SAVED, 🤖 DEMO BOTS) get a line of their
+   own under the race line. width 0 + min-width 100%: the line adds nothing to the season block's width
+   (the SEASON / RACE lines set it), so the header row never gives up room for it (the day-event pill used
+   to be cut); several tags wrap between tags. */
+.hdr-tags {
+  display: block;
+  width: 0;
+  min-width: 100%;
+  white-space: normal;
+}
+.hdr-tag { white-space: nowrap; }
+.hdr-season--tags { gap: 0; line-height: 1; }
 .hdr-fixedseed { color: var(--sev-bad); white-space: nowrap; }
 .hdr-savewarn { color: var(--sev-bad); white-space: nowrap; font-weight: 700; }
 .hdr-demobots { color: var(--gold-bright); white-space: nowrap; font-weight: 700; }
@@ -941,9 +953,6 @@ body[data-hype-tier="3"] .hype__fill {
   .hdr { gap: var(--sp-4); }
   .hdr-season__main { font-size: var(--fs-md); }
   .hdr-dayevent { max-width: 240px; }
-  /* The FIXED SEED badge widens the race line; at this width it says just FIXED (the title explains),
-     so it does not squeeze the day-event pill next to it. */
-  .hdr-fixedseed__more { display: none; }
   .rcard { flex-basis: 320px; }
 }
 @media (max-width: 1100px) {

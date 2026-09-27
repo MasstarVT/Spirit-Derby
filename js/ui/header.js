@@ -63,7 +63,7 @@
       else if (role === 'held') { label = 'NOT SAVING'; title = 'The stored save could not be loaded and is kept untouched. See the banner.'; }
       else if (err) { label = 'NOT SAVED'; title = 'The last save failed (' + String(err.message || err) + '). Progress since then is only in this window: EXPORT JSON to keep it.'; }
       if (!label) return '';
-      return ' · <span class="hdr-savewarn" title="' + dom.esc(title) + '">⚠ ' + label + '</span>';
+      return '<span class="hdr-savewarn" title="' + dom.esc(title) + '">⚠ ' + label + '</span>';
     },
 
     render: function (state) {
@@ -84,19 +84,29 @@
         let html;
         if (!live && idx >= racesPerDay) html = 'RACES <b>' + racesPerDay + '/' + racesPerDay + '</b> · DAY COMPLETE';
         else html = 'RACE <b>' + Math.min(idx + 1, racesPerDay) + '/' + racesPerDay + '</b>' + (live ? ' · LIVE' : ' · NEXT UP');
-        // Review batch 5: a debug seed override replays the same race every time, so it is shown
-        // here, on stream too (overlay mode), for as long as it is active (it is never saved).
+        // Status tags, on stream too (overlay mode). Review batch 11 (R4, R5): they sit on their own line
+        // under the race line (.hdr-tags adds no width to the header), so they never squeeze the day-event pill.
+        const tags = [];
+        // Review batch 5: a debug seed override replays the same race every time, so it is shown for as
+        // long as it is active (it is never saved).
         const st = state.settings || {};
         if (st.debug && st.seedOverride != null) {
-          html += ' · <span class="hdr-fixedseed" title="Debug seed override ' + dom.esc(st.seedOverride) +
-            ': every race uses the same seed. Clear it in the admin Debug section.">FIXED<span class="hdr-fixedseed__more"> SEED</span></span>';
+          tags.push('<span class="hdr-fixedseed" title="Debug seed override ' + dom.esc(st.seedOverride) +
+            ': every race uses the same seed. Clear it in the admin Debug section.">FIXED SEED</span>');
         }
-        html += this.saveWarning();
-        // Review batch 8: demo bots play in this game; say so, on stream too, while they run.
+        const warn = this.saveWarning();
+        if (warn) tags.push(warn);
+        // Review batch 8: demo bots play in this game; say so while they run.
         if (SD.ui.chat && SD.ui.chat.botsOn) {
-          html += ' · <span class="hdr-demobots" title="The demo bots of the chat panel are playing in this game. Switch them off (Chat tab) before going live.">🤖 DEMO BOTS</span>';
+          tags.push('<span class="hdr-demobots" title="The demo bots of the chat panel are playing in this game. Switch them off (Chat tab) before going live.">🤖 DEMO BOTS</span>');
+        }
+        // A tag after the first carries its " · " (nowrap), so a wrapped line starts with the separator.
+        if (tags.length) {
+          html += '<span class="hdr-tags">' + tags.map(function (t, i) { return i ? ' <span class="hdr-tag">· ' + t + '</span>' : t; }).join('') + '</span>';
         }
         if (r.race.innerHTML !== html) r.race.innerHTML = html;
+        // Tighter lines while tags show, so up to three tag lines fit the header's height.
+        if (r.race.parentNode && r.race.parentNode.classList) r.race.parentNode.classList.toggle('hdr-season--tags', tags.length > 0);
         r.race.classList.toggle('hdr-season__race--live', live);
       }
 

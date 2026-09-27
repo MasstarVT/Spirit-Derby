@@ -47,7 +47,7 @@
  *                that never auto-closes, 9-10 runner fields, season summary vs the next race, modal focus,
  *                Tab containment, tab arrow keys, reduced motion, backer lines, toast priority; review batch 10: the
  *                playback state machine - pause / resume / END / abort, playbackDone exactly once)
- *   runners     tools/runners-test.js (M6 !create, admin SPAWN RUNNER, MAX_ACTIVE, SD.debug)
+ *   runners      tools/runners-test.js (M6 !create, admin SPAWN RUNNER, MAX_ACTIVE, SD.debug)
  *   hygiene      tools/hygiene-test.js (review batch 8: retire / rename / delete a runner and remove a viewer,
  *                demo bots on '~' keys and their clean-up, bots stopped by RESET ALL / IMPORT / live chat,
  *                confirm arm delay + RESET ALL backup, NEXT DAY debounce, stale season summaries, !create name

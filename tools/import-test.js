@@ -19,6 +19,12 @@
  *      pointers at it cleared (gap1#4)
  *   K  hook events fire mid-mutation, as documented (director-state#10)
  *   L  persistence.bootRecovery('fresh' | 'backup') for the boot error overlay
+ *   M  review batch 11 (R6): recordProblem(record, true) also checks events / ticks (what
+ *      achievements.checkRace iterates); a finishRace that still throws half-way is rolled back
+ *   N  review batch 11 (R8): RESTORE BACKUP then START NEW GAME keeps the newest game in the rescue copy
+ *      (only a save RESTORE BACKUP marked in spiritderby.restored; a stale marker never matches)
+ *   O  review batch 11 fix round (R8): an upgraded save (backed up by load()) that fails is still
+ *      rescued when an older rescue copy exists, and survives RESET ALL
  *
  *   node tools/import-test.js [--verbose]
  * Uses a fake localStorage (installed before the core loads) so the real storage path runs.
@@ -531,6 +537,188 @@ section('L. persistence.bootRecovery() for the boot error overlay');
   const before = fakeStorage.getItem(KEY);
   const r3 = P.bootRecovery('fresh');
   ok(!r3.ok && r3.readOnly && fakeStorage.getItem(KEY) === before, 'bootRecovery is refused there');
+  fakeStorage.clear();
+  P.load();
+})();
+
+// =============================================================================
+section('M. Review batch 11: the finished-race check covers events / ticks; a failed apply is rolled back (R6)');
+// =============================================================================
+(function () {
+  const shapes = {
+    'events is a string': function (rec) { rec.events = 'x'; },
+    'events holds null': function (rec) { rec.events = [null]; },
+    'events is an object': function (rec) { rec.events = {}; },
+    'ticks holds null': function (rec) { rec.ticks = [null].concat(rec.ticks || []); },
+    'a tick position is null': function (rec) { rec.ticks = (rec.ticks || []).map(function (t) { return Object.assign({}, t, { pos: [null] }); }); }
+  };
+  Object.keys(shapes).forEach(function (label, i) {
+    fakeStorage.clear();
+    P.load();
+    boot(SD.state.create({ seedSalt: 840 + i, dayEventId: 'clearSkies' }));
+    say('FoxFan', '!join');
+    const start = SD.game.startRace();
+    ok(start.ok, label + ': race started');
+    SD.game.setRaceStatus('finished');
+    const exp = exported();
+    SD.game.abortRace();
+    shapes[label](exp.currentRace.record);
+    eq(P.recordProblem(exp.currentRace.record, true) !== null, true, label + ': recordProblem refuses it');
+    const xpBefore = exp.runners.map(function (r) { return r.xp; });
+    const errs = [];
+    const origErr = console.error;
+    console.error = function () { errs.push(Array.prototype.slice.call(arguments).join(' ')); };
+    let imp;
+    try { imp = P.importJSON(JSON.stringify(exp)); } finally { console.error = origErr; }
+    ok(imp.ok, label + ': the import succeeds', imp.error);
+    eq(errs.length, 0, label + ': finishRace never ran into it (nothing thrown and caught)');
+    eq([S().currentRace, S().raceHistory.length], [null, 0], label + ': the race is cancelled, not applied');
+    eq(S().runners.map(function (r) { return r.xp; }), xpBefore, label + ': no runner kept any of its results');
+  });
+
+  // Last resort: finishRace throws half-way in the live game; everything it did is put back.
+  fakeStorage.clear();
+  P.load();
+  boot(SD.state.create({ seedSalt: 850, dayEventId: 'clearSkies' }));
+  say('FoxFan', '!join');
+  say('BatFan', '!join');
+  const pick = SD.betting.fieldOdds(S()).entrants[0].runnerId;
+  ok(say('FoxFan', '!bet ' + pick + ' 30').ok, 'FoxFan bets 30');
+  const st = SD.game.startRace();
+  SD.game.setRaceStatus('finished');
+  const results = st.record.results;
+  const last = runner(results[results.length - 1].runnerId);
+  last.lifetime = null;                          // finishRace throws on the LAST result row
+  // Everything but FoxFan's SP (the cancel refunds the bet, and a refund also takes it off spSpentTotal).
+  const snap = function () {
+    const players = JSON.parse(JSON.stringify(S().players));
+    delete players.foxfan.spiritPoints;
+    delete players.foxfan.stats.spSpentTotal;
+    return JSON.stringify({
+      runners: S().runners.map(function (r) { return [r.id, r.xp, r.level, r.energy, r.fatigue, r.stats, r.record && r.record.races]; }),
+      players: players, hype: S().hype, history: S().raceHistory.length, achievements: S().achievements
+    });
+  };
+  const before = snap();
+  const spBefore = sp('foxfan');
+  const logBefore = S().log.length;
+  const origErr = console.error;
+  console.error = function () {};
+  let res;
+  try { res = SD.game.applyPending(); } finally { console.error = origErr; }
+  ok(res && res.cancelled === true, 'the race is cancelled', res);
+  eq(snap(), before, 'runners, players, hype, history and achievements are exactly as before the attempt');
+  eq(sp('foxfan'), spBefore + 30, 'the bet FoxFan placed is refunded once');
+  ok(!S().log.slice(logBefore).some(function (e) { return / wins at /.test(e.text); }), 'no win line is left in the log');
+  ok(lastLog(/could not be applied/), 'the log says why');
+  last.lifetime = { races: 0, wins: 0 };
+  ok(SD.game.startRace().ok, 'the next race starts');
+  SD.game.endRace();
+})();
+
+// =============================================================================
+section('N. Review batch 11: chained recovery keeps the newest game (R8)');
+// =============================================================================
+(function () {
+  fakeStorage.clear();
+  P.load();
+  boot(SD.state.create({ seedSalt: 860, dayEventId: 'clearSkies' }));
+  say('FoxFan', '!join');
+  P.save();
+  const S0 = fakeStorage.getItem(KEY);
+  const B = JSON.stringify(SD.state.create({ seedSalt: 861, dayEventId: 'clearSkies' }));
+  fakeStorage.setItem(P.BACKUP_KEY, B);
+  // First page: RESTORE BACKUP (the newest game S0 goes to the rescue copy).
+  ok(P.bootRecovery('backup').ok, 'RESTORE BACKUP');
+  eq([fakeStorage.getItem(KEY) === B, fakeStorage.getItem(P.RESCUE_KEY) === S0], [true, true], 'save = backup, rescue = the newest game');
+  // Second page: the backup fails to boot too; START NEW GAME.
+  P.load();
+  const r = P.bootRecovery('fresh');
+  ok(r.ok && r.inBackup === true && r.rescued === false, 'START NEW GAME reports the save as kept in the backup', r);
+  eq(fakeStorage.getItem(KEY), null, 'the stored save is removed');
+  ok(fakeStorage.getItem(P.RESCUE_KEY) === S0, 'the rescue copy still holds the newest game (not the backup a second time)');
+  ok(fakeStorage.getItem(P.BACKUP_KEY) === B, 'the backup still holds the other one');
+
+  eq(fakeStorage.getItem(P.RESTORED_KEY), null, 'the restored-backup marker is used up');
+
+  // The held-save banner's START NEW GAME (releaseHeld) follows the same rule: the restored backup is
+  // a save this build cannot even read, so the next page holds it.
+  fakeStorage.clear();
+  P.load();
+  fakeStorage.setItem(KEY, S0);
+  fakeStorage.setItem(P.BACKUP_KEY, '{"not a save');
+  P.load();
+  ok(P.bootRecovery('backup').ok && fakeStorage.getItem(P.RESCUE_KEY) === S0, 'RESTORE BACKUP of an unreadable backup (the newest game is the rescue copy)');
+  const held = P.load();
+  ok(held.held === true && P.role() === 'held', 'the restored, unreadable save is held');
+  const rel = P.releaseHeld();
+  ok(rel.ok && rel.inBackup === true && rel.rescued === false, 'releaseHeld reports it as kept in the backup', rel);
+  eq(fakeStorage.getItem(P.RESCUE_KEY), S0, 'the older, different rescue copy is kept');
+
+  // A save that merely equals the backup (no RESTORE BACKUP marked it) is copied to the rescue slot.
+  fakeStorage.clear();
+  P.load();
+  fakeStorage.setItem(KEY, '{"not a save');
+  fakeStorage.setItem(P.BACKUP_KEY, '{"not a save');
+  fakeStorage.setItem(P.RESCUE_KEY, S0);
+  P.load();
+  const rel1 = P.releaseHeld();
+  ok(rel1.ok && rel1.rescued === true && !rel1.inBackup && fakeStorage.getItem(P.RESCUE_KEY) === '{"not a save',
+    'an unmarked save equal to the backup replaces the rescue copy, as before', rel1);
+
+  // A stale marker (the restored backup booted, was played and saved) never matches a later save.
+  fakeStorage.clear();
+  P.load();
+  fakeStorage.setItem(KEY, S0);
+  fakeStorage.setItem(P.BACKUP_KEY, B);
+  P.load();
+  ok(P.bootRecovery('backup').ok, 'RESTORE BACKUP (it boots this time)');
+  ok(reboot() === null, 'the restored backup boots');
+  say('FoxFan', '!join');
+  P.save();
+  const S2 = fakeStorage.getItem(KEY);
+  fakeStorage.setItem(P.BACKUP_KEY, S2);   // what load() does before upgrading a save
+  P.load();
+  const r2 = P.bootRecovery('fresh');
+  ok(r2.ok && r2.rescued === true && fakeStorage.getItem(P.RESCUE_KEY) === S2, 'the later game is copied to the rescue slot', r2);
+
+  // Without a rescue copy (or with the same text) the save is still copied, as before.
+  fakeStorage.clear();
+  P.load();
+  fakeStorage.setItem(KEY, '{"not a save');
+  fakeStorage.setItem(P.BACKUP_KEY, '{"not a save');
+  P.load();
+  const rel2 = P.releaseHeld();
+  ok(rel2.ok && rel2.rescued === true && fakeStorage.getItem(P.RESCUE_KEY) === '{"not a save', 'with no rescue copy yet, the save is copied there');
+  fakeStorage.clear();
+  P.load();
+})();
+
+// =============================================================================
+section('O. Review batch 11 fix round: an upgraded save that fails is still rescued (R8)');
+// =============================================================================
+(function () {
+  const fs = require('fs');
+  const path = require('path');
+  const S = fs.readFileSync(path.join(__dirname, 'fixtures', 'save-v2-display-names.json'), 'utf8');
+  const R = JSON.stringify(SD.state.create({ seedSalt: 870, dayEventId: 'clearSkies' }));
+  fakeStorage.clear();
+  fakeStorage.setItem(KEY, S);
+  fakeStorage.setItem(P.RESCUE_KEY, R);   // an older incident's rescue copy
+  const res = P.load();
+  ok(res.migratedFrom === 2 && fakeStorage.getItem(P.BACKUP_KEY) === S, 'load() upgrades the schema-2 save and backs it up first');
+  // The upgraded game breaks boot: START NEW GAME on the error overlay.
+  const r = P.bootRecovery('fresh');
+  ok(r.ok && r.rescued === true && !r.inBackup, 'START NEW GAME copies the save to the rescue slot', r);
+  eq(fakeStorage.getItem(P.RESCUE_KEY), S, 'the rescue copy is the failing (newest) game');
+  // The new game plays a race, then RESET ALL overwrites the backup: the save is still kept.
+  ok(reboot() === null, 'the new game boots');
+  say('FoxFan', '!join');
+  ok(SD.game.startRace().ok, 'a race starts');
+  SD.game.endRace();
+  SD.game.resetAll();
+  const kept = [KEY, P.BACKUP_KEY, P.RESCUE_KEY].some(function (k) { return fakeStorage.getItem(k) === S; });
+  ok(kept, 'after RESET ALL the upgraded save is still in storage');
   fakeStorage.clear();
   P.load();
 })();

@@ -20,6 +20,9 @@
  *      prefer an exact runner name (gap3#3)
  *   I  confusable (homoglyph) copies of a name are refused (xss-trust#8)
  *   J  admin drawer RUNNERS & VIEWERS actions call the new SD.game methods
+ *   K  fix round 1: season summaries, tagged log scrubs, saved bot-made runners, TAKE OVER, key repeat
+ *   L  review batch 11 (R12-R14): scrubs keep fixed words (tracks, species, labels) and other names
+ *      ("Moss" removed, "Moss Runner" kept); the session's chat feed is scrubbed too
  *
  *   node tools/hygiene-test.js [--verbose]
  * Uses a fake localStorage (installed before the core loads) so the real storage path runs, and the
@@ -768,6 +771,104 @@ section('K. Fix round 1: season summaries, tagged log scrubs, saved bot-made run
     ok(!key('Enter', false, true), 'a fresh Enter on an armed button still confirms');
     ok(!key('Enter', true, false), 'a repeat on a button that is not armed is left alone');
   }
+})();
+
+// =============================================================================
+section('L. Review batch 11: name scrubs hold fixed words and other names; the chat feed is scrubbed too (R12-R14)');
+// =============================================================================
+(function () {
+  const FIXED = /Hollow Glade|Fernfall Hollow|Hollow Owl/g;
+  const fixedCount = function () { return S().log.reduce(function (n, e) { return n + (e.text.match(FIXED) || []).length; }, 0); };
+  const strayWord = function (word, keepRe) {
+    return S().log.map(function (e) { return e.text.replace(keepRe, ''); }).filter(function (t) { return new RegExp('\\b' + word + '\\b').test(t); });
+  };
+
+  // R12: a runner named after a track / species word ("Hollow"), deleted.
+  fresh();
+  claimAll();
+  ok(say('troll', '!join').ok, 'troll joins');
+  ok(say('troll', '!create Hollow').ok, '!create Hollow');
+  const x = S().runners.filter(function (r) { return r.name === 'Hollow'; })[0];
+  SD.state.mutate('test', function () {
+    S().settings.runnerCount = SD.CONFIG.RACE.MAX_RUNNERS;
+    Object.keys(x.stats).forEach(function (k) { x.stats[k] = 100; });
+  });
+  SD.betting.clearCache();
+  for (let i = 0; i < 6; i++) { if (!runAndFinish().ok) SD.game.nextDay(); }
+  // Lines of the kinds the review found, with the fixed words it broke (the seeded run above has some).
+  SD.state.log('runner', 'A new runner joins the derby: \u{1F989} Hollow, a Hollow Owl (Wild Card), created by troll.', 'good', { runnerId: x.id, by: 'troll' });
+  SD.state.log('race', 'Race 1/3 at Hollow Glade (1200 m): Hollow, Moss Runner. Favourite: Hollow at 1.0x.', 'info', { runnerIds: [x.id, 'r01'] });
+  SD.state.log('race', 'Hollow wins at Fernfall Hollow (1200 m) in 60.0s!', 'epic', { winnerId: x.id, recordId: S().raceHistory[0].id });
+  const before = fixedCount();
+  ok(before >= 4, 'the log names Hollow Glade / Fernfall Hollow / Hollow Owl', before);
+  ok(SD.game.deleteRunner(x.id).ok, 'delete Hollow');
+  eq(fixedCount(), before, 'every "Hollow Glade", "Fernfall Hollow" and "Hollow Owl" is still there');
+  eq(strayWord('Hollow', FIXED), [], 'no line still names the runner Hollow');
+  ok(logHas(/^Race 1\/3 at Hollow Glade \(1200 m\): \(removed runner\), Moss Runner\. Favourite: \(removed runner\) at 1\.0x\.$/), 'the race-start line: track kept, runner slots replaced');
+  ok(logHas(/^\(removed runner\) wins at Fernfall Hollow \(1200 m\)/), 'the win line: track kept');
+  ok(logHas(/joins the derby: \u{1F989} \(removed runner\), a Hollow Owl \(Wild Card\)/u), 'the spawn line: species kept');
+
+  // R12: a runner named like a label ("Favourite") or exactly like a track, renamed.
+  ok(say('troll', '!create Favourite').ok, '!create Favourite');
+  const fav = S().runners.filter(function (r) { return r.name === 'Favourite'; })[0];
+  SD.state.log('race', 'Race 2/3 at Glowcap Marsh (1200 m): Favourite, Moss Runner. Favourite: Favourite at 1.0x.', 'info', { runnerIds: [fav.id, 'r01'] });
+  ok(SD.game.renameRunner(fav.id, 'Kind Name').ok, 'rename Favourite -> Kind Name');
+  ok(logHas(/^Race 2\/3 at Glowcap Marsh \(1200 m\): Kind Name, Moss Runner\. Favourite: Kind Name at 1\.0x\.$/), 'the "Favourite:" label is kept', S().log.slice(-3));
+  const hg = legacyRunner('Hollow Glade');   // exactly a track name
+  SD.state.log('race', 'Race 3/3 at Hollow Glade (1200 m): Hollow Glade, Moss Runner. Favourite: Hollow Glade at 1.2x.', 'info', { runnerIds: [hg.id, 'r01'] });
+  const hgr = SD.game.renameRunner(hg.id, 'Brook Song');
+  ok(hgr.ok, 'rename Hollow Glade -> Brook Song', hgr.message);
+  ok(logHas(/^Race 3\/3 at Hollow Glade \(1200 m\): Brook Song, Moss Runner\. Favourite: Brook Song at 1\.2x\.$/), 'the track slot keeps "at Hollow Glade ("');
+
+  // R13: a viewer whose display name is a word of a runner's name ("Moss" / Moss Runner), removed.
+  fresh();
+  const mossSay = function (t) { tick(11000); return SD.processCommand('moss', t, { source: 'twitch', displayName: 'Moss' }); };
+  ok(mossSay('!join').ok && mossSay('!claim r01').ok, 'Moss joins and claims Moss Runner');
+  ok(mossSay('!bet Moss Runner 10').ok, 'Moss bets on Moss Runner');
+  ok(say('fan', '!join').ok && say('fan', '!bet Moss Runner 10').ok, 'fan bets on Moss Runner too');
+  SD.state.mutate('test', function () { S().settings.runnerCount = SD.CONFIG.RACE.MAX_RUNNERS; });
+  for (let i = 0; i < 3; i++) { if (!runAndFinish().ok) SD.game.nextDay(); }
+  const mossRunnerLines = S().log.filter(function (e) { return /Moss Runner/.test(e.text); }).length;
+  ok(mossRunnerLines > 3, 'the log names Moss Runner', mossRunnerLines);
+  ok(SD.game.removePlayer('moss').ok, 'remove Moss');
+  eq(S().log.filter(function (e) { return /Moss Runner/.test(e.text); }).length, mossRunnerLines, 'every "Moss Runner" is still there');
+  eq(S().log.filter(function (e) { return /\(removed viewer\) Runner/.test(e.text); }).map(function (e) { return e.text; }), [], 'no line says "(removed viewer) Runner"');
+  eq(strayWord('Moss', /Moss Runner/g), [], 'no line still names the viewer Moss');
+  ok(logHas(/^\(removed viewer\) claimed \u{1F98C} Moss Runner\.$/u), 'the claim line: viewer replaced, runner kept');
+
+  // R13: a display name identical to the runner's whole name.
+  fresh();
+  const mhSay = function (t) { tick(11000); return SD.processCommand('moonhoof', t, { source: 'twitch', displayName: 'Moonhoof' }); };
+  ok(mhSay('!join').ok && mhSay('!claim r02').ok, 'a viewer called Moonhoof claims the runner Moonhoof');
+  ok(SD.game.removePlayer('moonhoof').ok, 'remove the viewer');
+  ok(logHas(/^\(removed viewer\) claimed \u{1F40E} Moonhoof\.$/u), 'the claim line keeps the runner (its emoji marks it)', S().log.map(function (e) { return e.text; }).slice(-4));
+
+  // R14: the session's chat feed (runtime.chatFeed).
+  fresh();
+  claimAll();
+  const feedText = function () { return SD.state.runtime.chatFeed.map(function (m) { return m.text; }).join('\n'); };
+  const feedTail = function () { return SD.state.runtime.chatFeed.slice(-6).map(function (m) { return m.text; }).join(' | '); };
+  ok(say('troll', '!join').ok && say('troll', '!create Trollface Zed').ok, 'troll creates Trollface Zed');
+  ok(say('bob', '!join').ok && say('bob', '!boost Trollface Zed').ok, 'bob boosts it');
+  has(feedText(), 'Trollface Zed', 'the chat feed names it');
+  const tz = S().runners.filter(function (r) { return r.name === 'Trollface Zed'; })[0];
+  ok(SD.game.renameRunner(tz.id, 'Calm Zed').ok, 'rename it');
+  ok(feedText().indexOf('Trollface Zed') < 0 && feedText().indexOf('Calm Zed') >= 0, 'the chat feed shows the new name only', feedTail());
+  ok(SD.game.deleteRunner(tz.id).ok, 'delete it');
+  ok(feedText().indexOf('Calm Zed') < 0 && feedText().indexOf('(removed runner)') >= 0, 'the chat feed says (removed runner)', feedTail());
+  ok(say('moss', '!join').ok, 'moss joins');
+  const bobBet = say('bob', '!inspect Moss Runner');
+  ok(bobBet.ok && /Moss Runner/.test(bobBet.message), 'bob asks about Moss Runner', bobBet.message);
+  SD.commands.system('🏅 moss unlocked First Steps (+25 SP)', 'epic');
+  ok(SD.game.removePlayer('moss').ok, 'remove moss');
+  eq(SD.state.runtime.chatFeed.filter(function (m) { return m.username === 'moss'; }).length, 0, 'moss\'s own lines (typed and replies) are dropped from the feed');
+  ok(/\(removed viewer\) unlocked First Steps/.test(feedText()) && /\bmoss\b/.test(feedText()) === false, 'other lines naming moss say (removed viewer)', feedTail());
+  ok(/Moss Runner/.test(feedText()), 'bob\'s line keeps Moss Runner');
+  // js/ui/chat.js draws the feed again on those events (browser-only DOM work).
+  const chatSrc = require('fs').readFileSync(require('path').join(__dirname, '..', 'js', 'ui', 'chat.js'), 'utf8');
+  ok(['RUNNER_RENAMED', 'RUNNER_RETIRED', 'PLAYER_REMOVED'].every(function (n) {
+    return new RegExp("dom\\.on\\('" + n + "'[^\\n]*redrawFeed\\(\\)").test(chatSrc);
+  }) && typeof SD.ui.chat.redrawFeed === 'function', 'chat.js redraws the feed on runner:renamed / runner:retired / player:removed');
 })();
 
 console.log('\n' + (failed ? 'FAILED: ' : 'OK: ') + passed + ' passed, ' + failed + ' failed');

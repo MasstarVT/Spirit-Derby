@@ -669,7 +669,9 @@
 }
 .paddock__sub { font-size: var(--fs-md); color: var(--text-dim); }
 .paddock__leader {
-  margin-top: 2px;
+  /* Review batch 11 fix round: no top margin - with it the 8-card paddock under the leader line (and a
+     chip row) overflowed by 1 px at 1920x1080 and showed a scrollbar. */
+  margin-top: 0;
   font-size: var(--fs-min);
   font-weight: 700;
   color: var(--gold-bright);
@@ -697,6 +699,13 @@
   grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
   gap: var(--sp-3);
 }
+/* Review batch 11 (R19): a 9-10 runner field (track.js adds --many) in columns of 300 px or more: four
+   across a 1920x1080 track, so 3 rows instead of 4, and the paddock fits with the leader line shown. */
+.paddock__grid--many { grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); }
+.paddock__grid--many .paddock__name { font-size: 20px; }
+/* Fix round: the narrower cards leave out the running style (the roster card shows it), so condition and
+   owner (track.js puts it before the energy) fit the ~150 px meta line instead of being cut after the style. */
+.paddock__grid--many .paddock__style { display: none; }
 .paddock__runner {
   --badge: var(--moss);
   --ring: rgba(243, 233, 210, 0.28);

@@ -46,6 +46,9 @@
  *    gone or retired. importJSON() runs boot's post-load routine (SD.game.afterLoad: runtime maps reset,
  *    day event rolled) and applies a 'finished' race (SD.game.applyPending). bootRecovery() backs the
  *    boot error overlay's RESTORE BACKUP / START NEW GAME.
+ *  - Review batch 11: recordProblem(record, true) also checks the record's events / ticks lists; a save
+ *    that bootRecovery('backup') restored (marked in spiritderby.restored) never replaces a different
+ *    rescue copy when it fails too (rescueHeld: inBackup).
  */
 (function (SD) {
   'use strict';
@@ -54,6 +57,9 @@
   const BACKUP_KEY = 'spiritderby.backup';
   const RESCUE_KEY = 'spiritderby.rescue';   // review batch 6: a save load() could not read, kept on START NEW GAME
   const LOCK_KEY = 'spiritderby.lock';       // review batch 6: { id, n, at } of the window that saves
+  // Review batch 11 (R8 fix round): "<length>:<FNV-1a hash>" of the text bootRecovery('backup') put in
+  // spiritderby.save, so the next rescue knows that save is the restored backup (see rescueHeld).
+  const RESTORED_KEY = 'spiritderby.restored';
   // 3 (review batch 2): runner.ownerKey (owner's login key) + entrant.ownerKeyAtRace; see MIGRATIONS[3].
   // 4 (review batch 6): slim history records (betsSummary, slim, compacted chatEffects); see MIGRATIONS[4].
   const SCHEMA_VERSION = 4;
@@ -693,6 +699,9 @@
   // as 'finished' that game.applyPending() will apply) also everything finishRace reads: a summary
   // object and non-empty results, each for an entrant, with numeric place / timeSec / xp / energyDelta /
   // fatigueDelta, statChanges only on known stats, and non-negative SP shares.
+  // Review batch 11 (R6): also the lists finishRace's hooks iterate (achievements.checkRace): events
+  // absent or a list of objects, and ticks absent or a list of objects whose pos (when a list) holds
+  // objects. A record that passes can be applied without finishRace throwing half-way.
   function recordProblem(rec, finished) {
     if (!isValidRecord(rec)) return 'malformed race record';
     if (typeof rec.id !== 'string' || !rec.id) return 'bad race id';
@@ -718,6 +727,10 @@
         return STATS.indexOf(k) >= 0 && isNum(res.statChanges[k]);
       }))) return 'bad result stat changes';
     }
+    if (rec.events != null && !(Array.isArray(rec.events) && rec.events.every(isObj))) return 'bad race events';
+    if (rec.ticks != null && !(Array.isArray(rec.ticks) && rec.ticks.every(function (t) {
+      return isObj(t) && (!Array.isArray(t.pos) || t.pos.every(isObj));
+    }))) return 'bad race ticks';
     return null;
   }
 
@@ -1213,11 +1226,29 @@
     return !isObj(st) || (!(isObj(st.meta) && Number(st.meta.raceCounter) > 0) && !(isObj(st.players) && Object.keys(st.players).length));
   }
 
+  // Fingerprint of a save text for spiritderby.restored (length + FNV-1a; compared together with the
+  // full text of spiritderby.backup, so a collision alone never matches).
+  function fingerprint(text) {
+    return String(text).length + ':' + SD.rng.hash(text);
+  }
+
   // Held save (role 'held'): copy the stored text to spiritderby.rescue and check it. Without room for
   // the copy it refuses, unless force (the streamer downloaded it, or chose to lose it).
+  // Review batch 11 (R8, fix round): a stored save that the boot error overlay's RESTORE BACKUP put there
+  // (spiritderby.restored holds its fingerprint) and that is still the very text of spiritderby.backup
+  // failed too: it is kept in the backup, so it does not replace a different rescue copy - that one is
+  // the newer game the first recovery kept. Only that marker counts: a save that merely equals the
+  // backup (load() backs up every save before upgrading it) is copied to the rescue slot as always.
+  // The marker is used up here either way. -> { ok, rescued, inBackup? }
   function rescueHeld(force) {
     const raw = readRaw(KEY);
+    const marker = readRaw(RESTORED_KEY);
+    if (marker != null) removeRaw(RESTORED_KEY);
     if (!raw) return { ok: true, rescued: false };
+    if (marker === fingerprint(raw) && raw === readRaw(BACKUP_KEY)) {
+      const prev = readRaw(RESCUE_KEY);
+      if (prev && prev !== raw) return { ok: true, rescued: false, inBackup: true };
+    }
     let ok = false;
     try { writeRaw(RESCUE_KEY, raw); ok = readRaw(RESCUE_KEY) === raw; } catch (e) { ok = false; }
     rescueLen = null;
@@ -1229,14 +1260,14 @@
 
   // START NEW GAME from the held-save banner: the stored save is copied to spiritderby.rescue (checked;
   // refused without room unless opts.force), then this window becomes the writer and saves the game it
-  // is running. -> { ok, rescued, saved } | { ok:false, rescueFailed, error }
+  // is running. -> { ok, rescued, inBackup?, saved } | { ok:false, rescueFailed, error }
   function releaseHeld(opts) {
     if (role !== 'held') return { ok: true, rescued: false, saved: false };
     const r = rescueHeld(!!(opts && opts.force));
     if (!r.ok) return r;
     setRole('writer');
     writeLock();
-    return { ok: true, rescued: r.rescued, saved: save() };
+    return r.inBackup ? { ok: true, rescued: false, inBackup: true, saved: save() } : { ok: true, rescued: r.rescued, saved: save() };
   }
 
   // The text of the save this window is holding untouched (role 'held'), for DOWNLOAD; else null.
@@ -1475,7 +1506,10 @@
   //              upgrade) becomes the stored save.
   // Afterwards this window writes nothing more (a later flush would put the broken game back) and its
   // lock is released, so the reload the caller does next saves straight away. Refused in a read-only
-  // window (the save belongs to the other one). -> { ok, rescued } | { ok:false, error, rescueFailed? }
+  // window (the save belongs to the other one). -> { ok, rescued, inBackup? } | { ok:false, error, rescueFailed? }
+  // Review batch 11 (R8): 'backup' marks the restored save (spiritderby.restored); if that save fails too,
+  // the next recovery keeps an existing, different rescue copy (inBackup: true, see rescueHeld), so
+  // RESTORE BACKUP then START NEW GAME never loses the newer game.
   function bootRecovery(action, opts) {
     if (role === 'reader') return readOnlyRefusal();
     if (action !== 'fresh' && action !== 'backup') return { ok: false, error: 'Unknown recovery action "' + action + '".' };
@@ -1489,19 +1523,23 @@
     } catch (e) {
       return { ok: false, error: 'Browser storage refused the change (' + String((e && e.message) || e) + ').' };
     }
+    if (backup) {
+      try { writeRaw(RESTORED_KEY, fingerprint(backup)); } catch (e) { /* no room: the next rescue copies it, as before */ }
+    }
     releaseLock();
     cancelTimer();
     dirty = false;
     lastBytes = null;
     role = 'held';
     roleInfo = { reason: 'recovery', message: 'The page is reloading after a failed start.' };
-    return { ok: true, rescued: r.rescued };
+    return r.inBackup ? { ok: true, rescued: false, inBackup: true } : { ok: true, rescued: r.rescued };
   }
 
   SD.persistence = {
     KEY: KEY,
     BACKUP_KEY: BACKUP_KEY,
     RESCUE_KEY: RESCUE_KEY,
+    RESTORED_KEY: RESTORED_KEY,
     LOCK_KEY: LOCK_KEY,
     SCHEMA_VERSION: SCHEMA_VERSION,
     MIGRATIONS: MIGRATIONS,

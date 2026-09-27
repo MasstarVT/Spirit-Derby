@@ -143,6 +143,11 @@
       this.refs.bots.addEventListener('click', function () { self.setBots(!self.botsOn); });
 
       this.offs.push(dom.on('CHAT_MESSAGE', function (m) { self.onMessage(m); }));
+      // Review batch 11 (R14): RENAME / DELETE RUNNER / REMOVE VIEWER rewrote runtime.chatFeed (SD.game),
+      // so the feed is drawn again from it and no longer shows the old name.
+      this.offs.push(dom.on('RUNNER_RENAMED', function () { self.redrawFeed(); }));
+      this.offs.push(dom.on('RUNNER_RETIRED', function (p) { if (p && p.deleted) self.redrawFeed(); }));
+      this.offs.push(dom.on('PLAYER_REMOVED', function () { self.redrawFeed(); }));
       this.offs.push(dom.on('RACE_STARTED', function (p) {
         const rec = p && p.record;
         self.system('🏁 ' + (rec ? rec.trackName + ' · ' + rec.distance + ' m — ' : '') +
@@ -248,6 +253,21 @@
       const feed = this.refs.feed;
       if (!feed || feed.children.length) return;
       feed.appendChild(dom.el('li', { class: 'chat__empty', text: 'Chat is quiet. Type !join below, or switch on the demo bots.' }));
+    },
+
+    // The whole feed again from SD.state.runtime.chatFeed (after SD.game scrubbed a name out of it).
+    redrawFeed: function () {
+      const feed = this.refs.feed;
+      if (!feed) return;
+      const stick = this.nearBottom();
+      const top = feed.scrollTop;
+      while (feed.firstChild) feed.removeChild(feed.firstChild);
+      const rows = (SD.state && SD.state.runtime && SD.state.runtime.chatFeed) || [];
+      const self = this;
+      rows.forEach(function (m) { self.append(m); });
+      if (!rows.length) this.showEmpty();
+      if (stick) this.scrollToEnd();
+      else feed.scrollTop = top;
     },
 
     onMessage: function (m) {

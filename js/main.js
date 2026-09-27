@@ -72,7 +72,9 @@
       const hint = document.createElement('p');
       hint.className = 'boot-error__hint';
       hint.textContent = 'The saved game may be what stops it. Download it first (a newer build may read it), then restore the backup ' +
-        '(the game before your last import or upgrade) or start a new game. Either way a copy of the save is kept in spiritderby.rescue.';
+        '(the game before your last import or upgrade) or start a new game. Either way a copy of the save is kept in spiritderby.rescue, ' +
+        'replacing an older rescue copy (download that one first). Only when the save is a backup you just restored that failed too ' +
+        'does the backup keep it, and the rescue copy (your newer game) is left alone.';
       inner.appendChild(hint);
       const actions = document.createElement('div');
       actions.className = 'boot-error__actions';
@@ -115,6 +117,15 @@
         button('⬇ DOWNLOAD SAVED GAME', function () {
           if (SD.ui.dom && SD.ui.dom.download) SD.ui.dom.download('spirit-derby-save-that-failed.json', saved);
           status.textContent = 'Downloaded spirit-derby-save-that-failed.json.';
+        });
+      }
+      // Review batch 11 (R8): after RESTORE BACKUP failed too, the newer game is the rescue copy; otherwise
+      // START NEW GAME / RESTORE BACKUP replace an older rescue copy, which can be downloaded here first.
+      const rescue = P.readRescue ? P.readRescue() : null;
+      if (rescue && rescue !== saved) {
+        button('⬇ DOWNLOAD RESCUE COPY', function () {
+          if (SD.ui.dom && SD.ui.dom.download) SD.ui.dom.download('spirit-derby-rescue-copy.json', rescue);
+          status.textContent = 'Downloaded spirit-derby-rescue-copy.json.';
         });
       }
       if (P.readBackup && P.readBackup()) button('RESTORE BACKUP', recover('backup'));
@@ -456,7 +467,8 @@
         }
         forceNewGame = false;
         renderSaveBar();
-        dom.toast('New game started.' + (r.rescued ? ' The old save is kept in spiritderby.rescue (admin Save: RESCUE COPY).' : ''), 'good', { ms: 8000 });
+        dom.toast('New game started.' + (r.rescued ? ' The old save is kept in spiritderby.rescue (admin Save: RESCUE COPY).'
+          : r.inBackup ? ' The old save was the backup, which still holds it (admin Save: RESTORE BACKUP).' : ''), 'good', { ms: 8000 });
         autoConnect(bootParams);
       }, undefined, e);
     }

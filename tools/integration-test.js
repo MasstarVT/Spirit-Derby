@@ -822,12 +822,16 @@ section('bridge: a relay token in the URL is never shown (fix round 1)');
   eq(bridge.status().url, url, 'status().url keeps the real URL (the socket needs the token)');
   eq(lastWS().url, url, 'the socket is opened with the token');
   ok(c.ok && c.message.indexOf('s3cret') < 0 && c.message.indexOf('?token=…') > 0, 'connect() message hides the token', c.message);
+  // Review batch 11 (R3): the redacted '…' must not run into the message's own trailing '…'.
+  ok(c.message.indexOf('……') < 0, 'connect() message has no doubled ellipsis after a redacted token', c.message);
+  eq(c.message, 'Connecting to the bridge (ws://localhost:8765/?token=…)…', 'connect() message brackets the redacted URL');
   lastWS().serverClose(1006);
   ok(bridge.status().lastError.indexOf('s3cret') < 0, 'lastError (header tooltip, admin detail) hides the token', bridge.status().lastError);
   fireOnlyTimeout('bridge retry (token)');
   lastWS().serverOpen();
   const again = bridge.connect(url);
   ok(again.message.indexOf('s3cret') < 0, '"Already connected" message hides the token', again.message);
+  eq(again.message, 'Already connected to the bridge (ws://localhost:8765/?token=…).', '"Already connected" brackets the redacted URL (R3)');
   bridge.disconnect();
   const leaked = chat.filter(function (m) { return String(m.text).indexOf('s3cret') >= 0; });
   eq(leaked.length, 0, 'no chat-feed system line shows the token');

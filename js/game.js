@@ -125,10 +125,19 @@
   // -> { ok, applied: true, result } | { ok, applied: false, cancelled?, reason? } (null: nothing pending)
   // Review batch 8 (fix round 1): once the race is settled, the demo clean-up that afterLoad had to put
   // off (a race existed: IMPORT / TAKE OVER defer this call until after state:loaded) runs.
+  // Review batch 11 (R6): if finishRace throws half-way, the game is first put back exactly as it was
+  // before the attempt (a JSON copy taken just before), so the cancelled race leaves no partly applied
+  // results behind (XP, stats, energy, SP, log lines).
   function applyPending() {
     const res = applyPendingRace();
     if (res) { try { purgeDemo(); } catch (e) { /* retried on the next load */ } }
     return res;
+  }
+  // Put every top-level field of `snap` back into the live state object `s` (same object, so every
+  // module holding it sees the rollback), dropping fields that were added since.
+  function restoreInPlace(s, snap) {
+    Object.keys(s).forEach(function (k) { if (!U.hasOwn(snap, k)) delete s[k]; });
+    Object.keys(snap).forEach(function (k) { U.setOwn(s, k, snap[k]); });
   }
   function applyPendingRace() {
     const s = cur();
@@ -137,11 +146,14 @@
     let reason = SD.persistence && typeof SD.persistence.recordProblem === 'function'
       ? SD.persistence.recordProblem(cr.record, true) : (cr.record ? null : 'no race record');
     if (!reason) {
+      let before = null;
+      try { before = JSON.stringify(s); } catch (e) { before = null; }
       try {
         return { ok: true, applied: true, result: finishRace() };
       } catch (e) {
         reason = String((e && e.message) || e);
         if (typeof console !== 'undefined' && console.error) console.error('[SD.game] a finished race could not be applied:', e);
+        if (before != null && cur() === s) restoreInPlace(s, JSON.parse(before));
       }
     }
     const after = cur();
@@ -712,6 +724,85 @@
     const re = new RegExp((notAtStart ? '([^\\p{L}\\p{N}_])' : '(^|[^\\p{L}\\p{N}_])') + escapeRe(from) + '(?=$|[^\\p{L}\\p{N}_])', 'gu');
     return text.replace(re, function (m, pre) { return pre + to; });
   }
+  // Review batch 11 (R12, R13): swapName, but the phrases in `keep` that contain `from` as a whole word
+  // (and are not `from` itself) are left alone: a species, track, style or event name, a label such as
+  // "Favourite:", another runner's or viewer's name. So deleting a runner called "Hollow" no longer
+  // turns "Hollow Glade" into "(removed runner) Glade", and removing the viewer "Moss" leaves the runner
+  // "Moss Runner" alone. `keep` is longest first (keepFor); held phrases are put back unchanged.
+  const WORD_CH = /[\p{L}\p{N}_]/u;
+  function swapKept(text, from, to, notAtStart, keep) {
+    if (!from || typeof text !== 'string' || text.indexOf(from) < 0) return text;
+    // A text that already has the marker character (typed in chat) is swapped plainly: no mix-ups.
+    if (text.indexOf('') >= 0) return swapName(text, from, to, notAtStart);
+    const held = [];
+    let t = text;
+    (keep || []).forEach(function (ph) {
+      if (held.length >= 0x700 || t.indexOf(ph) < 0) return;
+      const pre = WORD_CH.test(ph.charAt(0)) ? '(^|[^\\p{L}\\p{N}_])' : '()';
+      const post = WORD_CH.test(ph.charAt(ph.length - 1)) ? '(?=$|[^\\p{L}\\p{N}_])' : '';
+      t = t.replace(new RegExp(pre + escapeRe(ph) + post, 'gu'), function (m, p0) {
+        // Private-use characters: never part of a name, and not word characters (swapName's boundaries).
+        const mark = '\uE000' + String.fromCharCode(0xE100 + held.length) + '\uE000';
+        held.push(ph);
+        return p0 + mark;
+      });
+    });
+    t = swapName(t, from, to, notAtStart);
+    return held.length ? t.replace(/\uE000([\uE100-\uE7FF])\uE000/g, function (m, c) { return held[c.charCodeAt(0) - 0xE100]; }) : t;
+  }
+  // The phrases of `list` worth holding for `from`: a whole-word match of it inside, not `from` itself;
+  // longest first (a track in its slot before the bare track name).
+  function keepFor(from, list) {
+    const out = [];
+    list.forEach(function (ph) {
+      if (typeof ph !== 'string' || !ph || ph === from || ph.indexOf(from) < 0 || out.indexOf(ph) >= 0) return;
+      if (swapName(ph, from, '\u0000') !== ph) out.push(ph);
+    });
+    return out.sort(function (a, b) { return b.length - a.length; });
+  }
+  // Fixed words the game writes into log lines: catalogue names (species, styles, tracks, abilities,
+  // race and day events, stats, moods, conditions, achievements), a track in its slot ("at <track> (",
+  // so a runner named exactly like a track keeps the track) and the race-start / season-end labels.
+  function fixedPhrases(st) {
+    const D = SD.DATA || {};
+    const out = ['Favourite:', 'Champion:', 'MVP:'];
+    const add = function (x) {
+      const n = x && typeof x === 'object' ? (Array.isArray(x) ? x[1] : x.name || x.label) : x;
+      if (typeof n === 'string' && n) out.push(n);
+    };
+    ['SPECIES', 'STYLES', 'ABILITIES', 'RACE_EVENTS', 'DAY_EVENTS', 'STAT_LABELS', 'CONDITIONS', 'ACHIEVEMENTS'].forEach(function (k) {
+      const v = D[k];
+      (Array.isArray(v) ? v : v && typeof v === 'object' ? Object.keys(v).map(function (i) { return v[i]; }) : []).forEach(add);
+    });
+    Object.keys(D.MOODS || {}).forEach(add);
+    const tracks = (Array.isArray(D.TRACK_NAMES) ? D.TRACK_NAMES : []).slice();
+    (Array.isArray(st.raceHistory) ? st.raceHistory : []).forEach(function (r) {
+      if (r && typeof r.trackName === 'string' && r.trackName && tracks.indexOf(r.trackName) < 0) tracks.push(r.trackName);
+    });
+    tracks.forEach(function (t) { out.push(t); out.push('at ' + t + ' ('); });
+    return out;
+  }
+  // Names a log line may carry besides the one being scrubbed: the runners (also with their emoji, as
+  // the claim and spawn lines write them) and the viewers' display names.
+  function namesInGame(st, skipRunner, skipKey) {
+    const out = [];
+    (st.runners || []).forEach(function (r) {
+      if (!r || r === skipRunner || typeof r.name !== 'string') return;
+      out.push(r.name);
+      if (r.emoji) out.push(r.emoji + ' ' + r.name);
+    });
+    Object.keys(st.players || {}).forEach(function (k) {
+      const p = U.own(st.players, k);
+      if (k !== skipKey && p && typeof p === 'object' && typeof p.displayName === 'string') out.push(p.displayName);
+    });
+    return out;
+  }
+  // The entrant names of the race a log line is about (a runner deleted since keeps its name there).
+  function entrantNames(st, e, skipId) {
+    const rec = e && e.recordId ? recordOf(st, e.recordId) : null;
+    return rec && Array.isArray(rec.entrants)
+      ? rec.entrants.filter(function (x) { return x && x.runnerId !== skipId; }).map(function (x) { return x.name; }) : [];
+  }
   function tagged(list, x) { return Array.isArray(list) && list.indexOf(x) >= 0; }
   function recordOf(st, id) {
     const hist = Array.isArray(st.raceHistory) ? st.raceHistory : [];
@@ -749,16 +840,21 @@
   // A runner's old name out of the game log and the archived season summaries. Race records keep it:
   // their results are hashed (REPLAY LAST RACE compares the hash). When another runner's name contains
   // the old name ("Moss Runner 2"), only log entries about this runner alone (runnerId) are rewritten.
+  // Review batch 11 (R12): fixed words and other names in a line are held (swapKept).
   function scrubRunnerName(st, runner, from, to) {
     const shared = st.runners.some(function (r) { return r !== runner && swapName(r.name, from, '\u0000') !== r.name; });
+    const keep = keepFor(from, fixedPhrases(st).concat(namesInGame(st, runner, null)));
     (st.log || []).forEach(function (e) {
       if (!e || typeof e.text !== 'string' || e.text.indexOf(from) < 0) return;
       const how = runnerMention(st, e, runner.id);
       if (!how || (shared && how !== 'all')) return;
       if (how === 'winner') {
         if (e.text.indexOf(from + ' wins at ') === 0) e.text = to + e.text.slice(from.length);
-      } else e.text = swapName(e.text, from, to, how === 'inner');
+      } else e.text = swapKept(e.text, from, to, how === 'inner', keepFor(from, keep.concat(entrantNames(st, e, runner.id))));
     });
+    // Review batch 11 (R14): the session's chat feed (runtime.chatFeed, the Chat tab) too. Its rows are
+    // not tagged, so every whole-word mention is replaced (fixed words and other names held).
+    scrubFeed(function (m) { m.text = swapKept(m.text, from, to, false, keep); return true; });
     ((st.season && st.season.history) || []).forEach(function (h) {
       if (!h || typeof h !== 'object') return;
       (Array.isArray(h.runnerTable) ? h.runnerTable : []).forEach(function (row) { if (row && row.runnerId === runner.id) row.name = to; });
@@ -893,16 +989,39 @@
   // lines naming several viewers (usernames: bets, payouts, a season end's MVP / champion owner; not a
   // match at the start of the line) and, in lines logged before those tags existed, the runner-created
   // line (", created by <name>.") and the bet / payout lines of a race (bet / sp with a recordId).
+  // Review batch 11 (R13): runner names, other viewers' names and fixed words in a line are held
+  // (swapKept), so removing a viewer called "Moss" leaves the runner "Moss Runner" alone.
   function scrubViewerName(st, key, name) {
     const created = ', created by ' + name + '.';
+    const keep = keepFor(name, fixedPhrases(st).concat(namesInGame(st, null, key)));
+    const swap = function (e, notAtStart) {
+      return swapKept(e.text, name, REMOVED_VIEWER, notAtStart, keepFor(name, keep.concat(entrantNames(st, e, null))));
+    };
     (st.log || []).forEach(function (e) {
       if (!e || typeof e.text !== 'string' || e.text.indexOf(name) < 0) return;
-      if (e.username === key || e.by === key) e.text = swapName(e.text, name, REMOVED_VIEWER);
-      else if (tagged(e.usernames, key)) e.text = swapName(e.text, name, REMOVED_VIEWER, true);
+      if (e.username === key || e.by === key) e.text = swap(e, false);
+      else if (tagged(e.usernames, key)) e.text = swap(e, true);
       else if (Array.isArray(e.usernames) || e.by != null || e.username != null) return;
       else if (e.type === 'runner' && e.text.indexOf(created) >= 0) e.text = e.text.split(created).join(', created by ' + REMOVED_VIEWER + '.');
-      else if (e.recordId && (e.type === 'bet' || e.type === 'sp')) e.text = swapName(e.text, name, REMOVED_VIEWER, true);
+      else if (e.recordId && (e.type === 'bet' || e.type === 'sp')) e.text = swap(e, true);
     });
+    // Review batch 11 (R14): in the session's chat feed, the viewer's own lines (what they typed and the
+    // replies to them) are dropped, and other lines naming them get "(removed viewer)".
+    scrubFeed(function (m) {
+      if (m.username != null && SD.players && SD.players.keyOf(m.username) === key) return false;
+      m.text = swapKept(m.text, name, REMOVED_VIEWER, false, keep);
+      return true;
+    });
+  }
+
+  // Rewrite (fn returns true) or drop (false) each row of SD.state.runtime.chatFeed, in place. The Chat
+  // tab re-renders the feed on the event that follows (runner:renamed / runner:retired / player:removed).
+  function scrubFeed(fn) {
+    const rt = SD.state.runtime;
+    if (!rt || !Array.isArray(rt.chatFeed) || !rt.chatFeed.length) return;
+    const kept = rt.chatFeed.filter(function (m) { return !!m && typeof m === 'object' && typeof m.text === 'string' && fn(m); });
+    rt.chatFeed.length = 0;
+    Array.prototype.push.apply(rt.chatFeed, kept);
   }
 
   function removeOne(st, key, opts, emit) {

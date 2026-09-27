@@ -471,9 +471,21 @@
   }
 
   // ---------------------------------------------------------------- modal focus (review batch 9)
-  /** True for an element the user types into (INPUT / TEXTAREA / SELECT / contenteditable). */
+  /**
+   * True for an element the user types into: a text-like INPUT, a TEXTAREA or contenteditable.
+   * Review batch 11 (R17): not a SELECT, checkbox, range or button-like input. Left focused behind a
+   * modal, Space / arrows / letters would change them (e.g. the drawer's Distance) instead of pressing
+   * Continue, so a modal takes focus from them.
+   */
+  const TEXT_INPUT = /^(|text|search|email|url|tel|password|number)$/;
   function isEditable(node) {
-    return !!node && ((typeof node.tagName === 'string' && /^(INPUT|TEXTAREA|SELECT)$/.test(node.tagName)) || !!node.isContentEditable);
+    if (!node) return false;
+    if (node.isContentEditable) return true;
+    const tag = typeof node.tagName === 'string' ? node.tagName.toUpperCase() : '';
+    if (tag === 'TEXTAREA') return true;
+    if (tag !== 'INPUT') return false;
+    const type = node.type != null ? node.type : (typeof node.getAttribute === 'function' ? node.getAttribute('type') : '');
+    return TEXT_INPUT.test(String(type || '').toLowerCase());
   }
 
   const FOCUSABLE = 'button, [href], input, select, textarea, [tabindex]';

@@ -784,8 +784,8 @@
           dom.badgeHTML(r, 'badge--lg') +
           '<div style="min-width:0">' +
             '<div class="paddock__name" title="' + esc(r.name) + '">' + esc(r.name) + '</div>' +
-            '<div class="paddock__meta">' + esc(style.name) + ' · <span class="cond cond--' + cond + '">' + esc(r.condition || 'Normal') + '</span>' +
-              ' · ⚡ ' + energy + '/' + maxE + (r.owner ? ' · 👤 ' + esc(r.owner) : '') + '</div>' +
+            '<div class="paddock__meta"><span class="paddock__style">' + esc(style.name) + ' · </span><span class="cond cond--' + cond + '">' + esc(r.condition || 'Normal') + '</span>' +
+              (r.owner ? ' · 👤 ' + esc(r.owner) : '') + ' · ⚡ ' + energy + '/' + maxE + '</div>' +
             (chips.length ? '<div class="paddock__fx">' + chips.join('') + '</div>' : '') +
           '</div>' + right +
         '</div>';
@@ -798,7 +798,12 @@
             (leader ? '<div class="paddock__leader">' + esc(leader) + '</div>' : '') + '</div>' +
           '<span class="paddock__status">' + esc(status) + '</span>' +
         '</div>' +
-        (cards ? '<div class="paddock__grid">' + cards + '</div>' : '<p class="paddock__empty">No runners are ready to race.</p>') +
+        // Review batch 11 (R19): 9-10 cards go in narrower columns (css/track.css .paddock__grid--many), so
+        // the field keeps to 3 rows and fits at 1920x1080 even under the head's leader line. Fix round: those
+        // narrower cards drop the running style from the meta line (.paddock__style), and the owner comes before
+        // the energy, so a claimed runner's owner shows when the line is cut (at 8 cards too).
+        (cards ? '<div class="paddock__grid' + (rows.length > 8 ? ' paddock__grid--many' : '') + '">' + cards + '</div>'
+          : '<p class="paddock__empty">No runners are ready to race.</p>') +
         '<p class="paddock__hint"><span class="paddock__hint-admin">Streamer: open controls with <kbd>`</kbd> or ⚙ → <b>START RACE</b> · </span>' +
           (SD.commands ? 'Chat: <b>!join</b> · <b>!claim</b> · <b>!train</b> · <b>!cheer</b>' +
             (SD.betting ? ' · <b>!bet moss 50</b> · <b>!boost</b> · <b>!odds</b>' : '') : 'Train runners from their cards below') + '</p>';
